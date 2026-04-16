@@ -2,7 +2,7 @@
   "name": "aidlc",
   "displayName": "aidlc",
   "description": "AI-powered SDLC pipeline. Agents drive each phase — Plan → Design → Build → Test → Release → Monitor — tracked per epic in VS Code.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "hueanmy",
   "license": "MIT",
   "repository": {
@@ -10,11 +10,21 @@
     "url": "https://github.com/hueanmy/aidlc-extension"
   },
   "icon": "media/icon.png",
-  "keywords": ["sdlc", "pipeline", "epic", "agile", "project management", "tracker", "workflow"],
+  "keywords": [
+    "sdlc",
+    "pipeline",
+    "epic",
+    "agile",
+    "project management",
+    "tracker",
+    "workflow"
+  ],
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other"],
+  "categories": [
+    "Other"
+  ],
   "activationEvents": [
     "workspaceContains:docs/sdlc/epics",
     "onStartupFinished"
@@ -50,7 +60,13 @@
         "cfPipeline.platform": {
           "type": "string",
           "default": "mobile",
-          "enum": ["mobile", "web", "backend", "desktop", "generic"],
+          "enum": [
+            "mobile",
+            "web",
+            "backend",
+            "desktop",
+            "generic"
+          ],
           "description": "Platform type — determines which SDLC skills and agents are loaded."
         },
         "cfPipeline.mcpPackage": {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.1
+
+- Update extension metadata for Open VSX
+- Initial commit
+
 ## 0.2.0
 
 - Renamed to SDLC Pipeline
