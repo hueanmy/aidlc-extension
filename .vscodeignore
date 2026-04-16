@@ -1,0 +1,8 @@
+.vscode/**
+node_modules/**
+src/**
+.gitignore
+tsconfig.json
+**/*.ts
+**/*.map
+install.sh

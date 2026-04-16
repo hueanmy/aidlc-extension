@@ -1,0 +1,146 @@
+{
+  "name": "aidlc",
+  "displayName": "aidlc",
+  "description": "AI-powered SDLC pipeline. Agents drive each phase — Plan → Design → Build → Test → Release → Monitor — tracked per epic in VS Code.",
+  "version": "0.5.0",
+  "publisher": "hueanmy",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hueanmy/aidlc"
+  },
+  "icon": "media/icon.png",
+  "keywords": ["sdlc", "pipeline", "epic", "agile", "project management", "tracker", "workflow"],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "workspaceContains:docs/sdlc/epics",
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "sdlc-pipeline",
+          "title": "SDLC Pipeline",
+          "icon": "media/pipeline-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "sdlc-pipeline": [
+        {
+          "id": "cfPipelineView",
+          "name": "Epic Pipeline",
+          "icon": "media/pipeline-icon.svg"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "SDLC Pipeline",
+      "properties": {
+        "cfPipeline.epicsPath": {
+          "type": "string",
+          "default": "docs/sdlc/epics",
+          "description": "Relative path from workspace root to the SDLC epics folder."
+        },
+        "cfPipeline.platform": {
+          "type": "string",
+          "default": "mobile",
+          "enum": ["mobile", "web", "backend", "desktop", "generic"],
+          "description": "Platform type — determines which SDLC skills and agents are loaded."
+        },
+        "cfPipeline.mcpPackage": {
+          "type": "string",
+          "default": "aidlc-pipeline",
+          "description": "NPM package name for the MCP server. Override for private registries."
+        },
+        "cfPipeline.autoConfigureMcp": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically configure Claude Code MCP server on activation."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "cfPipeline.refresh",
+        "title": "Refresh Pipeline Status",
+        "icon": "$(refresh)",
+        "category": "SDLC"
+      },
+      {
+        "command": "cfPipeline.openDashboard",
+        "title": "Open Pipeline Dashboard",
+        "icon": "$(dashboard)",
+        "category": "SDLC"
+      },
+      {
+        "command": "cfPipeline.selectEpicsFolder",
+        "title": "Select Epics Folder",
+        "icon": "$(folder-opened)",
+        "category": "SDLC"
+      },
+      {
+        "command": "cfPipeline.openSettings",
+        "title": "Pipeline Settings",
+        "icon": "$(gear)",
+        "category": "SDLC"
+      },
+      {
+        "command": "cfPipeline.openArtifact",
+        "title": "Open Artifact",
+        "category": "SDLC"
+      },
+      {
+        "command": "cfPipeline.runPhase",
+        "title": "Run Phase Command",
+        "category": "SDLC"
+      },
+      {
+        "command": "cfPipeline.openPhaseSession",
+        "title": "Open Isolated Phase Session",
+        "category": "SDLC"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "cfPipeline.openSettings",
+          "when": "view == cfPipelineView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "cfPipeline.refresh",
+          "when": "view == cfPipelineView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "cfPipeline.openDashboard",
+          "when": "view == cfPipelineView",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "cfPipeline.openPhaseSession",
+          "when": "view == cfPipelineView && viewItem == phase",
+          "group": "inline"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  }
+}

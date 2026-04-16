@@ -1,0 +1,40 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <!-- Full bleed background -->
+  <rect x="0" y="0" width="256" height="256" fill="#0f0f1a"/>
+
+  <!-- Frosted glass card -->
+  <rect x="20" y="20" width="216" height="216" rx="40" fill="#1a1a2e" fill-opacity="0.85" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+
+  <!-- Soft glow behind ring -->
+  <circle cx="128" cy="118" r="64" fill="#4fc3f7" fill-opacity="0.04"/>
+
+  <!-- Cycle ring segments -->
+  <path d="M128 50 A68 68 0 0 1 187 77" stroke="#5bcefa" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <path d="M191 86 A68 68 0 0 1 196 118" stroke="#2dd4bf" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <path d="M194 128 A68 68 0 0 1 178 160" stroke="#34d399" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <path d="M170 167 A68 68 0 0 1 128 186" stroke="#fbbf24" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <path d="M118 185 A68 68 0 0 1 78 162" stroke="#f472b6" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <path d="M70 154 A68 68 0 0 1 60 118" stroke="#c084fc" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <path d="M61 108 A68 68 0 0 1 78 76" stroke="#94a3b8" stroke-width="8" fill="none" stroke-linecap="round"/>
+  <path d="M86 70 A68 68 0 0 1 118 52" stroke="#60a5fa" stroke-width="8" fill="none" stroke-linecap="round"/>
+
+  <!-- Glow dots -->
+  <circle cx="128" cy="50" r="5" fill="#5bcefa"/>
+  <circle cx="128" cy="50" r="10" fill="#5bcefa" fill-opacity="0.15"/>
+  <circle cx="194" cy="118" r="5" fill="#2dd4bf"/>
+  <circle cx="194" cy="118" r="10" fill="#2dd4bf" fill-opacity="0.15"/>
+  <circle cx="170" cy="167" r="5" fill="#34d399"/>
+  <circle cx="170" cy="167" r="10" fill="#34d399" fill-opacity="0.15"/>
+  <circle cx="128" cy="186" r="5" fill="#fbbf24"/>
+  <circle cx="128" cy="186" r="10" fill="#fbbf24" fill-opacity="0.15"/>
+  <circle cx="62" cy="118" r="5" fill="#c084fc"/>
+  <circle cx="62" cy="118" r="10" fill="#c084fc" fill-opacity="0.15"/>
+  <circle cx="86" cy="70" r="5" fill="#60a5fa"/>
+  <circle cx="86" cy="70" r="10" fill="#60a5fa" fill-opacity="0.15"/>
+
+  <!-- Center text: aidlc -->
+  <text x="128" y="124" text-anchor="middle" font-family="-apple-system, SF Pro Display, Helvetica Neue, sans-serif" font-size="28" font-weight="700" letter-spacing="2" fill="white">aidlc</text>
+
+  <!-- Tagline below cycle -->
+  <text x="128" y="218" text-anchor="middle" font-family="-apple-system, SF Pro Display, Helvetica Neue, sans-serif" font-size="11" font-weight="500" letter-spacing="3" fill="#5bcefa" fill-opacity="0.6">AI + SDLC</text>
+</svg>
