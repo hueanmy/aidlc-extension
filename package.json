@@ -2,7 +2,7 @@
   "name": "aidlc",
   "displayName": "aidlc",
   "description": "AI-powered SDLC pipeline. Agents drive each phase — Plan → Design → Build → Test → Release → Monitor — tracked per epic in VS Code.",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "publisher": "hueanmy",
   "license": "MIT",
   "repository": {

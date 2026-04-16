@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.2
+
+- Add epics bootstrap and MCP settings configuration
+- Exclude local Claude settings from VSIX
+
 ## 0.5.1
 
 - Update extension metadata for Open VSX
