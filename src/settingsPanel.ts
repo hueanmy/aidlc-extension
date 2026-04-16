@@ -7,6 +7,11 @@ export interface PipelineConfig {
   enabledPhases: string[];
 }
 
+interface SettingsPanelData {
+  epics: EpicStatus[];
+  epicsPath: string;
+}
+
 const ALL_PHASES = [
   { id: 'plan', name: 'Plan', agent: 'Product Owner', emoji: 'PO' },
   { id: 'design', name: 'Design', agent: 'Tech Lead', emoji: 'TL' },
@@ -25,10 +30,12 @@ export class SettingsPanel {
   public static currentPanel: SettingsPanel | undefined;
   private readonly _panel: vscode.WebviewPanel;
   private _disposables: vscode.Disposable[] = [];
+  private epics: EpicStatus[] = [];
+  private epicsPath = 'docs/sdlc/epics';
 
   private constructor(
     panel: vscode.WebviewPanel,
-    private epics: EpicStatus[],
+    private getData: () => SettingsPanelData,
     private onConfigChanged: () => void,
   ) {
     this._panel = panel;
@@ -42,12 +49,12 @@ export class SettingsPanel {
 
   public static show(
     extensionUri: vscode.Uri,
-    epics: EpicStatus[],
+    getData: () => SettingsPanelData,
     onConfigChanged: () => void,
   ) {
     if (SettingsPanel.currentPanel) {
       SettingsPanel.currentPanel._panel.reveal(vscode.ViewColumn.One);
-      SettingsPanel.currentPanel.epics = epics;
+      SettingsPanel.currentPanel.getData = getData;
       SettingsPanel.currentPanel.onConfigChanged = onConfigChanged;
       SettingsPanel.currentPanel.update();
       return;
@@ -60,17 +67,20 @@ export class SettingsPanel {
       { enableScripts: true, retainContextWhenHidden: true },
     );
 
-    SettingsPanel.currentPanel = new SettingsPanel(panel, epics, onConfigChanged);
+    SettingsPanel.currentPanel = new SettingsPanel(panel, getData, onConfigChanged);
     SettingsPanel.currentPanel.update();
   }
 
   private update() {
+    const { epics, epicsPath } = this.getData();
+    this.epics = epics;
+    this.epicsPath = epicsPath;
     const configs = this.epics.map(epic => ({
       key: epic.key,
       title: epic.title,
       enabledPhases: SettingsPanel.readConfig(epic.folderPath).enabledPhases,
     }));
-    this._panel.webview.html = this.getHtml(configs);
+    this._panel.webview.html = this.getHtml(configs, this.epicsPath);
   }
 
   public static readConfig(epicDir: string): PipelineConfig {
@@ -92,7 +102,7 @@ export class SettingsPanel {
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
   }
 
-  private handleMessage(msg: { type: string; epicKey?: string; epicDir?: string; phases?: string[] }) {
+  private async handleMessage(msg: { type: string; epicKey?: string; epicDir?: string; phases?: string[] }) {
     if (msg.type === 'save' && msg.epicDir && msg.phases) {
       SettingsPanel.writeConfig(msg.epicDir, { enabledPhases: msg.phases });
       this.onConfigChanged();
@@ -104,6 +114,10 @@ export class SettingsPanel {
       this.onConfigChanged();
       this.update();
       vscode.window.showInformationMessage(`Pipeline config applied to all ${this.epics.length} epics`);
+    } else if (msg.type === 'selectFolder') {
+      await vscode.commands.executeCommand('cfPipeline.selectEpicsFolder');
+      this.onConfigChanged();
+      this.update();
     }
   }
 
@@ -116,10 +130,11 @@ export class SettingsPanel {
     }
   }
 
-  private getHtml(configs: { key: string; title: string; enabledPhases: string[] }[]): string {
+  private getHtml(configs: { key: string; title: string; enabledPhases: string[] }[], epicsPath: string): string {
     const phasesJson = JSON.stringify(ALL_PHASES);
     const configsJson = JSON.stringify(configs);
     const epicsJson = JSON.stringify(this.epics.map(e => ({ key: e.key, folderPath: e.folderPath })));
+    const epicsPathJson = JSON.stringify(epicsPath);
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -137,6 +152,18 @@ export class SettingsPanel {
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); padding: 24px; }
   h1 { font-size: 20px; font-weight: 600; color: #fff; margin-bottom: 4px; }
   .subtitle { color: var(--text-muted); font-size: 13px; margin-bottom: 24px; }
+
+  .path-card {
+    background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px 20px; margin-bottom: 16px;
+  }
+  .path-card h2 { font-size: 14px; color: #fff; margin-bottom: 8px; }
+  .path-value {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; color: var(--accent); background: #1b1b1c;
+    border: 1px solid #2f2f31; border-radius: 6px; padding: 10px 12px;
+    margin-bottom: 12px; word-break: break-all;
+  }
 
   .apply-all {
     background: var(--card-bg); border: 1px solid var(--border);
@@ -190,6 +217,14 @@ export class SettingsPanel {
 <h1>Pipeline Settings</h1>
 <p class="subtitle">Configure which phases each epic needs to go through</p>
 
+<div class="path-card">
+  <h2>Epics Folder</h2>
+  <div class="path-value" id="epicsPath"></div>
+  <div class="btn-row">
+    <button class="btn btn-secondary" onclick="selectFolder()">Change Folder</button>
+  </div>
+</div>
+
 <div class="apply-all">
   <h2>Apply to All Epics</h2>
   <div class="phase-grid" id="globalPhases"></div>
@@ -207,6 +242,15 @@ export class SettingsPanel {
   const ALL_PHASES = ${phasesJson};
   const configs = ${configsJson};
   const epicMeta = ${epicsJson};
+  const epicsPath = ${epicsPathJson};
+
+  function renderEpicsPath() {
+    document.getElementById('epicsPath').textContent = epicsPath;
+  }
+
+  function selectFolder() {
+    vscode.postMessage({ type: 'selectFolder' });
+  }
 
   function renderGlobalPhases() {
     const el = document.getElementById('globalPhases');
@@ -278,6 +322,7 @@ export class SettingsPanel {
     setTimeout(function() { btn.textContent = 'Save'; btn.style.background = ''; }, 1500);
   }
 
+  renderEpicsPath();
   renderGlobalPhases();
   renderEpics();
 </script>

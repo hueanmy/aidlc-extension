@@ -30,17 +30,21 @@ export interface EpicStatus {
 export class EpicScanner {
   private epicsDir: string;
 
-  constructor(workspaceRoot: string, relativePath?: string) {
-    const rel = relativePath || 'docs/sdlc/epics';
-    this.epicsDir = path.join(workspaceRoot, ...rel.split('/'));
+  private static resolveEpicsDir(workspaceRoot: string, configuredPath: string): string {
+    return path.resolve(workspaceRoot, configuredPath);
+  }
+
+  constructor(workspaceRoot: string, configuredPath?: string) {
+    const epicsPath = configuredPath || 'docs/sdlc/epics';
+    this.epicsDir = EpicScanner.resolveEpicsDir(workspaceRoot, epicsPath);
   }
 
   getEpicsDir(): string {
     return this.epicsDir;
   }
 
-  setEpicsDir(workspaceRoot: string, relativePath: string): void {
-    this.epicsDir = path.join(workspaceRoot, ...relativePath.split('/'));
+  setEpicsDir(workspaceRoot: string, configuredPath: string): void {
+    this.epicsDir = EpicScanner.resolveEpicsDir(workspaceRoot, configuredPath);
   }
 
   scanAll(): EpicStatus[] {

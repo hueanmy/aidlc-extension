@@ -26,7 +26,12 @@ export function ensureMcpConfig(workspaceRoot: string, log: (msg: string) => voi
   }
 
   const platform = config.get<string>('platform', 'mobile');
+  const serverName = (config.get<string>('mcpServerName', 'sdlc') || 'sdlc').trim() || 'sdlc';
+  const mcpCommand = (config.get<string>('mcpCommand', 'npx') || 'npx').trim() || 'npx';
+  const mcpArgs = sanitizeArgs(config.get<unknown>('mcpArgs'));
+  const extraEnv = sanitizeEnv(config.get<unknown>('mcpEnv'));
   const mcpPackage = config.get<string>('mcpPackage', 'aidlc-pipeline');
+  const args = mcpArgs.length > 0 ? mcpArgs : ['-y', mcpPackage];
 
   const claudeDir = path.join(workspaceRoot, '.claude');
   const settingsPath = path.join(claudeDir, 'settings.json');
@@ -46,30 +51,57 @@ export function ensureMcpConfig(workspaceRoot: string, log: (msg: string) => voi
   }
 
   // Check if sdlc server already configured
-  const existing = settings.mcpServers['sdlc'];
+  const existing = settings.mcpServers[serverName];
   if (existing) {
-    // Update platform if changed
-    if (existing.env?.SDLC_PLATFORM !== platform) {
-      existing.env = { ...existing.env, SDLC_PLATFORM: platform };
+    const nextEnv = { ...(existing.env || {}), ...extraEnv, SDLC_PLATFORM: platform };
+    const shouldUpdateEnv = JSON.stringify(existing.env || {}) !== JSON.stringify(nextEnv);
+    const shouldUpdateCommand = existing.command !== mcpCommand;
+    const shouldUpdateArgs = JSON.stringify(existing.args || []) !== JSON.stringify(args);
+
+    if (shouldUpdateEnv || shouldUpdateCommand || shouldUpdateArgs) {
+      existing.command = mcpCommand;
+      existing.args = args;
+      existing.env = nextEnv;
       writeSettings(claudeDir, settingsPath, settings);
-      log(`Updated MCP platform to: ${platform}`);
+      log(`Updated MCP server "${serverName}"`);
     } else {
       log('MCP already configured');
     }
     return;
   }
 
-  // Add sdlc MCP server
-  settings.mcpServers['sdlc'] = {
-    command: 'npx',
-    args: ['-y', mcpPackage],
+  // Add MCP server
+  settings.mcpServers[serverName] = {
+    command: mcpCommand,
+    args,
     env: {
+      ...extraEnv,
       SDLC_PLATFORM: platform,
     },
   };
 
   writeSettings(claudeDir, settingsPath, settings);
-  log(`MCP configured: ${mcpPackage} (platform: ${platform})`);
+  log(`MCP configured: ${serverName} -> ${mcpCommand} ${args.join(' ')} (platform: ${platform})`);
+}
+
+function sanitizeArgs(input: unknown): string[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  return input.filter((value): value is string => typeof value === 'string').map((value) => value.trim()).filter(Boolean);
+}
+
+function sanitizeEnv(input: unknown): Record<string, string> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return {};
+  }
+  const output: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (typeof value === 'string' && key.trim().length > 0) {
+      output[key.trim()] = value;
+    }
+  }
+  return output;
 }
 
 function writeSettings(claudeDir: string, settingsPath: string, settings: ClaudeSettings): void {

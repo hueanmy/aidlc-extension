@@ -5,43 +5,89 @@ import { DashboardPanel } from './dashboardPanel';
 import { SettingsPanel } from './settingsPanel';
 import { EpicStatus, PhaseStatus } from './epicScanner';
 import { ensureMcpConfig } from './mcpConfigurator';
+import { ensureEpicsBootstrap } from './epicBootstrapper';
 
 export function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('SDLC Pipeline');
   context.subscriptions.push(outputChannel);
 
+  const safeEnsureMcpConfig = (workspaceRoot: string) => {
+    try {
+      ensureMcpConfig(workspaceRoot, (msg) => outputChannel.appendLine(`[MCP] ${msg}`));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      outputChannel.appendLine(`[MCP] Auto-configure skipped due to error: ${message}`);
+    }
+  };
+
   try {
     outputChannel.appendLine('Activating SDLC Pipeline extension');
 
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (!workspaceRoot) {
-      outputChannel.appendLine('Activation skipped: no workspace root found');
-      return;
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+      || path.join(context.globalStorageUri.fsPath, 'default-workspace');
+    const hasWorkspaceFolder = !!vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!hasWorkspaceFolder) {
+      outputChannel.appendLine('No workspace root found. Commands will stay available in limited mode.');
+    } else {
+      outputChannel.appendLine(`Workspace root: ${workspaceRoot}`);
+
+      // Auto-configure Claude Code MCP server
+      safeEnsureMcpConfig(workspaceRoot);
     }
-
-    outputChannel.appendLine(`Workspace root: ${workspaceRoot}`);
-
-    // Auto-configure Claude Code MCP server
-    ensureMcpConfig(workspaceRoot, (msg) => outputChannel.appendLine(`[MCP] ${msg}`));
 
     const config = vscode.workspace.getConfiguration('cfPipeline');
     let epicsRelativePath: string = config.get<string>('epicsPath') || 'docs/sdlc/epics';
+    const configuredTemplatePath = (config.get<string>('templateSourcePath') || '').trim();
+    const templateSourcePath = configuredTemplatePath.length > 0
+      ? configuredTemplatePath
+      : path.join(context.extensionPath, 'templates', 'generic');
+
+    const bootstrapResult = ensureEpicsBootstrap(
+      workspaceRoot,
+      epicsRelativePath,
+      templateSourcePath,
+      (msg) => outputChannel.appendLine(`[Bootstrap] ${msg}`),
+    );
+    if (bootstrapResult.created) {
+      void vscode.window.showInformationMessage(
+        `Created default epic ${bootstrapResult.epicKey} in ${bootstrapResult.epicsDir}`,
+      );
+    }
+
     outputChannel.appendLine(`Epics path: ${epicsRelativePath}`);
 
-    const pipelineProvider = new PipelineProvider(workspaceRoot, epicsRelativePath);
+    let pipelineProvider: PipelineProvider | undefined;
+    let providerRegistration: vscode.Disposable | undefined;
+    let treeView: vscode.TreeView<unknown> | undefined;
 
-    const providerRegistration = vscode.window.registerTreeDataProvider('cfPipelineView', pipelineProvider);
-    const treeView = vscode.window.createTreeView('cfPipelineView', {
-      treeDataProvider: pipelineProvider,
-      showCollapseAll: false,
-    });
+    if (workspaceRoot) {
+      try {
+        pipelineProvider = new PipelineProvider(workspaceRoot, epicsRelativePath);
+        providerRegistration = vscode.window.registerTreeDataProvider('cfPipelineView', pipelineProvider);
+        treeView = vscode.window.createTreeView('cfPipelineView', {
+          treeDataProvider: pipelineProvider,
+          showCollapseAll: false,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        outputChannel.appendLine(`Provider initialization failed: ${message}`);
+      }
+    }
 
     const refreshCmd = vscode.commands.registerCommand('cfPipeline.refresh', () => {
+      if (!pipelineProvider) {
+        vscode.window.showWarningMessage('SDLC Pipeline is not ready. Open a workspace folder and reload window.');
+        return;
+      }
       pipelineProvider.refresh();
       vscode.window.showInformationMessage('Pipeline status refreshed');
     });
 
     const dashboardCmd = vscode.commands.registerCommand('cfPipeline.openDashboard', () => {
+      if (!pipelineProvider) {
+        vscode.window.showWarningMessage('SDLC Pipeline is not ready. Open a workspace folder and reload window.');
+        return;
+      }
       const epics = pipelineProvider.getEpics();
       DashboardPanel.show(context.extensionUri, epics);
     });
@@ -64,6 +110,11 @@ export function activate(context: vscode.ExtensionContext) {
     const selectEpicsFolderCmd = vscode.commands.registerCommand(
       'cfPipeline.selectEpicsFolder',
       async () => {
+        if (!pipelineProvider) {
+          vscode.window.showWarningMessage('SDLC Pipeline is not ready yet. Reload window and try again.');
+          return;
+        }
+
         const result = await vscode.window.showOpenDialog({
           canSelectFolders: true,
           canSelectFiles: false,
@@ -79,33 +130,48 @@ export function activate(context: vscode.ExtensionContext) {
 
         const selectedPath = result[0].fsPath;
 
-        // Compute relative path from workspace root
-        if (!selectedPath.startsWith(workspaceRoot)) {
-          vscode.window.showWarningMessage('Selected folder must be inside the workspace.');
-          return;
-        }
-
-        const newRelativePath = path.relative(workspaceRoot, selectedPath);
-        epicsRelativePath = newRelativePath;
+        // Use absolute path if outside workspace, relative if inside
+        const newPath = selectedPath.startsWith(workspaceRoot)
+          ? path.relative(workspaceRoot, selectedPath)
+          : selectedPath;
+        epicsRelativePath = newPath;
 
         // Save to workspace settings
         const wsConfig = vscode.workspace.getConfiguration('cfPipeline');
-        await wsConfig.update('epicsPath', newRelativePath, vscode.ConfigurationTarget.Workspace);
+        await wsConfig.update(
+          'epicsPath',
+          newPath,
+          hasWorkspaceFolder ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global,
+        );
+
+        ensureEpicsBootstrap(
+          workspaceRoot,
+          newPath,
+          templateSourcePath,
+          (msg) => outputChannel.appendLine(`[Bootstrap] ${msg}`),
+        );
 
         // Update provider and watcher
-        pipelineProvider.setEpicsPath(newRelativePath);
+        pipelineProvider.setEpicsPath(newPath);
         recreateWatcher();
 
-        outputChannel.appendLine(`Epics path changed to: ${newRelativePath}`);
-        vscode.window.showInformationMessage(`Epics folder set to: ${newRelativePath}`);
+        outputChannel.appendLine(`Epics path changed to: ${newPath}`);
+        vscode.window.showInformationMessage(`Epics folder set to: ${newPath}`);
       }
     );
 
     const openSettingsCmd = vscode.commands.registerCommand(
       'cfPipeline.openSettings',
       () => {
-        const epics = pipelineProvider.getEpics();
-        SettingsPanel.show(context.extensionUri, epics, () => {
+        if (!pipelineProvider) {
+          vscode.window.showWarningMessage('SDLC Pipeline is not ready. Open a workspace folder and reload window.');
+          return;
+        }
+
+        SettingsPanel.show(context.extensionUri, () => ({
+          epics: pipelineProvider.getEpics(),
+          epicsPath: epicsRelativePath,
+        }), () => {
           pipelineProvider.refresh();
         });
       }
@@ -141,23 +207,50 @@ export function activate(context: vscode.ExtensionContext) {
     // Dynamic file watcher that updates when epics path changes
     let watcher: vscode.FileSystemWatcher | undefined;
     function recreateWatcher() {
-      watcher?.dispose();
-      const watchPattern = `**/${epicsRelativePath}/**/*.md`;
-      watcher = vscode.workspace.createFileSystemWatcher(watchPattern);
-      watcher.onDidChange(() => pipelineProvider.refresh());
-      watcher.onDidCreate(() => pipelineProvider.refresh());
-      watcher.onDidDelete(() => pipelineProvider.refresh());
+      if (!pipelineProvider) {
+        return;
+      }
+      try {
+        watcher?.dispose();
+        const isAbsolute = path.isAbsolute(epicsRelativePath);
+        const watchPattern = isAbsolute
+          ? new vscode.RelativePattern(vscode.Uri.file(epicsRelativePath), '**/*.md')
+          : `**/${epicsRelativePath}/**/*.md`;
+        watcher = vscode.workspace.createFileSystemWatcher(watchPattern);
+        watcher.onDidChange(() => pipelineProvider.refresh());
+        watcher.onDidCreate(() => pipelineProvider.refresh());
+        watcher.onDidDelete(() => pipelineProvider.refresh());
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        outputChannel.appendLine(`Watcher setup failed for epics path "${epicsRelativePath}": ${message}`);
+      }
     }
     recreateWatcher();
 
     // Listen for config changes
     const configListener = vscode.workspace.onDidChangeConfiguration(e => {
-      if (e.affectsConfiguration('cfPipeline.platform') || e.affectsConfiguration('cfPipeline.mcpPackage')) {
-        ensureMcpConfig(workspaceRoot, (msg) => outputChannel.appendLine(`[MCP] ${msg}`));
+      if (
+        hasWorkspaceFolder && (
+          e.affectsConfiguration('cfPipeline.platform') ||
+          e.affectsConfiguration('cfPipeline.mcpPackage') ||
+          e.affectsConfiguration('cfPipeline.mcpServerName') ||
+          e.affectsConfiguration('cfPipeline.mcpCommand') ||
+          e.affectsConfiguration('cfPipeline.mcpArgs') ||
+          e.affectsConfiguration('cfPipeline.mcpEnv') ||
+          e.affectsConfiguration('cfPipeline.autoConfigureMcp')
+        )
+      ) {
+        safeEnsureMcpConfig(workspaceRoot);
       }
       if (e.affectsConfiguration('cfPipeline.epicsPath')) {
         const newPath = vscode.workspace.getConfiguration('cfPipeline').get<string>('epicsPath') || 'docs/sdlc/epics';
-        if (newPath !== epicsRelativePath) {
+        if (pipelineProvider && newPath !== epicsRelativePath) {
+          ensureEpicsBootstrap(
+            workspaceRoot,
+            newPath,
+            templateSourcePath,
+            (msg) => outputChannel.appendLine(`[Bootstrap] ${msg}`),
+          );
           epicsRelativePath = newPath;
           pipelineProvider.setEpicsPath(newPath);
           recreateWatcher();
@@ -168,9 +261,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     const watcherDisposable = { dispose: () => watcher?.dispose() };
 
-    context.subscriptions.push(
-      providerRegistration,
-      treeView,
+    const disposables: vscode.Disposable[] = [
       refreshCmd,
       dashboardCmd,
       selectEpicsFolderCmd,
@@ -180,18 +271,29 @@ export function activate(context: vscode.ExtensionContext) {
       openPhaseSessionCmd,
       watcherDisposable,
       configListener,
-    );
+    ];
+    if (providerRegistration) {
+      disposables.push(providerRegistration);
+    }
+    if (treeView) {
+      disposables.push(treeView);
+    }
+    context.subscriptions.push(...disposables);
 
-    const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
-    statusBar.command = 'cfPipeline.openDashboard';
-    const epics = pipelineProvider.getEpics();
-    const active = epics.filter(e => e.progress > 0 && e.progress < 100).length;
-    statusBar.text = `$(rocket) ${active} active epic${active !== 1 ? 's' : ''}`;
-    statusBar.tooltip = 'Open SDLC Pipeline Dashboard';
-    statusBar.show();
-    context.subscriptions.push(statusBar);
+    if (pipelineProvider) {
+      const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
+      statusBar.command = 'cfPipeline.openDashboard';
+      const epics = pipelineProvider.getEpics();
+      const active = epics.filter(e => e.progress > 0 && e.progress < 100).length;
+      statusBar.text = `$(rocket) ${active} active epic${active !== 1 ? 's' : ''}`;
+      statusBar.tooltip = 'Open SDLC Pipeline Dashboard';
+      statusBar.show();
+      context.subscriptions.push(statusBar);
 
-    outputChannel.appendLine(`Activation complete: loaded ${epics.length} epic(s)`);
+      outputChannel.appendLine(`Activation complete: loaded ${epics.length} epic(s)`);
+    } else {
+      outputChannel.appendLine('Activation complete in limited mode (no pipeline provider).');
+    }
   } catch (error) {
     const message = error instanceof Error ? error.stack || error.message : String(error);
     outputChannel.appendLine(`Activation failed: ${message}`);

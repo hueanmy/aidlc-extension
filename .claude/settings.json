@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "sdlc": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "aidlc-pipeline"
+      ],
+      "env": {
+        "SDLC_PLATFORM": "mobile"
+      }
+    }
+  }
+}

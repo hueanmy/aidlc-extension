@@ -27,7 +27,14 @@
   ],
   "activationEvents": [
     "workspaceContains:docs/sdlc/epics",
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:cfPipeline.refresh",
+    "onCommand:cfPipeline.openDashboard",
+    "onCommand:cfPipeline.selectEpicsFolder",
+    "onCommand:cfPipeline.openSettings",
+    "onCommand:cfPipeline.openArtifact",
+    "onCommand:cfPipeline.runPhase",
+    "onCommand:cfPipeline.openPhaseSession"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -57,6 +64,11 @@
           "default": "docs/sdlc/epics",
           "description": "Relative path from workspace root to the SDLC epics folder."
         },
+        "cfPipeline.templateSourcePath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to epic templates. Leave empty to use bundled templates shipped with this extension."
+        },
         "cfPipeline.platform": {
           "type": "string",
           "default": "mobile",
@@ -72,7 +84,33 @@
         "cfPipeline.mcpPackage": {
           "type": "string",
           "default": "aidlc-pipeline",
-          "description": "NPM package name for the MCP server. Override for private registries."
+          "description": "Fallback NPM package name when mcpArgs is empty (default args will be: -y <mcpPackage>)."
+        },
+        "cfPipeline.mcpServerName": {
+          "type": "string",
+          "default": "sdlc",
+          "description": "MCP server key written into .claude/settings.json under mcpServers.<name>."
+        },
+        "cfPipeline.mcpCommand": {
+          "type": "string",
+          "default": "npx",
+          "description": "MCP server command for Claude settings (for example: npx, uvx, node)."
+        },
+        "cfPipeline.mcpArgs": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional MCP server args. If empty, extension uses ['-y', mcpPackage]."
+        },
+        "cfPipeline.mcpEnv": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Additional environment variables merged into MCP server env."
         },
         "cfPipeline.autoConfigureMcp": {
           "type": "boolean",
@@ -124,6 +162,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "cfPipeline.selectEpicsFolder",
+          "when": "view == cfPipelineView",
+          "group": "navigation@0"
+        },
         {
           "command": "cfPipeline.openSettings",
           "when": "view == cfPipelineView",
