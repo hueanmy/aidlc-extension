@@ -6,3 +6,4 @@ tsconfig.json
 **/*.ts
 **/*.map
 install.sh
+.claude/settings.local.json
