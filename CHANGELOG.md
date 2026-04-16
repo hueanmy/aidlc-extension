@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.3
+
+- Refresh description and document Claude Code + Jira + Figma workflow
+
 ## 0.5.2
 
 - Add epics bootstrap and MCP settings configuration
