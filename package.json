@@ -7,7 +7,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/hueanmy/aidlc"
+    "url": "https://github.com/hueanmy/aidlc-extension"
   },
   "icon": "media/icon.png",
   "keywords": ["sdlc", "pipeline", "epic", "agile", "project management", "tracker", "workflow"],
