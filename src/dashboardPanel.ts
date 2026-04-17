@@ -142,6 +142,7 @@ export class DashboardPanel {
     -webkit-backdrop-filter: blur(28px) saturate(180%);
     box-shadow: var(--glass-shadow);
   }
+  .epic-card:has(.phase:hover) { z-index: 200; }
   .epic-card::before, .stat-card::before {
     content: '';
     position: absolute;
@@ -324,15 +325,15 @@ export class DashboardPanel {
     position: absolute;
     bottom: calc(100% + 10px); left: 50%;
     transform: translateX(-50%);
-    background: rgba(18,18,28,0.72);
+    background: rgba(12,14,24,0.96);
     border: 1px solid var(--glass-border);
     border-radius: var(--radius-sm);
     backdrop-filter: blur(32px) saturate(180%);
     -webkit-backdrop-filter: blur(32px) saturate(180%);
     padding: 14px;
-    width: 260px; z-index: 20;
+    width: 260px; z-index: 999;
     font-size: 11px;
-    box-shadow: 0 20px 50px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.14);
+    box-shadow: 0 20px 50px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.14);
   }
   .phase-detail::after {
     content: '';
@@ -340,7 +341,7 @@ export class DashboardPanel {
     top: 100%; left: 50%;
     transform: translateX(-50%);
     border: 6px solid transparent;
-    border-top-color: rgba(18,18,28,0.72);
+    border-top-color: rgba(12,14,24,0.96);
   }
   .phase:hover .phase-detail { display: block; }
   .phase-detail h4 { color: #fff; margin-bottom: 10px; font-size: 12px; letter-spacing: 0.01em; }
