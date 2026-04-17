@@ -1,0 +1,9 @@
+{
+  "name": "aidlc-demo-recorder",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "playwright": "^1.48.0"
+  }
+}

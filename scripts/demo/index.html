@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>aidlc demo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 1200px; height: 750px;
+    font-family: -apple-system, "SF Pro Display", "Segoe UI", sans-serif;
+    font-size: 13px;
+    color: #cccccc;
+    background: #1e1e1e;
+    overflow: hidden;
+  }
+
+  /* ===== Window chrome ===== */
+  .window {
+    width: 1200px; height: 750px;
+    background: #1e1e1e;
+    display: grid;
+    grid-template-rows: 28px 1fr 22px;
+    grid-template-columns: 48px 280px 1fr;
+    grid-template-areas:
+      "title title title"
+      "activity side main"
+      "status status status";
+  }
+  .titlebar {
+    grid-area: title;
+    background: #323233;
+    display: flex; align-items: center; padding: 0 12px;
+    border-bottom: 1px solid #0e0e0e;
+    gap: 8px;
+  }
+  .dot { width: 12px; height: 12px; border-radius: 50%; }
+  .dot.red { background: #ff5f56; }
+  .dot.yellow { background: #ffbd2e; }
+  .dot.green { background: #27c93f; }
+  .title-text { margin-left: 16px; color: #888; font-size: 12px; }
+
+  /* ===== Activity bar ===== */
+  .activity {
+    grid-area: activity;
+    background: #333333;
+    display: flex; flex-direction: column; align-items: center; padding-top: 12px;
+    gap: 18px;
+  }
+  .activity-icon {
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    color: #858585;
+    font-size: 18px;
+    border-left: 2px solid transparent;
+    cursor: pointer;
+  }
+  .activity-icon.active {
+    color: #ffffff;
+    border-left-color: #0078d4;
+  }
+  .activity-icon.sdlc {
+    opacity: 0;
+    animation: sdlc-appear 0.4s ease 1.2s forwards,
+               sdlc-activate 0.6s ease 2.6s forwards;
+  }
+  @keyframes sdlc-appear { to { opacity: 1; } }
+  @keyframes sdlc-activate {
+    to { color: #ffffff; border-left-color: #0078d4; }
+  }
+
+  /* ===== Sidebar ===== */
+  .sidebar {
+    grid-area: side;
+    background: #252526;
+    border-right: 1px solid #0e0e0e;
+    display: flex; flex-direction: column;
+    opacity: 0;
+    transform: translateX(-20px);
+    animation: slide-in 0.5s ease 2.6s forwards;
+  }
+  @keyframes slide-in {
+    to { opacity: 1; transform: translateX(0); }
+  }
+  .sidebar-header {
+    padding: 8px 14px 8px 20px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #bbbbbb;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .sidebar-actions { display: flex; gap: 6px; color: #858585; }
+  .sidebar-actions span { cursor: pointer; }
+  .sidebar-actions span:hover { color: #fff; }
+
+  .tree { padding: 4px 0; }
+  .tree-item {
+    display: flex; align-items: center; padding: 4px 20px; gap: 6px;
+    cursor: pointer;
+  }
+  .tree-item:hover { background: #2a2d2e; }
+  .tree-item.epic { font-weight: 500; color: #ddd; }
+  .caret { display: inline-block; width: 10px; font-size: 9px; transition: transform 0.2s; }
+  .epic.expanded .caret { transform: rotate(90deg); }
+  .epic-key { color: #569cd6; font-family: "SF Mono", Menlo, monospace; font-size: 12px; }
+
+  .phase-list {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s ease;
+  }
+  .epic.expanded + .phase-list { max-height: 400px; }
+
+  .phase-row {
+    display: flex; align-items: center; padding: 3px 20px 3px 44px;
+    gap: 8px;
+    color: #b0b0b0;
+    position: relative;
+  }
+  .phase-row:hover { background: #2a2d2e; }
+  .phase-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #555;
+    box-shadow: 0 0 0 2px #252526;
+  }
+  .phase-dot.done { background: #4ec9b0; }
+  .phase-dot.progress { background: #dcdcaa; animation: pulse 1.5s ease infinite; }
+  .phase-dot.blocked { background: #f48771; }
+  @keyframes pulse { 50% { opacity: 0.5; } }
+
+  .phase-label { flex: 1; }
+  .phase-agent { color: #858585; font-size: 11px; }
+
+  .tooltip {
+    position: absolute;
+    right: 14px; top: 50%; transform: translateY(-50%) translateX(8px);
+    background: #3c3c3c;
+    border: 1px solid #464647;
+    padding: 4px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  }
+  .phase-row.design .tooltip {
+    animation: tip-show 2.2s ease 7.8s forwards;
+  }
+  @keyframes tip-show {
+    0% { opacity: 0; transform: translateY(-50%) translateX(8px); }
+    15% { opacity: 1; transform: translateY(-50%) translateX(0); }
+    85% { opacity: 1; transform: translateY(-50%) translateX(0); }
+    100% { opacity: 0; transform: translateY(-50%) translateX(8px); }
+  }
+
+  /* ===== Main area ===== */
+  .main {
+    grid-area: main;
+    position: relative;
+    background: #1e1e1e;
+    overflow: hidden;
+  }
+  .tab-bar {
+    height: 34px;
+    background: #252526;
+    border-bottom: 1px solid #0e0e0e;
+    display: flex; align-items: center;
+  }
+  .tab {
+    height: 100%;
+    padding: 0 16px;
+    display: flex; align-items: center; gap: 8px;
+    background: #1e1e1e;
+    border-right: 1px solid #0e0e0e;
+    font-size: 13px;
+  }
+
+  .editor-view, .dashboard-view, .settings-view {
+    position: absolute;
+    top: 34px; left: 0; right: 0; bottom: 0;
+    padding: 24px 32px;
+    overflow: hidden;
+    background: #1e1e1e;
+  }
+  .editor-view { opacity: 1; }
+
+  /* Dashboard */
+  .dashboard-view {
+    opacity: 0;
+    animation: dashboard-show 0.4s ease 11s forwards,
+               dashboard-hide 0.4s ease 22s forwards;
+  }
+  @keyframes dashboard-show { to { opacity: 1; } }
+  @keyframes dashboard-hide { to { opacity: 0; } }
+
+  .dashboard-view h2 {
+    font-size: 16px;
+    font-weight: 500;
+    margin-bottom: 16px;
+    color: #fff;
+  }
+  .dashboard-row {
+    background: #252526;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 10px;
+    display: grid;
+    grid-template-columns: 140px 1fr 80px;
+    gap: 20px;
+    align-items: center;
+  }
+  .dashboard-row.hover {
+    border-color: #0078d4;
+    animation: row-hover 2s ease 18.5s;
+  }
+  @keyframes row-hover {
+    50% { background: #2a2d2e; }
+  }
+  .epic-badge { color: #569cd6; font-family: "SF Mono", Menlo, monospace; }
+  .progress-track {
+    height: 8px;
+    background: #3c3c3c;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #4ec9b0, #0078d4);
+    width: 0;
+    border-radius: 4px;
+  }
+  .dashboard-view.active .progress-fill.p1 { animation: fill-bar 1.4s ease 12s forwards; }
+  .dashboard-view.active .progress-fill.p2 { animation: fill-bar-55 1.4s ease 12.2s forwards; }
+  .dashboard-view.active .progress-fill.p3 { animation: fill-bar-30 1.4s ease 12.4s forwards; }
+  @keyframes fill-bar { to { width: 78%; } }
+  @keyframes fill-bar-55 { to { width: 55%; } }
+  @keyframes fill-bar-30 { to { width: 30%; } }
+
+  .progress-text {
+    text-align: right;
+    color: #858585;
+    font-size: 12px;
+  }
+  .phase-pills {
+    display: flex; gap: 4px;
+    margin-top: 12px;
+    grid-column: 2 / span 2;
+  }
+  .pill {
+    width: 20px; height: 6px; border-radius: 3px; background: #444;
+  }
+  .pill.done { background: #4ec9b0; }
+  .pill.progress { background: #dcdcaa; }
+  .pill.blocked { background: #f48771; }
+
+  /* Settings panel */
+  .settings-view {
+    opacity: 0;
+    animation: settings-show 0.4s ease 22.5s forwards,
+               settings-hide 0.4s ease 31s forwards;
+  }
+  @keyframes settings-show { to { opacity: 1; } }
+  @keyframes settings-hide { to { opacity: 0; } }
+
+  .settings-view h2 {
+    font-size: 16px; font-weight: 500; margin-bottom: 18px; color: #fff;
+  }
+  .settings-view .subtitle { color: #888; margin-bottom: 20px; font-size: 12px; }
+  .phase-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 14px;
+    background: #252526;
+    border: 1px solid #333;
+    border-radius: 4px;
+    margin-bottom: 6px;
+  }
+  .toggle {
+    width: 32px; height: 18px; border-radius: 9px;
+    background: #0078d4;
+    position: relative;
+    transition: background 0.3s;
+  }
+  .toggle::after {
+    content: "";
+    position: absolute;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: white;
+    top: 2px; left: 16px;
+    transition: left 0.3s;
+  }
+  .toggle.off { background: #555; }
+  .toggle.off::after { left: 2px; }
+  .toggle.uat {
+    animation: toggle-off 0.3s ease 25.5s forwards,
+               toggle-on 0.3s ease 27.5s forwards;
+  }
+  @keyframes toggle-off {
+    to { background: #555; }
+  }
+  @keyframes toggle-on {
+    to { background: #0078d4; }
+  }
+
+  /* Editor (final phase session) */
+  .editor-content {
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    opacity: 0;
+    animation: editor-show 0.4s ease 31.5s forwards;
+  }
+  @keyframes editor-show { to { opacity: 1; } }
+
+  .line-num { color: #555; display: inline-block; width: 30px; text-align: right; margin-right: 14px; }
+  .md-h1 { color: #569cd6; font-weight: 600; }
+  .md-h2 { color: #4ec9b0; }
+  .md-key { color: #ce9178; }
+  .md-comment { color: #6a9955; }
+
+  /* End card overlay */
+  .endcard {
+    position: absolute;
+    inset: 0;
+    background: rgba(30, 30, 30, 0.94);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px;
+    opacity: 0;
+    z-index: 10;
+    animation: end-show 0.5s ease 37s forwards;
+  }
+  @keyframes end-show { to { opacity: 1; } }
+  .endcard .brand {
+    font-size: 34px;
+    font-weight: 600;
+    background: linear-gradient(90deg, #4ec9b0, #569cd6, #c586c0);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .endcard .tag {
+    color: #ccc; font-size: 15px;
+  }
+  .endcard .url {
+    color: #569cd6; font-family: "SF Mono", Menlo, monospace; font-size: 13px;
+    margin-top: 8px;
+  }
+
+  /* Status bar */
+  .statusbar {
+    grid-area: status;
+    background: #0078d4;
+    color: white;
+    display: flex; align-items: center; padding: 0 14px; gap: 16px;
+    font-size: 11px;
+  }
+  .statusbar .sep { opacity: 0.5; }
+</style>
+</head>
+<body>
+<div class="window">
+
+  <div class="titlebar">
+    <div class="dot red"></div>
+    <div class="dot yellow"></div>
+    <div class="dot green"></div>
+    <div class="title-text">my-project — Visual Studio Code</div>
+  </div>
+
+  <div class="activity">
+    <div class="activity-icon">🔍</div>
+    <div class="activity-icon">📁</div>
+    <div class="activity-icon">🔀</div>
+    <div class="activity-icon sdlc active">⭕</div>
+    <div class="activity-icon">🧩</div>
+  </div>
+
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <span>Epic Pipeline</span>
+      <div class="sidebar-actions">
+        <span title="Select folder">📂</span>
+        <span title="Settings">⚙</span>
+        <span title="Refresh">↻</span>
+        <span title="Dashboard">▦</span>
+      </div>
+    </div>
+    <div class="tree">
+      <div class="tree-item epic expanded">
+        <span class="caret">▶</span>
+        <span class="epic-key">ABC-123</span>
+        <span>Checkout redesign</span>
+      </div>
+      <div class="phase-list">
+        <div class="phase-row"><span class="phase-dot done"></span><span class="phase-label">Plan</span><span class="phase-agent">PO</span></div>
+        <div class="phase-row design"><span class="phase-dot done"></span><span class="phase-label">Design</span><span class="phase-agent">Tech Lead</span>
+          <div class="tooltip">Design · done · by Tech Lead</div>
+        </div>
+        <div class="phase-row"><span class="phase-dot done"></span><span class="phase-label">Test Plan</span><span class="phase-agent">QA</span></div>
+        <div class="phase-row"><span class="phase-dot progress"></span><span class="phase-label">Implement</span><span class="phase-agent">Dev</span></div>
+        <div class="phase-row"><span class="phase-dot"></span><span class="phase-label">Review</span><span class="phase-agent">Tech Lead</span></div>
+        <div class="phase-row"><span class="phase-dot"></span><span class="phase-label">UAT</span><span class="phase-agent">QA</span></div>
+        <div class="phase-row"><span class="phase-dot"></span><span class="phase-label">Release</span><span class="phase-agent">RM</span></div>
+        <div class="phase-row"><span class="phase-dot"></span><span class="phase-label">Monitor</span><span class="phase-agent">SRE</span></div>
+        <div class="phase-row"><span class="phase-dot"></span><span class="phase-label">Doc Sync</span><span class="phase-agent">Archivist</span></div>
+      </div>
+      <div class="tree-item epic">
+        <span class="caret">▶</span>
+        <span class="epic-key">ABC-124</span>
+        <span>Search ranking v2</span>
+      </div>
+      <div class="tree-item epic">
+        <span class="caret">▶</span>
+        <span class="epic-key">ABC-130</span>
+        <span>Push notifications</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="tab-bar">
+      <div class="tab">📄 README.md</div>
+    </div>
+
+    <div class="editor-view">
+      <div class="editor-content" style="animation-delay: 0s; opacity: 1;">
+        <div><span class="line-num">1</span><span class="md-h1"># SDLC Pipeline</span></div>
+        <div><span class="line-num">2</span></div>
+        <div><span class="line-num">3</span>Track SDLC pipeline progress for software epics directly in VS Code.</div>
+        <div><span class="line-num">4</span>Visualize every phase — from planning to release —</div>
+        <div><span class="line-num">5</span>with agent ownership and real-time status.</div>
+        <div><span class="line-num">6</span></div>
+        <div><span class="line-num">7</span><span class="md-h2">## Use with Claude Code</span></div>
+        <div><span class="line-num">8</span></div>
+        <div><span class="line-num">9</span><span class="md-comment">> Integrated with Claude Code, Jira, and Figma</span></div>
+        <div><span class="line-num">10</span></div>
+        <div><span class="line-num">11</span><span class="md-key">/epic ABC-123</span>   <span class="md-comment"># scaffold from Jira</span></div>
+        <div><span class="line-num">12</span><span class="md-key">/prd ABC-123</span>    <span class="md-comment"># PO drafts PRD</span></div>
+        <div><span class="line-num">13</span><span class="md-key">/tech-design</span>    <span class="md-comment"># architecture + API contracts</span></div>
+        <div><span class="line-num">14</span><span class="md-key">/test-plan</span>      <span class="md-comment"># QA test cases</span></div>
+        <div><span class="line-num">15</span><span class="md-key">/review &lt;pr&gt;</span>    <span class="md-comment"># validate against epic docs</span></div>
+        <div><span class="line-num">16</span><span class="md-key">/release</span>        <span class="md-comment"># RM: notes + tag</span></div>
+        <div><span class="line-num">17</span><span class="md-key">/monitor</span>        <span class="md-comment"># SRE: post-release health</span></div>
+      </div>
+    </div>
+
+    <div class="dashboard-view active">
+      <h2>SDLC Pipeline — Dashboard</h2>
+      <div class="dashboard-row hover">
+        <div><div class="epic-badge">ABC-123</div><div style="color:#888;font-size:11px;margin-top:2px">Checkout redesign</div></div>
+        <div>
+          <div class="progress-track"><div class="progress-fill p1"></div></div>
+          <div class="phase-pills">
+            <div class="pill done"></div>
+            <div class="pill done"></div>
+            <div class="pill done"></div>
+            <div class="pill progress"></div>
+            <div class="pill"></div>
+            <div class="pill"></div>
+            <div class="pill"></div>
+            <div class="pill"></div>
+            <div class="pill"></div>
+          </div>
+        </div>
+        <div class="progress-text">4 / 9 · 44%</div>
+      </div>
+      <div class="dashboard-row">
+        <div><div class="epic-badge">ABC-124</div><div style="color:#888;font-size:11px;margin-top:2px">Search ranking v2</div></div>
+        <div>
+          <div class="progress-track"><div class="progress-fill p2"></div></div>
+          <div class="phase-pills">
+            <div class="pill done"></div>
+            <div class="pill done"></div>
+            <div class="pill progress"></div>
+            <div class="pill"></div>
+            <div class="pill"></div>
+            <div class="pill"></div>
+            <div class="pill"></div>
+            <div class="pill"></div>
+            <div class="pill"></div>
+          </div>
+        </div>
+        <div class="progress-text">2 / 9 · 22%</div>
+      </div>
+      <div class="dashboard-row">
+        <div><div class="epic-badge">ABC-130</div><div style="color:#888;font-size:11px;margin-top:2px">Push notifications</div></div>
+        <div>
+          <div class="progress-track"><div class="progress-fill p3"></div></div>
+          <div class="phase-pills">
+            <div class="pill done"></div>
+            <div class="pill"></div>
+            <div class="pill"></div>
+            <div class="pill"></div>
+            <div class="pill"></div>
+            <div class="pill"></div>
+            <div class="pill"></div>
+            <div class="pill"></div>
+            <div class="pill"></div>
+          </div>
+        </div>
+        <div class="progress-text">1 / 9 · 11%</div>
+      </div>
+    </div>
+
+    <div class="settings-view">
+      <h2>Pipeline Settings — ABC-123</h2>
+      <div class="subtitle">Toggle phases to skip for this epic</div>
+      <div class="phase-toggle"><span>Plan</span><div class="toggle"></div></div>
+      <div class="phase-toggle"><span>Design</span><div class="toggle"></div></div>
+      <div class="phase-toggle"><span>Test Plan</span><div class="toggle"></div></div>
+      <div class="phase-toggle"><span>Implement</span><div class="toggle"></div></div>
+      <div class="phase-toggle"><span>Review</span><div class="toggle"></div></div>
+      <div class="phase-toggle"><span>UAT</span><div class="toggle uat"></div></div>
+      <div class="phase-toggle"><span>Release</span><div class="toggle"></div></div>
+      <div class="phase-toggle"><span>Monitor</span><div class="toggle"></div></div>
+      <div class="phase-toggle"><span>Doc Sync</span><div class="toggle"></div></div>
+    </div>
+
+    <div class="endcard">
+      <div class="brand">aidlc</div>
+      <div class="tag">AI-driven SDLC · Claude Code · Jira · Figma</div>
+      <div class="url">open-vsx.org/extension/hueanmy/aidlc</div>
+    </div>
+  </div>
+
+  <div class="statusbar">
+    <span>main</span>
+    <span class="sep">·</span>
+    <span>SDLC: 3 epics</span>
+    <span class="sep">·</span>
+    <span>44% avg progress</span>
+  </div>
+
+</div>
+</body>
+</html>
