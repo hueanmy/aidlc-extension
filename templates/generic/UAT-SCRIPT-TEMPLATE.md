@@ -1,9 +1,9 @@
 # UAT Test Script: [Feature Title]
 
-> **Epic**: [DRM-XXXX — Epic Title](../epics/DRM-XXXX/DRM-XXXX.md)
+> **Epic**: [EPIC-XXXX — Epic Title](../epics/EPIC-XXXX/EPIC-XXXX.md)
 > **TestFlight Build**: vX.Y.Z (Build XX)
 > **Environment**: UAT (`uat.dreem.ai`)
-> Copy to `docs/sdlc/epics/DRM-XXXX/UAT-SCRIPT.md`
+> Copy to `docs/sdlc/epics/EPIC-XXXX/UAT-SCRIPT.md`
 >
 > This script is for **non-technical testers** (PM, stakeholders). Write steps they can follow on their device.
 
@@ -80,7 +80,7 @@
 
 | # | Scenario | Step | Description | Severity | Screenshot | Ticket |
 |---|----------|------|-------------|----------|------------|--------|
-| 1 | | | | P0/P1/P2/P3 | | DRM-YYYY |
+| 1 | | | | P0/P1/P2/P3 | | EPIC-YYYY |
 
 ---
 

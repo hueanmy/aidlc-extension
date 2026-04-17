@@ -30,7 +30,7 @@ export function ensureMcpConfig(workspaceRoot: string, log: (msg: string) => voi
   const mcpCommand = (config.get<string>('mcpCommand', 'npx') || 'npx').trim() || 'npx';
   const mcpArgs = sanitizeArgs(config.get<unknown>('mcpArgs'));
   const extraEnv = sanitizeEnv(config.get<unknown>('mcpEnv'));
-  const mcpPackage = config.get<string>('mcpPackage', 'aidlc-pipeline');
+  const mcpPackage = config.get<string>('mcpPackage', 'github:hueanmy/aidlc-pipeline');
   const args = mcpArgs.length > 0 ? mcpArgs : ['-y', mcpPackage];
 
   const claudeDir = path.join(workspaceRoot, '.claude');

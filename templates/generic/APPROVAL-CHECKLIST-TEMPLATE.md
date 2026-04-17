@@ -1,7 +1,7 @@
 # Approval Checklist: [Feature Title]
 
-> **Epic**: [DRM-XXXX — Epic Title](../epics/DRM-XXXX/DRM-XXXX.md)
-> Copy to `docs/sdlc/epics/DRM-XXXX/APPROVAL.md`
+> **Epic**: [EPIC-XXXX — Epic Title](../epics/EPIC-XXXX/EPIC-XXXX.md)
+> Copy to `docs/sdlc/epics/EPIC-XXXX/APPROVAL.md`
 
 ---
 

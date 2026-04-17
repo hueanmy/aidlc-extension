@@ -1,9 +1,9 @@
 # Test Plan: [Feature Title]
 
-> **Epic**: [DRM-XXXX — Epic Title](../epics/DRM-XXXX/DRM-XXXX.md)
-> **PRD**: [PRD](../epics/DRM-XXXX/PRD.md)
-> **Tech Design**: [Tech Design](../epics/DRM-XXXX/TECH-DESIGN.md)
-> Copy to `docs/sdlc/epics/DRM-XXXX/TEST-PLAN.md`
+> **Epic**: [EPIC-XXXX — Epic Title](../epics/EPIC-XXXX/EPIC-XXXX.md)
+> **PRD**: [PRD](../epics/EPIC-XXXX/PRD.md)
+> **Tech Design**: [Tech Design](../epics/EPIC-XXXX/TECH-DESIGN.md)
+> Copy to `docs/sdlc/epics/EPIC-XXXX/TEST-PLAN.md`
 
 ---
 
@@ -11,7 +11,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Epic Key** | DRM-XXXX |
+| **Epic Key** | EPIC-XXXX |
 | **Author** | |
 | **QA Reviewer** | |
 | **Status** | `draft` / `review` / `approved` |
@@ -26,8 +26,8 @@ _What this test plan covers (derived from PRD acceptance criteria)._
 
 | AC ID | Acceptance Criteria | Test Type |
 |-------|-------------------|-----------|
-| DRM-XXXX-AC01 | (from PRD) | Unit / UI / Integration |
-| DRM-XXXX-AC02 | | |
+| EPIC-XXXX-AC01 | (from PRD) | Unit / UI / Integration |
+| EPIC-XXXX-AC02 | | |
 
 ### Out of Scope
 _What is NOT tested and why._
@@ -58,12 +58,12 @@ _What is NOT tested and why._
 
 | ID | Component | Test Description | File | Status |
 |----|-----------|-----------------|------|--------|
-| DRM-XXXX-UT01 | ViewModel | State transitions: idle → loading → success/error | `DreemCatcherTests/` | ⬜ |
-| DRM-XXXX-UT02 | ViewModel | Data transformation / mapping | | ⬜ |
-| DRM-XXXX-UT03 | Service | API call with mocked HTTPClient | | ⬜ |
-| DRM-XXXX-UT04 | Model | Codable encode/decode with full response | | ⬜ |
-| DRM-XXXX-UT05 | Model | Codable decode with missing optional fields | | ⬜ |
-| DRM-XXXX-UT06 | Model | Codable decode with unknown extra fields | | ⬜ |
+| EPIC-XXXX-UT01 | ViewModel | State transitions: idle → loading → success/error | `DreemCatcherTests/` | ⬜ |
+| EPIC-XXXX-UT02 | ViewModel | Data transformation / mapping | | ⬜ |
+| EPIC-XXXX-UT03 | Service | API call with mocked HTTPClient | | ⬜ |
+| EPIC-XXXX-UT04 | Model | Codable encode/decode with full response | | ⬜ |
+| EPIC-XXXX-UT05 | Model | Codable decode with missing optional fields | | ⬜ |
+| EPIC-XXXX-UT06 | Model | Codable decode with unknown extra fields | | ⬜ |
 
 ---
 
@@ -71,9 +71,9 @@ _What is NOT tested and why._
 
 | ID | Flow | Steps | Expected | Device | Status |
 |----|------|-------|----------|--------|--------|
-| DRM-XXXX-UI01 | Happy path | 1. Open feature 2. Do action 3. See result | Result displayed | Simulator | ⬜ |
-| DRM-XXXX-UI02 | Error state | 1. Trigger error condition | Error UI shown | Simulator | ⬜ |
-| DRM-XXXX-UI03 | Empty state | 1. Open with no data | Empty state shown | Simulator | ⬜ |
+| EPIC-XXXX-UI01 | Happy path | 1. Open feature 2. Do action 3. See result | Result displayed | Simulator | ⬜ |
+| EPIC-XXXX-UI02 | Error state | 1. Trigger error condition | Error UI shown | Simulator | ⬜ |
+| EPIC-XXXX-UI03 | Empty state | 1. Open with no data | Empty state shown | Simulator | ⬜ |
 
 ---
 
@@ -81,8 +81,8 @@ _What is NOT tested and why._
 
 | ID | Flow | Components | Precondition | Expected | Status |
 |----|------|-----------|--------------|----------|--------|
-| DRM-XXXX-IT01 | End-to-end | View → VM → Service → API | Authenticated, DEV backend | Data loaded | ⬜ |
-| DRM-XXXX-IT02 | Token refresh | Expired token → interceptor → retry | Expired token | Transparent refresh | ⬜ |
+| EPIC-XXXX-IT01 | End-to-end | View → VM → Service → API | Authenticated, DEV backend | Data loaded | ⬜ |
+| EPIC-XXXX-IT02 | Token refresh | Expired token → interceptor → retry | Expired token | Transparent refresh | ⬜ |
 
 ---
 
@@ -92,37 +92,37 @@ _What is NOT tested and why._
 
 | ID | Scenario | Device | Status |
 |----|----------|--------|--------|
-| DRM-XXXX-CAM01 | Camera opens, preview shows | Real device | ⬜ |
-| DRM-XXXX-CAM02 | Tap to focus at various points | Real device | ⬜ |
-| DRM-XXXX-CAM03 | Volume button capture | Real device | ⬜ |
-| DRM-XXXX-CAM04 | Camera permission denied → settings prompt | Simulator OK | ⬜ |
+| EPIC-XXXX-CAM01 | Camera opens, preview shows | Real device | ⬜ |
+| EPIC-XXXX-CAM02 | Tap to focus at various points | Real device | ⬜ |
+| EPIC-XXXX-CAM03 | Volume button capture | Real device | ⬜ |
+| EPIC-XXXX-CAM04 | Camera permission denied → settings prompt | Simulator OK | ⬜ |
 
 ### Network Tests
 
 | ID | Scenario | How to Test | Expected | Status |
 |----|----------|-------------|----------|--------|
-| DRM-XXXX-NET01 | Offline: no network | Airplane mode | Graceful error / cached data | ⬜ |
-| DRM-XXXX-NET02 | Network loss mid-upload | Toggle airplane during upload | Retry / resume | ⬜ |
-| DRM-XXXX-NET03 | WiFi → cellular transition | Switch network | Socket reconnects | ⬜ |
-| DRM-XXXX-NET04 | Slow network (2G) | Network Link Conditioner | Timeout handling | ⬜ |
+| EPIC-XXXX-NET01 | Offline: no network | Airplane mode | Graceful error / cached data | ⬜ |
+| EPIC-XXXX-NET02 | Network loss mid-upload | Toggle airplane during upload | Retry / resume | ⬜ |
+| EPIC-XXXX-NET03 | WiFi → cellular transition | Switch network | Socket reconnects | ⬜ |
+| EPIC-XXXX-NET04 | Slow network (2G) | Network Link Conditioner | Timeout handling | ⬜ |
 
 ### App Lifecycle Tests
 
 | ID | Scenario | Steps | Expected | Status |
 |----|----------|-------|----------|--------|
-| DRM-XXXX-LC01 | Background during feature | Press Home | State preserved | ⬜ |
-| DRM-XXXX-LC02 | Return from background | Open app again | Resume correctly | ⬜ |
-| DRM-XXXX-LC03 | Memory warning | Simulate in Xcode | No crash, graceful dealloc | ⬜ |
-| DRM-XXXX-LC04 | Incoming call during capture | Call during camera | Session paused, resumes | ⬜ |
-| DRM-XXXX-LC05 | App killed and relaunched | Force kill | Clean restart, no stale state | ⬜ |
+| EPIC-XXXX-LC01 | Background during feature | Press Home | State preserved | ⬜ |
+| EPIC-XXXX-LC02 | Return from background | Open app again | Resume correctly | ⬜ |
+| EPIC-XXXX-LC03 | Memory warning | Simulate in Xcode | No crash, graceful dealloc | ⬜ |
+| EPIC-XXXX-LC04 | Incoming call during capture | Call during camera | Session paused, resumes | ⬜ |
+| EPIC-XXXX-LC05 | App killed and relaunched | Force kill | Clean restart, no stale state | ⬜ |
 
 ### Permission Tests
 
 | ID | Permission | Scenario | Expected | Status |
 |----|-----------|----------|----------|--------|
-| DRM-XXXX-PM01 | Camera | First time: allow | Camera works | ⬜ |
-| DRM-XXXX-PM02 | Camera | First time: deny | Show settings prompt | ⬜ |
-| DRM-XXXX-PM03 | Photo Library | Allow limited access | Show limited photos | ⬜ |
+| EPIC-XXXX-PM01 | Camera | First time: allow | Camera works | ⬜ |
+| EPIC-XXXX-PM02 | Camera | First time: deny | Show settings prompt | ⬜ |
+| EPIC-XXXX-PM03 | Photo Library | Allow limited access | Show limited photos | ⬜ |
 
 ---
 
@@ -130,9 +130,9 @@ _What is NOT tested and why._
 
 | ID | Metric | Threshold | How to Measure | Status |
 |----|--------|-----------|----------------|--------|
-| DRM-XXXX-PF01 | Screen load time | < 300ms | Instruments: Time Profiler | ⬜ |
-| DRM-XXXX-PF02 | Memory footprint | < 20MB increase | Instruments: Allocations | ⬜ |
-| DRM-XXXX-PF03 | No memory leaks | 0 leaks after 10 cycles | Instruments: Leaks | ⬜ |
+| EPIC-XXXX-PF01 | Screen load time | < 300ms | Instruments: Time Profiler | ⬜ |
+| EPIC-XXXX-PF02 | Memory footprint | < 20MB increase | Instruments: Allocations | ⬜ |
+| EPIC-XXXX-PF03 | No memory leaks | 0 leaks after 10 cycles | Instruments: Leaks | ⬜ |
 
 ---
 
@@ -140,9 +140,9 @@ _What is NOT tested and why._
 
 | ID | Check | Expected | Status |
 |----|-------|----------|--------|
-| DRM-XXXX-A11Y01 | VoiceOver navigation | All elements announced | ⬜ |
-| DRM-XXXX-A11Y02 | Dynamic Type (largest) | Text scales, no truncation | ⬜ |
-| DRM-XXXX-A11Y03 | Color contrast | Meets WCAG AA (4.5:1) | ⬜ |
+| EPIC-XXXX-A11Y01 | VoiceOver navigation | All elements announced | ⬜ |
+| EPIC-XXXX-A11Y02 | Dynamic Type (largest) | Text scales, no truncation | ⬜ |
+| EPIC-XXXX-A11Y03 | Color contrast | Meets WCAG AA (4.5:1) | ⬜ |
 
 ---
 
@@ -180,7 +180,7 @@ _What is NOT tested and why._
 **Known Issues**:
 | ID | Description | Severity | Ticket |
 |----|-------------|----------|--------|
-| | | | DRM-YYYY |
+| | | | EPIC-YYYY |
 
 ---
 

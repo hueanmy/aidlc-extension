@@ -1,7 +1,7 @@
 # Epic: [EPIC-KEY] — [Epic Title]
 
 > Copy this template to `docs/sdlc/epics/[EPIC-KEY]/[EPIC-KEY].md`
-> Example: `docs/sdlc/epics/DRM-2100/DRM-2100.md`
+> Example: `docs/sdlc/epics/EPIC-2100/EPIC-2100.md`
 >
 > **Epic Key** is the single identifier for all work. All artifacts, PRs, branches, and docs reference this key.
 
@@ -11,7 +11,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Epic Key** | DRM-XXXX |
+| **Epic Key** | EPIC-XXXX |
 | **Title** | |
 | **Owner** | |
 | **Priority** | P0 / P1 / P2 / P3 |
@@ -48,9 +48,9 @@ _Who benefits and how? Include metrics if possible (e.g., "reduce upload failure
 
 | ID | Story | Acceptance Criteria | Priority | Status |
 |----|-------|-------------------|----------|--------|
-| DRM-XXXX-01 | As a [user], I want [action] so that [benefit] | Given/When/Then (detail in PRD) | Must | ⬜ |
-| DRM-XXXX-02 | | | Should | ⬜ |
-| DRM-XXXX-03 | | | Could | ⬜ |
+| EPIC-XXXX-01 | As a [user], I want [action] so that [benefit] | Given/When/Then (detail in PRD) | Must | ⬜ |
+| EPIC-XXXX-02 | | | Should | ⬜ |
+| EPIC-XXXX-03 | | | Could | ⬜ |
 
 ---
 
@@ -79,7 +79,7 @@ _Who benefits and how? Include metrics if possible (e.g., "reduce upload failure
 |-----------|------|--------|----------|-------|
 | Backend API endpoint ready | External | ⬜ Ready | | Backend team |
 | Figma designs approved | External | ⬜ Ready | | Design team |
-| Other epic: DRM-YYYY | Internal | ⬜ Done | | |
+| Other epic: EPIC-YYYY | Internal | ⬜ Done | | |
 | Third-party SDK update | External | ⬜ Ready | | |
 
 ---
@@ -92,7 +92,7 @@ _Who benefits and how? Include metrics if possible (e.g., "reduce upload failure
 | Phase | Scope | Deliverable | Status |
 |-------|-------|-------------|--------|
 | 1. Planning | PRD + Tech Design + Test Plan + Approval | All artifacts approved | ⬜ |
-| 2. Core Implementation | DRM-XXXX-01, DRM-XXXX-02 | Working feature on DEV | ⬜ |
+| 2. Core Implementation | EPIC-XXXX-01, EPIC-XXXX-02 | Working feature on DEV | ⬜ |
 | 3. Testing & Polish | Edge cases, device testing, bug fixes | All tests passing | ⬜ |
 | 4. UAT & Release | UAT sign-off, release build | Included in vX.Y.Z | ⬜ |
 | 5. Doc Reverse-Sync | Update docs from what was built | Docs reflect reality | ⬜ |
@@ -102,19 +102,19 @@ _Who benefits and how? Include metrics if possible (e.g., "reduce upload failure
 ## Pipeline — Artifacts Tracker
 
 > Every artifact is keyed to this epic. Check off as completed.
-> Branch naming: `feature/[EPIC-KEY]-short-desc` (e.g., `feature/DRM-2100-tap-to-focus`)
-> PR title: `[EPIC-KEY] description` (e.g., `[DRM-2100] Add tap-to-focus visual feedback`)
-> Commit prefix: `DRM-XXXX description`
+> Branch naming: `feature/[EPIC-KEY]-short-desc` (e.g., `feature/EPIC-2100-tap-to-focus`)
+> PR title: `[EPIC-KEY] description` (e.g., `[EPIC-2100] Add tap-to-focus visual feedback`)
+> Commit prefix: `EPIC-XXXX description`
 
 | Stage | Artifact | Status | Link |
 |-------|----------|--------|------|
 | **Planning** | | | |
 | Requirement | This epic doc | ✅ | (this file) |
-| Product/UX | PRD | ⬜ | `epics/DRM-XXXX/PRD.md` |
+| Product/UX | PRD | ⬜ | `epics/EPIC-XXXX/PRD.md` |
 | Product/UX | Figma designs | ⬜ | (Figma link) |
-| Tech Design | Technical design doc | ⬜ | `epics/DRM-XXXX/TECH-DESIGN.md` |
-| Test Planning | Test plan | ⬜ | `epics/DRM-XXXX/TEST-PLAN.md` |
-| Approval | Approval checklist | ⬜ | `epics/DRM-XXXX/APPROVAL.md` |
+| Tech Design | Technical design doc | ⬜ | `epics/EPIC-XXXX/TECH-DESIGN.md` |
+| Test Planning | Test plan | ⬜ | `epics/EPIC-XXXX/TEST-PLAN.md` |
+| Approval | Approval checklist | ⬜ | `epics/EPIC-XXXX/APPROVAL.md` |
 | **Execution** | | | |
 | Implementation | PR(s) | ⬜ | (GitHub PR links) |
 | Code Review | Review passed | ⬜ | (PR review links) |
@@ -123,11 +123,11 @@ _Who benefits and how? Include metrics if possible (e.g., "reduce upload failure
 | Integration Tests | Passing | ⬜ | (CI link) |
 | **Delivery** | | | |
 | CI/CD Build | TestFlight build | ⬜ | (TestFlight link) |
-| UAT Script | UAT test script | ⬜ | `epics/DRM-XXXX/UAT-SCRIPT.md` |
+| UAT Script | UAT test script | ⬜ | `epics/EPIC-XXXX/UAT-SCRIPT.md` |
 | UAT | UAT sign-off | ⬜ | |
 | Release | Included in version | ⬜ | vX.Y.Z |
 | **Closure** | | | |
-| Doc Reverse-Sync | Docs updated | ⬜ | `epics/DRM-XXXX/DOC-REVERSE-SYNC.md` |
+| Doc Reverse-Sync | Docs updated | ⬜ | `epics/EPIC-XXXX/DOC-REVERSE-SYNC.md` |
 
 ---
 

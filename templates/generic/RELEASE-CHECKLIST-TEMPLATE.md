@@ -19,8 +19,8 @@
 
 | Epic | Title | UAT Status | Doc Sync |
 |------|-------|-----------|----------|
-| DRM-XXXX | | ⬜ Passed | ⬜ Done |
-| DRM-YYYY | | ⬜ Passed | ⬜ Done |
+| EPIC-XXXX | | ⬜ Passed | ⬜ Done |
+| EPIC-YYYY | | ⬜ Passed | ⬜ Done |
 
 ---
 

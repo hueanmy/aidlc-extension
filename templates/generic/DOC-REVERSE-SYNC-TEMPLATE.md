@@ -1,8 +1,8 @@
-# Doc Reverse-Sync: DRM-XXXX
+# Doc Reverse-Sync: EPIC-XXXX
 
-> **Epic**: [DRM-XXXX — Epic Title](../epics/DRM-XXXX/DRM-XXXX.md)
+> **Epic**: [EPIC-XXXX — Epic Title](../epics/EPIC-XXXX/EPIC-XXXX.md)
 > **Purpose**: Update existing docs to reflect what was ACTUALLY built, not what was planned.
-> Copy to `docs/sdlc/epics/DRM-XXXX/DOC-REVERSE-SYNC.md`
+> Copy to `docs/sdlc/epics/EPIC-XXXX/DOC-REVERSE-SYNC.md`
 
 ---
 
@@ -69,7 +69,7 @@ Docs must reflect reality, not the plan.
 ```
 Read the current doc at docs/[XX-doc-name].md and the implementation 
 in [list of changed files from PR]. Generate updated sections that
-reflect what was actually built for epic DRM-XXXX. Only change 
+reflect what was actually built for epic EPIC-XXXX. Only change 
 sections affected by this epic. Keep existing doc structure and style.
 ```
 

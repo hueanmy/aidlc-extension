@@ -106,7 +106,7 @@ export class EpicScanner {
         artifact: this.artifactExists(epicDir, 'PRD.md') ? 'PRD.md' : this.artifactExists(epicDir, `${key}.md`) ? `${key}.md` : null,
         artifactPath: this.getArtifactPath(epicDir, 'PRD.md') || this.getArtifactPath(epicDir, `${key}.md`),
         input: 'Jira ticket, Figma designs, business context',
-        output: 'Epic Doc + PRD with Acceptance Criteria (DRM-XXXX-AC*)',
+        output: 'Epic Doc + PRD with Acceptance Criteria (EPIC-XXXX-AC*)',
       },
       {
         id: 'design',

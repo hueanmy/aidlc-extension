@@ -49,7 +49,7 @@ export function ensureEpicsBootstrap(
     return { created: false, epicsDir };
   }
 
-  const epicKey = 'DRM-1000';
+  const epicKey = 'EPIC-1000';
   const epicDir = path.join(epicsDir, epicKey);
   fs.mkdirSync(epicDir, { recursive: true });
 
@@ -83,8 +83,8 @@ function renderTemplate(content: string, epicKey: string): string {
   const today = new Date().toISOString().slice(0, 10);
   return content
     .replaceAll('[EPIC-KEY]', epicKey)
-    .replaceAll('DRM-XXXX', epicKey)
-    .replaceAll('DRM-YYYY', epicKey)
+    .replaceAll('EPIC-XXXX', epicKey)
+    .replaceAll('EPIC-YYYY', epicKey)
     .replaceAll('[Epic Title]', 'Initial Epic Template')
     .replaceAll('[Feature Title]', 'Initial Epic Template')
     .replaceAll('YYYY-MM-DD', today)

@@ -1,8 +1,8 @@
 # Tech Design: [Feature Title]
 
-> **Epic**: [DRM-XXXX — Epic Title](../epics/DRM-XXXX/DRM-XXXX.md)
-> **PRD**: [PRD](../epics/DRM-XXXX/PRD.md)
-> Copy to `docs/sdlc/epics/DRM-XXXX/TECH-DESIGN.md`
+> **Epic**: [EPIC-XXXX — Epic Title](../epics/EPIC-XXXX/EPIC-XXXX.md)
+> **PRD**: [PRD](../epics/EPIC-XXXX/PRD.md)
+> Copy to `docs/sdlc/epics/EPIC-XXXX/TECH-DESIGN.md`
 
 ---
 
@@ -10,7 +10,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Epic Key** | DRM-XXXX |
+| **Epic Key** | EPIC-XXXX |
 | **Author** | |
 | **Reviewer** | |
 | **Status** | `draft` / `review` / `approved` |

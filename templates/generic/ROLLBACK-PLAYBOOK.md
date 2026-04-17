@@ -59,13 +59,13 @@ Questions to answer within 30 minutes:
 
 ```bash
 # 1. Create hotfix branch from release tag
-git checkout -b hotfix/DRM-XXXX-description v{X.Y.Z}
+git checkout -b hotfix/EPIC-XXXX-description v{X.Y.Z}
 
 # 2. Fix the issue
 # ... make changes ...
 
 # 3. Fast-track review (tech lead must approve)
-# PR title: [HOTFIX][DRM-XXXX] description
+# PR title: [HOTFIX][EPIC-XXXX] description
 
 # 4. Test on real device (minimum: the device/OS that reproduces the issue)
 
@@ -120,7 +120,7 @@ make fl-release  # PROD — submit for expedited review
 After the issue is resolved:
 
 1. **Resume rollout** (if paused): App Store Connect → Resume Phased Release
-2. **Create incident report epic**: `DRM-XXXX [INCIDENT] vX.Y.Z [description]`
+2. **Create incident report epic**: `EPIC-XXXX [INCIDENT] vX.Y.Z [description]`
 3. **Post-mortem content** (add to epic doc):
    - What happened (timeline)
    - Root cause

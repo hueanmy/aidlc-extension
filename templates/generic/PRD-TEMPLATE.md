@@ -1,7 +1,7 @@
 # PRD: [Feature Title]
 
-> **Epic**: [DRM-XXXX — Epic Title](../epics/DRM-XXXX/DRM-XXXX.md)
-> Copy to `docs/sdlc/epics/DRM-XXXX/PRD.md`
+> **Epic**: [EPIC-XXXX — Epic Title](../epics/EPIC-XXXX/EPIC-XXXX.md)
+> Copy to `docs/sdlc/epics/EPIC-XXXX/PRD.md`
 
 ---
 
@@ -9,7 +9,7 @@
 
 | Field | Value |
 |-------|-------|
-| **Epic Key** | DRM-XXXX |
+| **Epic Key** | EPIC-XXXX |
 | **Author** | |
 | **Reviewer** | |
 | **Status** | `draft` / `review` / `approved` / `superseded` |
@@ -60,10 +60,10 @@ Screen A → [Action] → Screen B → [Action] → Screen C
 
 | ID | Criteria | Priority |
 |----|----------|----------|
-| DRM-XXXX-AC01 | **Given** [precondition] **When** [action] **Then** [result] | Must |
-| DRM-XXXX-AC02 | | Must |
-| DRM-XXXX-AC03 | | Should |
-| DRM-XXXX-AC04 | | Could |
+| EPIC-XXXX-AC01 | **Given** [precondition] **When** [action] **Then** [result] | Must |
+| EPIC-XXXX-AC02 | | Must |
+| EPIC-XXXX-AC03 | | Should |
+| EPIC-XXXX-AC04 | | Could |
 
 ---
 
@@ -109,7 +109,7 @@ _If no Figma yet, describe layout requirements:_
 |-----------|--------|-------|
 | Backend API: `POST /api/v2/xxx` | ⬜ Ready / ⬜ In progress | |
 | Figma: Final designs | ⬜ Ready / ⬜ In progress | |
-| Other epic: DRM-YYYY | ⬜ Done / ⬜ Blocked | |
+| Other epic: EPIC-YYYY | ⬜ Done / ⬜ Blocked | |
 
 ---
 
