@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.12
+
+- fix(dashboard): lift hovered epic card above siblings so popup is never covered
+
 ## 0.5.11
 
 - fix(dashboard): show phase detail popup above dot instead of clipped below
