@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.10
+
+- Redesign Dashboard + Settings UI with glass theme and icon-matched palette
+- Add MCP Pipeline Source UI to Settings Panel
+- Add How Sync Works and Troubleshooting sections to README
+- Switch MCP default to github:hueanmy/aidlc-pipeline; rename DRM to EPIC
+
 ## 0.5.6
 
 - Use absolute GitHub URL for demo GIF on Open VSX
