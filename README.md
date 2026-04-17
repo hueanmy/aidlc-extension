@@ -51,6 +51,20 @@ The extension scans your `docs/sdlc/epics/` folder for epic artifacts (PRD, Tech
 | `cfPipeline.mcpServerName` | `sdlc` | Key used under `mcpServers.<name>` in `.claude/settings.json` |
 | `cfPipeline.autoConfigureMcp` | `true` | If `false`, extension will not touch `.claude/settings.json` |
 
+### Use your own pipeline
+
+If you have a private fork (e.g. company-specific SDLC with core-business docs), you can point the extension at it:
+
+1. Open the **Pipeline Settings** panel (sidebar → `…` → `Pipeline Settings`, or Command Palette → `SDLC: Pipeline Settings`).
+2. Scroll to **MCP Pipeline Source** at the top.
+3. Enter your package spec — e.g.:
+   - `github:yourcompany/cf-sdlc-pipeline` (GitHub repo, public or private with SSH auth)
+   - `@yourcompany/sdlc-pipeline` (once published to npm)
+4. Pick the platform that matches your project.
+5. Click **Apply & Reload MCP** — the extension rewrites `.claude/settings.json` and Claude Code loads your pipeline on the next tool call.
+
+To switch back, click **Reset to Default**.
+
 ## How Sync Works (MCP Server)
 
 When Claude Code boots the MCP server (triggered on the first MCP tool invocation per session), it runs `syncWorkspace()` against your project root. The server is published from [`hueanmy/aidlc-pipeline`](https://github.com/hueanmy/aidlc-pipeline) — pulled via `npx -y github:hueanmy/aidlc-pipeline` (or the npm package when available).

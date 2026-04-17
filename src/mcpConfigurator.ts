@@ -16,11 +16,15 @@ interface ClaudeSettings {
 /**
  * Ensures .claude/settings.json has the SDLC MCP server configured.
  * Creates or updates the config without overwriting other settings.
+ *
+ * @param force If true, overwrites an existing mcpServers.<name> entry even
+ *   when one is already present. Used when the user explicitly changes MCP
+ *   settings via the Settings Panel UI.
  */
-export function ensureMcpConfig(workspaceRoot: string, log: (msg: string) => void): void {
+export function ensureMcpConfig(workspaceRoot: string, log: (msg: string) => void, force = false): void {
   const config = vscode.workspace.getConfiguration('cfPipeline');
   const autoConfig = config.get<boolean>('autoConfigureMcp', true);
-  if (!autoConfig) {
+  if (!autoConfig && !force) {
     log('MCP auto-configure disabled');
     return;
   }
@@ -36,7 +40,6 @@ export function ensureMcpConfig(workspaceRoot: string, log: (msg: string) => voi
   const claudeDir = path.join(workspaceRoot, '.claude');
   const settingsPath = path.join(claudeDir, 'settings.json');
 
-  // Read existing settings or start fresh
   let settings: ClaudeSettings = {};
   if (fs.existsSync(settingsPath)) {
     try {
@@ -50,16 +53,11 @@ export function ensureMcpConfig(workspaceRoot: string, log: (msg: string) => voi
     settings.mcpServers = {};
   }
 
-  // Skip if sdlc server already configured — never overwrite an existing entry.
-  // User-level MCP package choice (cf-sdlc-pipeline vs aidlc-pipeline) must be
-  // preserved across reloads. To change an existing config, edit settings.json
-  // directly or remove mcpServers.sdlc and reload.
-  if (settings.mcpServers[serverName]) {
-    log(`MCP server "${serverName}" already configured, leaving as-is`);
+  if (settings.mcpServers[serverName] && !force) {
+    log(`MCP server "${serverName}" already configured, leaving as-is (pass force=true to overwrite)`);
     return;
   }
 
-  // Add MCP server
   settings.mcpServers[serverName] = {
     command: mcpCommand,
     args,
@@ -70,7 +68,7 @@ export function ensureMcpConfig(workspaceRoot: string, log: (msg: string) => voi
   };
 
   writeSettings(claudeDir, settingsPath, settings);
-  log(`MCP configured: ${serverName} -> ${mcpCommand} ${args.join(' ')} (platform: ${platform})`);
+  log(`MCP configured: ${serverName} -> ${mcpCommand} ${args.join(' ')} (platform: ${platform})${force ? ' [forced]' : ''}`);
 }
 
 function sanitizeArgs(input: unknown): string[] {

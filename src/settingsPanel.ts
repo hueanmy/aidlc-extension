@@ -80,7 +80,14 @@ export class SettingsPanel {
       title: epic.title,
       enabledPhases: SettingsPanel.readConfig(epic.folderPath).enabledPhases,
     }));
-    this._panel.webview.html = this.getHtml(configs, this.epicsPath);
+    const cfg = vscode.workspace.getConfiguration('cfPipeline');
+    const mcpSettings = {
+      mcpPackage: cfg.get<string>('mcpPackage', 'github:hueanmy/aidlc-pipeline'),
+      platform: cfg.get<string>('platform', 'mobile'),
+      mcpServerName: cfg.get<string>('mcpServerName', 'sdlc'),
+      mcpCommand: cfg.get<string>('mcpCommand', 'npx'),
+    };
+    this._panel.webview.html = this.getHtml(configs, this.epicsPath, mcpSettings);
   }
 
   public static readConfig(epicDir: string): PipelineConfig {
@@ -102,7 +109,14 @@ export class SettingsPanel {
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf8');
   }
 
-  private async handleMessage(msg: { type: string; epicKey?: string; epicDir?: string; phases?: string[] }) {
+  private async handleMessage(msg: {
+    type: string;
+    epicKey?: string;
+    epicDir?: string;
+    phases?: string[];
+    mcpPackage?: string;
+    platform?: string;
+  }) {
     if (msg.type === 'save' && msg.epicDir && msg.phases) {
       SettingsPanel.writeConfig(msg.epicDir, { enabledPhases: msg.phases });
       this.onConfigChanged();
@@ -118,7 +132,39 @@ export class SettingsPanel {
       await vscode.commands.executeCommand('cfPipeline.selectEpicsFolder');
       this.onConfigChanged();
       this.update();
+    } else if (msg.type === 'saveMcp') {
+      await this.handleSaveMcp(msg.mcpPackage, msg.platform);
+    } else if (msg.type === 'resetMcp') {
+      await this.handleSaveMcp('github:hueanmy/aidlc-pipeline', 'mobile');
     }
+  }
+
+  private async handleSaveMcp(mcpPackage: string | undefined, platform: string | undefined): Promise<void> {
+    const pkg = (mcpPackage ?? '').trim();
+    if (!pkg) {
+      vscode.window.showErrorMessage('MCP package cannot be empty');
+      return;
+    }
+    const plat = (platform ?? 'mobile').trim() || 'mobile';
+
+    const cfg = vscode.workspace.getConfiguration('cfPipeline');
+    const target = vscode.workspace.workspaceFolders?.[0]?.uri
+      ? vscode.ConfigurationTarget.Workspace
+      : vscode.ConfigurationTarget.Global;
+    await cfg.update('mcpPackage', pkg, target);
+    await cfg.update('platform', plat, target);
+
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (workspaceRoot) {
+      const { ensureMcpConfig } = await import('./mcpConfigurator');
+      ensureMcpConfig(workspaceRoot, () => { /* silent from UI */ }, true);
+      vscode.window.showInformationMessage(
+        `MCP updated: ${pkg} (platform: ${plat}). Reload Claude Code for changes to take effect.`,
+      );
+    } else {
+      vscode.window.showWarningMessage('MCP settings saved, but no workspace folder open — .claude/settings.json not written.');
+    }
+    this.update();
   }
 
   private dispose() {
@@ -130,11 +176,16 @@ export class SettingsPanel {
     }
   }
 
-  private getHtml(configs: { key: string; title: string; enabledPhases: string[] }[], epicsPath: string): string {
+  private getHtml(
+    configs: { key: string; title: string; enabledPhases: string[] }[],
+    epicsPath: string,
+    mcp: { mcpPackage: string; platform: string; mcpServerName: string; mcpCommand: string },
+  ): string {
     const phasesJson = JSON.stringify(ALL_PHASES);
     const configsJson = JSON.stringify(configs);
     const epicsJson = JSON.stringify(this.epics.map(e => ({ key: e.key, folderPath: e.folderPath })));
     const epicsPathJson = JSON.stringify(epicsPath);
+    const mcpJson = JSON.stringify(mcp);
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -211,11 +262,60 @@ export class SettingsPanel {
   .phase-agent { color: var(--text-muted); font-size: 11px; }
   .phase-emoji { background: #333; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 700; color: var(--accent); }
   .save-btn-row { margin-top: 12px; display: flex; justify-content: flex-end; }
+
+  .hint { color: var(--text-muted); font-size: 12px; margin-bottom: 10px; line-height: 1.5; }
+  .hint code { background: #1b1b1c; border: 1px solid #2f2f31; border-radius: 4px; padding: 1px 6px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--accent); }
+  .field-label { display: block; font-size: 12px; font-weight: 600; color: #fff; margin: 4px 0 6px; }
+  .field-input {
+    width: 100%; background: #1b1b1c; border: 1px solid #2f2f31; border-radius: 6px;
+    padding: 8px 10px; color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px; outline: none;
+  }
+  .field-input:focus { border-color: var(--accent); }
+  .preset-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .preset-chip {
+    background: #2a2a2a; color: var(--text); border: 1px solid transparent;
+    border-radius: 12px; padding: 4px 10px; font-size: 11px; cursor: pointer;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; transition: all 0.15s;
+  }
+  .preset-chip:hover { border-color: var(--accent); color: var(--accent); }
+  .platform-row { display: flex; flex-wrap: wrap; gap: 10px; }
+  .platform-opt {
+    display: flex; align-items: center; gap: 6px; background: #2a2a2a;
+    border: 1px solid transparent; border-radius: 6px; padding: 6px 12px;
+    cursor: pointer; font-size: 12px; user-select: none;
+  }
+  .platform-opt:hover { border-color: var(--accent); }
+  .platform-opt input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
+  .platform-opt input[type="radio"]:checked + span { color: var(--accent); font-weight: 600; }
 </style>
 </head>
 <body>
 <h1>Pipeline Settings</h1>
-<p class="subtitle">Configure which phases each epic needs to go through</p>
+<p class="subtitle">Configure the SDLC MCP server and which phases each epic needs to go through</p>
+
+<div class="path-card">
+  <h2>MCP Pipeline Source</h2>
+  <p class="hint">Which pipeline package Claude Code loads. Use <code>github:owner/repo</code> for a custom fork (e.g. <code>github:yourcompany/cf-sdlc-pipeline</code>) or an npm package name once published.</p>
+  <label class="field-label">Package spec</label>
+  <input type="text" class="field-input" id="mcpPackageInput" placeholder="github:hueanmy/aidlc-pipeline" />
+  <div class="preset-row" id="mcpPresets">
+    <button type="button" class="preset-chip" data-value="github:hueanmy/aidlc-pipeline">aidlc-pipeline (default)</button>
+  </div>
+  <label class="field-label" style="margin-top: 14px;">Platform</label>
+  <div class="platform-row" id="platformRow">
+    <label class="platform-opt"><input type="radio" name="platform" value="mobile" /><span>mobile</span></label>
+    <label class="platform-opt"><input type="radio" name="platform" value="web" /><span>web</span></label>
+    <label class="platform-opt"><input type="radio" name="platform" value="backend" /><span>backend</span></label>
+    <label class="platform-opt"><input type="radio" name="platform" value="desktop" /><span>desktop</span></label>
+    <label class="platform-opt"><input type="radio" name="platform" value="generic" /><span>generic</span></label>
+  </div>
+  <div class="hint" id="mcpCurrent" style="margin-top: 10px;"></div>
+  <div class="btn-row" style="margin-top: 14px;">
+    <button class="btn btn-primary" onclick="saveMcp()">Apply &amp; Reload MCP</button>
+    <button class="btn btn-secondary" onclick="resetMcp()">Reset to Default</button>
+  </div>
+</div>
 
 <div class="path-card">
   <h2>Epics Folder</h2>
@@ -243,6 +343,7 @@ export class SettingsPanel {
   const configs = ${configsJson};
   const epicMeta = ${epicsJson};
   const epicsPath = ${epicsPathJson};
+  const mcp = ${mcpJson};
 
   function renderEpicsPath() {
     document.getElementById('epicsPath').textContent = epicsPath;
@@ -322,9 +423,42 @@ export class SettingsPanel {
     setTimeout(function() { btn.textContent = 'Save'; btn.style.background = ''; }, 1500);
   }
 
+  function renderMcp() {
+    document.getElementById('mcpPackageInput').value = mcp.mcpPackage || '';
+    const radios = document.querySelectorAll('input[name="platform"]');
+    radios.forEach(function(r) { r.checked = r.value === (mcp.platform || 'mobile'); });
+    document.getElementById('mcpCurrent').innerHTML =
+      'Currently active: <code>' + (mcp.mcpCommand || 'npx') + ' -y ' + escapeHtml(mcp.mcpPackage) + '</code>' +
+      ' · server key <code>' + escapeHtml(mcp.mcpServerName) + '</code>';
+    document.querySelectorAll('.preset-chip').forEach(function(chip) {
+      chip.addEventListener('click', function() {
+        document.getElementById('mcpPackageInput').value = chip.dataset.value;
+      });
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s || '').replace(/[&<>\"']/g, function(c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  function saveMcp() {
+    var pkg = document.getElementById('mcpPackageInput').value.trim();
+    var platform = (document.querySelector('input[name="platform"]:checked') || {}).value || 'mobile';
+    if (!pkg) return;
+    vscode.postMessage({ type: 'saveMcp', mcpPackage: pkg, platform: platform });
+  }
+
+  function resetMcp() {
+    if (!confirm('Reset MCP package and platform to default (aidlc-pipeline, mobile)?')) return;
+    vscode.postMessage({ type: 'resetMcp' });
+  }
+
   renderEpicsPath();
   renderGlobalPhases();
   renderEpics();
+  renderMcp();
 </script>
 </body>
 </html>`;
