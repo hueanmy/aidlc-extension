@@ -50,23 +50,12 @@ export function ensureMcpConfig(workspaceRoot: string, log: (msg: string) => voi
     settings.mcpServers = {};
   }
 
-  // Check if sdlc server already configured
-  const existing = settings.mcpServers[serverName];
-  if (existing) {
-    const nextEnv = { ...(existing.env || {}), ...extraEnv, SDLC_PLATFORM: platform };
-    const shouldUpdateEnv = JSON.stringify(existing.env || {}) !== JSON.stringify(nextEnv);
-    const shouldUpdateCommand = existing.command !== mcpCommand;
-    const shouldUpdateArgs = JSON.stringify(existing.args || []) !== JSON.stringify(args);
-
-    if (shouldUpdateEnv || shouldUpdateCommand || shouldUpdateArgs) {
-      existing.command = mcpCommand;
-      existing.args = args;
-      existing.env = nextEnv;
-      writeSettings(claudeDir, settingsPath, settings);
-      log(`Updated MCP server "${serverName}"`);
-    } else {
-      log('MCP already configured');
-    }
+  // Skip if sdlc server already configured — never overwrite an existing entry.
+  // User-level MCP package choice (cf-sdlc-pipeline vs aidlc-pipeline) must be
+  // preserved across reloads. To change an existing config, edit settings.json
+  // directly or remove mcpServers.sdlc and reload.
+  if (settings.mcpServers[serverName]) {
+    log(`MCP server "${serverName}" already configured, leaving as-is`);
     return;
   }
 

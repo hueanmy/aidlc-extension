@@ -2,7 +2,7 @@
   "name": "aidlc",
   "displayName": "aidlc",
   "description": "AI-driven SDLC in VS Code, integrated with Claude Code, Jira, and Figma. Use slash commands /epic, /prd, /tech-design, /test-plan, /review, /release, /monitor to drive each phase by Jira epic key — pulling context from Jira tickets and Figma designs, with tree view and dashboard tracking status per epic.",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "publisher": "hueanmy",
   "license": "MIT",
   "repository": {
