@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.5
+
+- Add UI demo GIF to README (mock VS Code render via Playwright)
+- Preserve existing MCP server config on activation — skip overwrite when `mcpServers.<name>` already exists
+- Exclude demo source and MP4 from VSIX
+
 ## 0.5.3
 
 - Refresh description and document Claude Code + Jira + Figma workflow
