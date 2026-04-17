@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.11
+
+- fix(dashboard): show phase detail popup above dot instead of clipped below
+
 ## 0.5.10
 
 - Redesign Dashboard + Settings UI with glass theme and icon-matched palette
