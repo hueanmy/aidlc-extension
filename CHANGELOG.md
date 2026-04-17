@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.6
+
+- Use absolute GitHub URL for demo GIF on Open VSX
+
 ## 0.5.5
 
 - Add UI demo GIF to README (mock VS Code render via Playwright)
