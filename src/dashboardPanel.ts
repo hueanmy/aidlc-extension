@@ -141,7 +141,6 @@ export class DashboardPanel {
     backdrop-filter: blur(28px) saturate(180%);
     -webkit-backdrop-filter: blur(28px) saturate(180%);
     box-shadow: var(--glass-shadow);
-    overflow: hidden;
   }
   .epic-card::before, .stat-card::before {
     content: '';
@@ -167,8 +166,28 @@ export class DashboardPanel {
   }
   .epic-header {
     display: flex; justify-content: space-between; align-items: center;
+    gap: 12px;
     margin-bottom: 18px;
+    cursor: pointer; user-select: none;
   }
+  .epic-header-right { display: flex; align-items: center; gap: 10px; }
+  .expand-btn {
+    width: 26px; height: 26px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(255,255,255,0.05);
+    color: var(--text-muted);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: transform 0.25s ease, border-color 0.2s ease, color 0.2s ease;
+    backdrop-filter: blur(12px);
+  }
+  .expand-btn:hover { border-color: rgba(140,184,224,0.45); color: var(--accent); }
+  .expand-btn svg { width: 14px; height: 14px; }
+  .epic-card.collapsed .expand-btn { transform: rotate(-90deg); }
+  .epic-card.collapsed .epic-body { display: none; }
+  .epic-card.collapsed { margin-bottom: 10px; }
+  .epic-card.collapsed:hover { transform: none; }
   .epic-title {
     font-size: 15px; font-weight: 600; color: #fff; letter-spacing: 0.01em;
   }
@@ -212,13 +231,14 @@ export class DashboardPanel {
   /* ---- Pipeline ---- */
   .pipeline {
     display: flex;
-    gap: 0;
-    overflow-x: auto;
+    flex-wrap: wrap;
+    row-gap: 24px;
     padding-bottom: 8px;
   }
   .phase {
     display: flex; flex-direction: column; align-items: center;
-    min-width: 100px; flex: 1; position: relative;
+    flex: 1 1 88px; min-width: 88px; max-width: 160px;
+    position: relative;
   }
   .phase-connector {
     position: absolute;
@@ -302,7 +322,7 @@ export class DashboardPanel {
   .phase-detail {
     display: none;
     position: absolute;
-    top: 82px; left: 50%;
+    bottom: calc(100% + 10px); left: 50%;
     transform: translateX(-50%);
     background: rgba(18,18,28,0.72);
     border: 1px solid var(--glass-border);
@@ -310,9 +330,17 @@ export class DashboardPanel {
     backdrop-filter: blur(32px) saturate(180%);
     -webkit-backdrop-filter: blur(32px) saturate(180%);
     padding: 14px;
-    width: 260px; z-index: 10;
+    width: 260px; z-index: 20;
     font-size: 11px;
     box-shadow: 0 20px 50px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.14);
+  }
+  .phase-detail::after {
+    content: '';
+    position: absolute;
+    top: 100%; left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: rgba(18,18,28,0.72);
   }
   .phase:hover .phase-detail { display: block; }
   .phase-detail h4 { color: #fff; margin-bottom: 10px; font-size: 12px; letter-spacing: 0.01em; }
@@ -369,6 +397,11 @@ ${epics.length === 0 ? '<p style="color: var(--text-muted); text-align: center; 
 
 ${epics.map(epic => this.renderEpicCard(epic)).join('\n')}
 
+<script>
+  function toggleEpic(card) {
+    card.classList.toggle('collapsed');
+  }
+</script>
 </body>
 </html>`;
   }
@@ -395,15 +428,24 @@ ${epics.map(epic => this.renderEpicCard(epic)).join('\n')}
 
     return `
     <div class="epic-card">
-      <div class="epic-header">
+      <div class="epic-header" onclick="toggleEpic(this.parentElement)">
         <div class="epic-title"><span>${epic.key}</span> ${epic.title !== epic.key ? '— ' + epic.title : ''}</div>
-        <div class="progress-badge ${badgeClass}">${badgeText}</div>
+        <div class="epic-header-right">
+          <div class="progress-badge ${badgeClass}">${badgeText}</div>
+          <button class="expand-btn" aria-label="Toggle pipeline">
+            <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </div>
       </div>
-      <div class="progress-bar-container">
-        <div class="progress-bar-fill" style="width: ${epic.progress}%; background: ${barColor}"></div>
-      </div>
-      <div class="pipeline">
-        ${epic.phases.map((phase, i) => this.renderPhase(phase, i, epic.phases.length)).join('\n')}
+      <div class="epic-body">
+        <div class="progress-bar-container">
+          <div class="progress-bar-fill" style="width: ${epic.progress}%; background: ${barColor}"></div>
+        </div>
+        <div class="pipeline">
+          ${epic.phases.map((phase, i) => this.renderPhase(phase, i, epic.phases.length)).join('\n')}
+        </div>
       </div>
     </div>`;
   }
