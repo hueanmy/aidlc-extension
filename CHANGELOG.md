@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.3
+
+- chore(demo): add agents.html + record-agents.mjs playwright recording scripts
+- fix(mcp): drop force-write path + aidlc-pipeline preset from Settings Panel
+
 ## 0.6.1
 
 - fix: clicking any inline tree-view button (💬 Add Feedback, 👁 Open Review, 🔔 Review Gate, 🔄 Re-run, ▶ Run, 💬 Update Feedback + Re-run) now correctly invokes its command. Previously the handlers expected `(phase, epic)` but VS Code passes the TreeItem as a single argument for inline menu actions, so clicks were silently no-op
