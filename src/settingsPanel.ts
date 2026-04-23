@@ -82,8 +82,8 @@ export class SettingsPanel {
     }));
     const cfg = vscode.workspace.getConfiguration('cfPipeline');
     const mcpSettings = {
-      mcpPackage: cfg.get<string>('mcpPackage', 'github:hueanmy/aidlc-pipeline'),
-      platform: cfg.get<string>('platform', 'mobile'),
+      mcpPackage: cfg.get<string>('mcpPackage', ''),
+      platform: cfg.get<string>('platform', 'generic'),
       mcpServerName: cfg.get<string>('mcpServerName', 'sdlc'),
       mcpCommand: cfg.get<string>('mcpCommand', 'npx'),
     };
@@ -135,8 +135,22 @@ export class SettingsPanel {
     } else if (msg.type === 'saveMcp') {
       await this.handleSaveMcp(msg.mcpPackage, msg.platform);
     } else if (msg.type === 'resetMcp') {
-      await this.handleSaveMcp('github:hueanmy/aidlc-pipeline', 'mobile');
+      await this.handleResetMcp();
     }
+  }
+
+  private async handleResetMcp(): Promise<void> {
+    const cfg = vscode.workspace.getConfiguration('cfPipeline');
+    const target = vscode.workspace.workspaceFolders?.[0]?.uri
+      ? vscode.ConfigurationTarget.Workspace
+      : vscode.ConfigurationTarget.Global;
+    await cfg.update('mcpPackage', '', target);
+    await cfg.update('platform', 'generic', target);
+    await cfg.update('autoConfigureMcp', false, target);
+    vscode.window.showInformationMessage(
+      'MCP config cleared. No MCP server will be auto-installed until you set cfPipeline.mcpPackage and re-enable cfPipeline.autoConfigureMcp.',
+    );
+    this.update();
   }
 
   private async handleSaveMcp(mcpPackage: string | undefined, platform: string | undefined): Promise<void> {
@@ -145,7 +159,7 @@ export class SettingsPanel {
       vscode.window.showErrorMessage('MCP package cannot be empty');
       return;
     }
-    const plat = (platform ?? 'mobile').trim() || 'mobile';
+    const plat = (platform ?? 'generic').trim() || 'generic';
 
     const cfg = vscode.workspace.getConfiguration('cfPipeline');
     const target = vscode.workspace.workspaceFolders?.[0]?.uri
@@ -473,7 +487,7 @@ export class SettingsPanel {
   <label class="field-label">Package spec</label>
   <input type="text" class="field-input" id="mcpPackageInput" placeholder="github:hueanmy/aidlc-pipeline" />
   <div class="preset-row" id="mcpPresets">
-    <button type="button" class="preset-chip" data-value="github:hueanmy/aidlc-pipeline">aidlc-pipeline (default)</button>
+    <button type="button" class="preset-chip" data-value="github:hueanmy/aidlc-pipeline">aidlc-pipeline</button>
   </div>
   <label class="field-label" style="margin-top: 14px;">Platform</label>
   <div class="platform-row" id="platformRow">
@@ -486,7 +500,7 @@ export class SettingsPanel {
   <div class="hint" id="mcpCurrent" style="margin-top: 10px;"></div>
   <div class="btn-row" style="margin-top: 14px;">
     <button class="btn btn-primary" onclick="saveMcp()">Apply &amp; Reload MCP</button>
-    <button class="btn btn-secondary" onclick="resetMcp()">Reset to Default</button>
+    <button class="btn btn-secondary" onclick="resetMcp()">Clear &amp; Disable Auto-Configure</button>
   </div>
 </div>
 
@@ -599,10 +613,12 @@ export class SettingsPanel {
   function renderMcp() {
     document.getElementById('mcpPackageInput').value = mcp.mcpPackage || '';
     const radios = document.querySelectorAll('input[name="platform"]');
-    radios.forEach(function(r) { r.checked = r.value === (mcp.platform || 'mobile'); });
-    document.getElementById('mcpCurrent').innerHTML =
-      'Currently active: <code>' + (mcp.mcpCommand || 'npx') + ' -y ' + escapeHtml(mcp.mcpPackage) + '</code>' +
-      ' · server key <code>' + escapeHtml(mcp.mcpServerName) + '</code>';
+    radios.forEach(function(r) { r.checked = r.value === (mcp.platform || 'generic'); });
+    const pkg = (mcp.mcpPackage || '').trim();
+    document.getElementById('mcpCurrent').innerHTML = pkg
+      ? 'Currently active: <code>' + (mcp.mcpCommand || 'npx') + ' -y ' + escapeHtml(pkg) + '</code>' +
+        ' · server key <code>' + escapeHtml(mcp.mcpServerName) + '</code>'
+      : 'No MCP package configured — extension will not install anything until you set one.';
     document.querySelectorAll('.preset-chip').forEach(function(chip) {
       chip.addEventListener('click', function() {
         document.getElementById('mcpPackageInput').value = chip.dataset.value;
@@ -618,13 +634,13 @@ export class SettingsPanel {
 
   function saveMcp() {
     var pkg = document.getElementById('mcpPackageInput').value.trim();
-    var platform = (document.querySelector('input[name="platform"]:checked') || {}).value || 'mobile';
+    var platform = (document.querySelector('input[name="platform"]:checked') || {}).value || 'generic';
     if (!pkg) return;
     vscode.postMessage({ type: 'saveMcp', mcpPackage: pkg, platform: platform });
   }
 
   function resetMcp() {
-    if (!confirm('Reset MCP package and platform to default (aidlc-pipeline, mobile)?')) return;
+    if (!confirm('Clear MCP package and disable auto-configure? Extension will not install any MCP until you set one explicitly.')) return;
     vscode.postMessage({ type: 'resetMcp' });
   }
 

@@ -13,6 +13,25 @@ const PHASE_ORDER = [
   'plan', 'design', 'test-plan', 'implement', 'review', 'uat', 'release', 'monitor', 'doc-sync',
 ] as const;
 
+// Tree-view inline menu actions (`view/item/context` with `group: "inline"`)
+// invoke commands with a single argument — the TreeItem itself (PhaseItem) —
+// not the `arguments` array from TreeItem.command. Without this unwrap, every
+// handler with the `(phase, epic)` signature silently returns when clicked
+// from an inline button because `epic` is undefined.
+function unwrapPhaseArgs(
+  first: unknown,
+  second?: EpicStatus,
+): { phase: PhaseStatus | undefined; epic: EpicStatus | undefined } {
+  if (
+    first && typeof first === 'object' &&
+    'phase' in (first as object) && 'epic' in (first as object)
+  ) {
+    const item = first as { phase: PhaseStatus; epic: EpicStatus };
+    return { phase: item.phase, epic: item.epic };
+  }
+  return { phase: first as PhaseStatus | undefined, epic: second };
+}
+
 export function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('SDLC Pipeline');
   context.subscriptions.push(outputChannel);
@@ -187,13 +206,14 @@ export function activate(context: vscode.ExtensionContext) {
     // phases. Delegates to runStep — same semantics.
     const rerunStepCmd = vscode.commands.registerCommand(
       'cfPipeline.rerunStep',
-      (phase: PhaseStatus, epic: EpicStatus) =>
-        vscode.commands.executeCommand('cfPipeline.runStep', phase, epic),
+      (a: unknown, b?: EpicStatus) =>
+        vscode.commands.executeCommand('cfPipeline.runStep', a, b),
     );
 
     const runStepCmd = vscode.commands.registerCommand(
       'cfPipeline.runStep',
-      async (phase: PhaseStatus, epic: EpicStatus) => {
+      async (a: unknown, b?: EpicStatus) => {
+        const { phase, epic } = unwrapPhaseArgs(a, b);
         if (!phase || !epic) { return; }
 
         const s = phase.status;
@@ -218,7 +238,8 @@ export function activate(context: vscode.ExtensionContext) {
 
     const feedbackAndRerunCmd = vscode.commands.registerCommand(
       'cfPipeline.feedbackAndRerun',
-      async (phase: PhaseStatus, epic: EpicStatus) => {
+      async (a: unknown, b?: EpicStatus) => {
+        const { phase, epic } = unwrapPhaseArgs(a, b);
         if (!phase || !epic) { return; }
 
         const existingFeedback = phase.userFeedback ?? '';
@@ -276,7 +297,8 @@ export function activate(context: vscode.ExtensionContext) {
 
     const reviewGateCmd = vscode.commands.registerCommand(
       'cfPipeline.reviewGate',
-      (phase: PhaseStatus, epic: EpicStatus) => {
+      (a: unknown, b?: EpicStatus) => {
+        const { phase, epic } = unwrapPhaseArgs(a, b);
         if (!phase || !epic) { return; }
         if (phase.status !== 'awaiting_human_review') {
           void vscode.window.showInformationMessage(
@@ -296,9 +318,56 @@ export function activate(context: vscode.ExtensionContext) {
       }
     );
 
+    // Manual entry point: open the ReviewPanel (approve / reject / comment)
+    // on ANY phase, regardless of status. Useful for driving the flow without
+    // the orchestrator — user can reject from a passed phase, add a comment
+    // from a pending one, etc. reviewGate stays strict for the automatic
+    // awaiting_human_review trigger.
+    const openReviewCmd = vscode.commands.registerCommand(
+      'cfPipeline.openReview',
+      (a: unknown, b?: EpicStatus) => {
+        const { phase, epic } = unwrapPhaseArgs(a, b);
+        if (!phase || !epic) { return; }
+        const reviewer = resolveReviewerId();
+        ReviewPanel.show(
+          context.extensionUri,
+          workspaceRoot,
+          phase,
+          epic,
+          reviewer,
+          () => pipelineProvider?.refresh(),
+        );
+      }
+    );
+
+    // Manual entry point: write user feedback to phases/<id>/status.json
+    // without triggering /advance-epic. Works on any phase — creates the
+    // status.json if missing so orchestrator picks it up later.
+    const addFeedbackCmd = vscode.commands.registerCommand(
+      'cfPipeline.addFeedback',
+      async (a: unknown, b?: EpicStatus) => {
+        const { phase, epic } = unwrapPhaseArgs(a, b);
+        if (!phase || !epic) { return; }
+        const feedback = await vscode.window.showInputBox({
+          title: `Feedback for ${epic.key} / ${phase.name}`,
+          prompt: 'Leave a note for the next worker run. Saved to status.json.',
+          value: phase.userFeedback ?? '',
+          placeHolder: 'e.g. Re-check AC02 and add the missing error state.',
+          ignoreFocusOut: true,
+        });
+        if (feedback === undefined) { return; }
+        writeUserFeedback(phase, epic, feedback.trim());
+        pipelineProvider?.refresh();
+        void vscode.window.showInformationMessage(
+          `Feedback saved for ${epic.key} / ${phase.name}.`
+        );
+      }
+    );
+
     const openPhaseSessionCmd = vscode.commands.registerCommand(
       'cfPipeline.openPhaseSession',
-      async (phase: PhaseStatus, epic: EpicStatus) => {
+      async (a: unknown, b?: EpicStatus) => {
+        const { phase, epic } = unwrapPhaseArgs(a, b);
         if (!phase || !epic) {
           return;
         }
@@ -405,6 +474,8 @@ export function activate(context: vscode.ExtensionContext) {
       runPhaseCmd,
       openPhaseSessionCmd,
       reviewGateCmd,
+      openReviewCmd,
+      addFeedbackCmd,
       advanceEpicCmd,
       runStepCmd,
       rerunStepCmd,

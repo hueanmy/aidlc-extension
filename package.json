@@ -36,6 +36,8 @@
     "onCommand:cfPipeline.runPhase",
     "onCommand:cfPipeline.openPhaseSession",
     "onCommand:cfPipeline.reviewGate",
+    "onCommand:cfPipeline.openReview",
+    "onCommand:cfPipeline.addFeedback",
     "onCommand:cfPipeline.advanceEpic",
     "onCommand:cfPipeline.runStep",
     "onCommand:cfPipeline.rerunStep",
@@ -76,7 +78,7 @@
         },
         "cfPipeline.platform": {
           "type": "string",
-          "default": "mobile",
+          "default": "generic",
           "enum": [
             "mobile",
             "web",
@@ -84,12 +86,12 @@
             "desktop",
             "generic"
           ],
-          "description": "Platform type — determines which SDLC skills and agents are loaded."
+          "description": "Platform type passed to the MCP server as SDLC_PLATFORM env var. Extension itself ships no skills or agents — your MCP server decides what to load."
         },
         "cfPipeline.mcpPackage": {
           "type": "string",
-          "default": "github:hueanmy/aidlc-pipeline",
-          "description": "MCP package spec. Accepts npm name or npx-compatible GitHub spec (e.g. 'github:owner/repo'). Used when mcpArgs is empty (default args: -y <mcpPackage>)."
+          "default": "",
+          "description": "MCP package spec (npm name or npx-compatible GitHub spec, e.g. 'github:owner/repo'). Leave empty to skip auto-config — extension will not install any MCP until you fill this in."
         },
         "cfPipeline.mcpServerName": {
           "type": "string",
@@ -119,8 +121,8 @@
         },
         "cfPipeline.autoConfigureMcp": {
           "type": "boolean",
-          "default": true,
-          "description": "Automatically configure Claude Code MCP server on activation."
+          "default": false,
+          "description": "Automatically configure Claude Code MCP server on activation. Disabled by default — enable only after you have set cfPipeline.mcpPackage (or cfPipeline.mcpArgs) to your own MCP."
         }
       }
     },
@@ -193,6 +195,18 @@
         "title": "Update Feedback + Re-run",
         "icon": "$(comment-discussion)",
         "category": "SDLC"
+      },
+      {
+        "command": "cfPipeline.openReview",
+        "title": "Open Review Panel (manual)",
+        "icon": "$(eye)",
+        "category": "SDLC"
+      },
+      {
+        "command": "cfPipeline.addFeedback",
+        "title": "Add Feedback Note",
+        "icon": "$(comment)",
+        "category": "SDLC"
       }
     ],
     "menus": {
@@ -248,6 +262,16 @@
           "command": "cfPipeline.advanceEpic",
           "when": "view == cfPipelineView && viewItem == epic",
           "group": "inline"
+        },
+        {
+          "command": "cfPipeline.addFeedback",
+          "when": "view == cfPipelineView && viewItem =~ /^phase(-run|-rerun|-review|-feedback)?$/",
+          "group": "inline@9"
+        },
+        {
+          "command": "cfPipeline.openReview",
+          "when": "view == cfPipelineView && viewItem =~ /^phase(-run|-rerun|-feedback)?$/",
+          "group": "inline@8"
         }
       ]
     }

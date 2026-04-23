@@ -203,6 +203,16 @@ function computePhaseContextValue(phase: PhaseStatus, isNext: boolean): string {
   const s = phase.status;
   if (s === 'awaiting_human_review') { return 'phase-review'; }
   if (s === 'rejected' || s === 'failed_needs_human') { return 'phase-feedback'; }
+
+  // Legacy epics have no status.json → phase.revision is undefined. Without
+  // the orchestrator writing real states, every unfinished phase should
+  // expose a ▶ Run button so the user can drive the pipeline manually.
+  const isOrchestratorManaged = phase.revision !== undefined;
+  if (!isOrchestratorManaged) {
+    if (s === 'done' || s === 'passed') { return 'phase-rerun'; }
+    return 'phase-run';
+  }
+
   if (s === 'passed' || s === 'done' || s === 'in_progress' || s === 'in-progress' || s === 'in_review') {
     return 'phase-rerun';
   }

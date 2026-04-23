@@ -29,12 +29,18 @@ export function ensureMcpConfig(workspaceRoot: string, log: (msg: string) => voi
     return;
   }
 
-  const platform = config.get<string>('platform', 'mobile');
+  const platform = config.get<string>('platform', 'generic');
   const serverName = (config.get<string>('mcpServerName', 'sdlc') || 'sdlc').trim() || 'sdlc';
   const mcpCommand = (config.get<string>('mcpCommand', 'npx') || 'npx').trim() || 'npx';
   const mcpArgs = sanitizeArgs(config.get<unknown>('mcpArgs'));
   const extraEnv = sanitizeEnv(config.get<unknown>('mcpEnv'));
-  const mcpPackage = config.get<string>('mcpPackage', 'github:hueanmy/aidlc-pipeline');
+  const mcpPackage = (config.get<string>('mcpPackage', '') || '').trim();
+
+  if (mcpArgs.length === 0 && mcpPackage.length === 0) {
+    log('No MCP package or args configured — skipping auto-configure. Set cfPipeline.mcpPackage (or cfPipeline.mcpArgs) to install your own MCP server.');
+    return;
+  }
+
   const args = mcpArgs.length > 0 ? mcpArgs : ['-y', mcpPackage];
 
   const claudeDir = path.join(workspaceRoot, '.claude');
