@@ -13,20 +13,22 @@ interface ClaudeSettings {
   [key: string]: unknown;
 }
 
+export type McpConfigResult =
+  | { status: 'skipped'; reason: string }
+  | { status: 'already-exists'; serverName: string }
+  | { status: 'written'; serverName: string; command: string; args: string[] };
+
 /**
- * Ensures .claude/settings.json has the SDLC MCP server configured.
- * Creates or updates the config without overwriting other settings.
- *
- * @param force If true, overwrites an existing mcpServers.<name> entry even
- *   when one is already present. Used when the user explicitly changes MCP
- *   settings via the Settings Panel UI.
+ * Appends an MCP server entry to .claude/settings.json without replacing
+ * an existing entry for the same server name. Other mcpServers and top-level
+ * settings are always preserved.
  */
-export function ensureMcpConfig(workspaceRoot: string, log: (msg: string) => void, force = false): void {
+export function ensureMcpConfig(workspaceRoot: string, log: (msg: string) => void): McpConfigResult {
   const config = vscode.workspace.getConfiguration('cfPipeline');
-  const autoConfig = config.get<boolean>('autoConfigureMcp', true);
-  if (!autoConfig && !force) {
+  const autoConfig = config.get<boolean>('autoConfigureMcp', false);
+  if (!autoConfig) {
     log('MCP auto-configure disabled');
-    return;
+    return { status: 'skipped', reason: 'auto-configure disabled' };
   }
 
   const platform = config.get<string>('platform', 'generic');
@@ -37,8 +39,9 @@ export function ensureMcpConfig(workspaceRoot: string, log: (msg: string) => voi
   const mcpPackage = (config.get<string>('mcpPackage', '') || '').trim();
 
   if (mcpArgs.length === 0 && mcpPackage.length === 0) {
-    log('No MCP package or args configured — skipping auto-configure. Set cfPipeline.mcpPackage (or cfPipeline.mcpArgs) to install your own MCP server.');
-    return;
+    const reason = 'No MCP package or args configured';
+    log(`${reason} — skipping. Set cfPipeline.mcpPackage (or cfPipeline.mcpArgs) to install your own MCP server.`);
+    return { status: 'skipped', reason };
   }
 
   const args = mcpArgs.length > 0 ? mcpArgs : ['-y', mcpPackage];
@@ -59,9 +62,9 @@ export function ensureMcpConfig(workspaceRoot: string, log: (msg: string) => voi
     settings.mcpServers = {};
   }
 
-  if (settings.mcpServers[serverName] && !force) {
-    log(`MCP server "${serverName}" already configured, leaving as-is (pass force=true to overwrite)`);
-    return;
+  if (settings.mcpServers[serverName]) {
+    log(`MCP server "${serverName}" already configured in .claude/settings.json — leaving untouched (append-only, never replace).`);
+    return { status: 'already-exists', serverName };
   }
 
   settings.mcpServers[serverName] = {
@@ -74,7 +77,8 @@ export function ensureMcpConfig(workspaceRoot: string, log: (msg: string) => voi
   };
 
   writeSettings(claudeDir, settingsPath, settings);
-  log(`MCP configured: ${serverName} -> ${mcpCommand} ${args.join(' ')} (platform: ${platform})${force ? ' [forced]' : ''}`);
+  log(`MCP appended: ${serverName} -> ${mcpCommand} ${args.join(' ')} (platform: ${platform})`);
+  return { status: 'written', serverName, command: mcpCommand, args };
 }
 
 function sanitizeArgs(input: unknown): string[] {

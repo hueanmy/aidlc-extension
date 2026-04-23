@@ -167,14 +167,23 @@ export class SettingsPanel {
       : vscode.ConfigurationTarget.Global;
     await cfg.update('mcpPackage', pkg, target);
     await cfg.update('platform', plat, target);
+    await cfg.update('autoConfigureMcp', true, target);
 
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (workspaceRoot) {
       const { ensureMcpConfig } = await import('./mcpConfigurator');
-      ensureMcpConfig(workspaceRoot, () => { /* silent from UI */ }, true);
-      vscode.window.showInformationMessage(
-        `MCP updated: ${pkg} (platform: ${plat}). Reload Claude Code for changes to take effect.`,
-      );
+      const result = ensureMcpConfig(workspaceRoot, () => { /* silent from UI */ });
+      if (result.status === 'written') {
+        vscode.window.showInformationMessage(
+          `MCP appended to .claude/settings.json: ${result.serverName} → ${pkg} (platform: ${plat}). Reload Claude Code for changes to take effect.`,
+        );
+      } else if (result.status === 'already-exists') {
+        vscode.window.showWarningMessage(
+          `MCP server "${result.serverName}" already exists in .claude/settings.json — left untouched (append-only). Edit that file manually if you want to change it.`,
+        );
+      } else {
+        vscode.window.showWarningMessage(`MCP not written: ${result.reason}.`);
+      }
     } else {
       vscode.window.showWarningMessage('MCP settings saved, but no workspace folder open — .claude/settings.json not written.');
     }
@@ -485,10 +494,7 @@ export class SettingsPanel {
   <h2>MCP Pipeline Source</h2>
   <p class="hint">Which pipeline package Claude Code loads. Use <code>github:owner/repo</code> for a custom fork (e.g. <code>github:yourcompany/cf-sdlc-pipeline</code>) or an npm package name once published.</p>
   <label class="field-label">Package spec</label>
-  <input type="text" class="field-input" id="mcpPackageInput" placeholder="github:hueanmy/aidlc-pipeline" />
-  <div class="preset-row" id="mcpPresets">
-    <button type="button" class="preset-chip" data-value="github:hueanmy/aidlc-pipeline">aidlc-pipeline</button>
-  </div>
+  <input type="text" class="field-input" id="mcpPackageInput" placeholder="e.g. github:yourcompany/cf-sdlc-pipeline or cf-sdlc-pipeline" />
   <label class="field-label" style="margin-top: 14px;">Platform</label>
   <div class="platform-row" id="platformRow">
     <label class="platform-opt"><input type="radio" name="platform" value="mobile" /><span>mobile</span></label>
