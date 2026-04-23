@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>aidlc extension — có gì?</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 1080px; height: 1920px;
+    font-family: -apple-system, "SF Pro Display", "Segoe UI", Inter, sans-serif;
+    color: #e6f1eb;
+    background: radial-gradient(ellipse at top, #0f1d18 0%, #070b09 70%);
+    overflow: hidden;
+  }
+
+  .stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; }
+
+  /* ===== 1. HOOK (0s – 3s) ===== */
+  .hook {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    text-align: center; padding: 0 70px;
+    opacity: 0;
+    animation: hookIn .45s ease .15s forwards, hookOut .4s ease 3s forwards;
+  }
+  .hook .kicker {
+    display: inline-block;
+    padding: 10px 22px;
+    border: 1px solid rgba(126, 229, 193, .4);
+    border-radius: 999px;
+    color: #7ee5c1;
+    font-size: 22px;
+    letter-spacing: .22em;
+    text-transform: uppercase;
+    margin-bottom: 48px;
+  }
+  .hook h1 {
+    font-size: 104px; line-height: 1.02; font-weight: 800; letter-spacing: -.01em;
+    background: linear-gradient(180deg, #ffffff 0%, #7ee5c1 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    margin-bottom: 28px;
+  }
+  .hook h1 em {
+    font-style: normal;
+    color: #7ee5c1;
+    -webkit-text-fill-color: #7ee5c1;
+  }
+  .hook .en {
+    font-size: 38px; color: #8bb1a4; font-weight: 500;
+  }
+  @keyframes hookIn  { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+  @keyframes hookOut { to { opacity: 0; transform: translateY(-20px); } }
+
+  /* ===== 2. DEFINITION (3.4s – 7s) ===== */
+  .intro {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    text-align: center; padding: 0 80px;
+    opacity: 0;
+    animation: introIn .4s ease 3.4s forwards, introOut .4s ease 7s forwards;
+  }
+  @keyframes introIn  { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+  @keyframes introOut { to { opacity: 0; transform: translateY(-12px); } }
+  .intro .lead { color: #7ee5c1; font-size: 30px; letter-spacing: .2em; text-transform: uppercase; margin-bottom: 28px; }
+  .intro h2 {
+    font-size: 72px; line-height: 1.1; font-weight: 800; color: #ffffff;
+    margin-bottom: 24px;
+  }
+  .intro h2 span { color: #7ee5c1; }
+  .intro .en { font-size: 34px; color: #a6c7bb; line-height: 1.35; max-width: 880px; }
+  .intro .chips { display: flex; gap: 14px; margin-top: 44px; flex-wrap: wrap; justify-content: center; }
+  .intro .chip {
+    padding: 12px 22px; border-radius: 999px;
+    border: 1px solid rgba(126, 229, 193, .3);
+    background: rgba(126, 229, 193, .06);
+    color: #c6d6cf; font-size: 24px;
+  }
+
+  /* ===== 3. PIPELINE (7.4s – 43s) ===== */
+  .pipeline {
+    position: absolute; inset: 0;
+    padding: 110px 70px 80px;
+    opacity: 0;
+    animation: pipeIn .4s ease 7.4s forwards, pipeOut .4s ease 43s forwards;
+  }
+  @keyframes pipeIn  { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes pipeOut { to { opacity: 0; } }
+
+  .pipe-head {
+    display: flex; align-items: center; gap: 18px;
+    margin-bottom: 26px;
+  }
+  .pipe-head .dot {
+    width: 14px; height: 14px; border-radius: 50%;
+    background: #7ee5c1; box-shadow: 0 0 18px #7ee5c1;
+  }
+  .pipe-head .title {
+    font-size: 28px; color: #7ee5c1; letter-spacing: .15em; text-transform: uppercase; font-weight: 600;
+  }
+  .pipe-head .sub {
+    margin-left: auto; color: #6f8a81; font-size: 22px;
+  }
+
+  .rail {
+    position: relative;
+    padding-left: 70px;
+  }
+  .rail::before {
+    content: ""; position: absolute; left: 28px; top: 0; bottom: 0;
+    width: 3px; background: linear-gradient(180deg, #1c352c 0%, #132620 100%);
+    border-radius: 2px;
+  }
+  .rail::after {
+    content: ""; position: absolute; left: 28px; top: 0;
+    width: 3px; height: 0;
+    background: linear-gradient(180deg, #7ee5c1 0%, #4fb89a 100%);
+    box-shadow: 0 0 12px #7ee5c1;
+    border-radius: 2px;
+    animation: railFill 35s linear 7.6s forwards;
+  }
+  @keyframes railFill { to { height: 100%; } }
+
+  .phase {
+    position: relative;
+    margin-bottom: 22px;
+    padding: 20px 26px 22px 26px;
+    background: rgba(14, 28, 23, .72);
+    border: 1px solid rgba(126, 229, 193, .08);
+    border-radius: 18px;
+    opacity: .35;
+    transition: opacity .4s ease, border-color .4s ease, background .4s ease, box-shadow .4s ease;
+  }
+  .phase.active {
+    opacity: 1;
+    border-color: rgba(126, 229, 193, .55);
+    background: rgba(20, 40, 33, .85);
+    box-shadow: 0 0 0 1px rgba(126, 229, 193, .25), 0 20px 40px rgba(0, 0, 0, .35);
+  }
+  .phase .node {
+    position: absolute; left: -56px; top: 26px;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: #0a1410;
+    border: 3px solid #1c352c;
+    transition: border-color .3s ease, box-shadow .3s ease, background .3s ease;
+  }
+  .phase.active .node {
+    border-color: #7ee5c1; background: #0f2a22;
+    box-shadow: 0 0 18px rgba(126, 229, 193, .55);
+  }
+  .phase .node::after {
+    content: ""; position: absolute; inset: 6px;
+    border-radius: 50%; background: transparent;
+    transition: background .3s ease;
+  }
+  .phase.active .node::after { background: #7ee5c1; }
+
+  .phase .top { display: flex; align-items: baseline; gap: 14px; margin-bottom: 10px; }
+  .phase .num { font-size: 18px; color: #6f8a81; font-weight: 600; letter-spacing: .12em; }
+  .phase .name-en { font-size: 32px; font-weight: 700; color: #ffffff; }
+  .phase .name-vn { font-size: 22px; color: #7ee5c1; font-weight: 500; }
+  .phase .meta { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 4px; }
+  .phase .pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 12px;
+    background: rgba(126, 229, 193, .08);
+    border: 1px solid rgba(126, 229, 193, .18);
+    border-radius: 999px;
+    font-size: 18px; color: #a6c7bb;
+  }
+  .phase .pill .k { color: #6f8a81; }
+  .phase .pill .v { color: #e6f1eb; font-weight: 500; }
+  .phase .desc { margin-top: 10px; font-size: 19px; line-height: 1.45; color: #c6d6cf; }
+  .phase .desc .vn { color: #8bb1a4; font-size: 17px; display: block; margin-top: 2px; }
+
+  /* ===== 4. FOLLOW / CTA (43.4s – 48s) ===== */
+  .cta {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    text-align: center; padding: 0 80px;
+    opacity: 0;
+    animation: ctaIn .5s ease 43.4s forwards;
+  }
+  @keyframes ctaIn { to { opacity: 1; } }
+  .cta .follow-label {
+    color: #7ee5c1; font-size: 26px; letter-spacing: .24em; text-transform: uppercase;
+    margin-bottom: 30px;
+  }
+  .cta h2 {
+    font-size: 64px; font-weight: 800; line-height: 1.15; color: #ffffff;
+    margin-bottom: 18px;
+  }
+  .cta .en {
+    font-size: 32px; color: #8bb1a4; margin-bottom: 50px;
+  }
+  .cta .repo {
+    display: flex; align-items: center; gap: 18px;
+    padding: 22px 34px;
+    border: 1px solid rgba(126, 229, 193, .5);
+    background: rgba(126, 229, 193, .08);
+    border-radius: 18px;
+    box-shadow: 0 0 40px rgba(126, 229, 193, .18);
+  }
+  .cta .repo .gh {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: #7ee5c1; display: flex; align-items: center; justify-content: center;
+    color: #0a1410; font-weight: 800; font-size: 22px;
+  }
+  .cta .repo .url {
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 32px; color: #ffffff; letter-spacing: .01em;
+  }
+  .cta .repo .url b { color: #7ee5c1; font-weight: 700; }
+  .cta .hint {
+    margin-top: 34px;
+    color: #6f8a81; font-size: 22px;
+  }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- 1. HOOK -->
+  <section class="hook">
+    <span class="kicker">VS Code · Claude Code</span>
+    <h1>aidlc extension<br><em>có gì?</em></h1>
+    <p class="en">What's inside the aidlc extension for VS Code?</p>
+  </section>
+
+  <!-- 2. DEFINITION -->
+  <section class="intro">
+    <p class="lead">Nó là một…</p>
+    <h2>extension biến AI thành<br>một <span>đội SDLC</span> thật sự.</h2>
+    <p class="en">A VS Code extension that turns AI agents into a real SDLC team — 9 phases, clear ownership, auto-wired to Claude Code.</p>
+    <div class="chips">
+      <span class="chip">Epic Tree View</span>
+      <span class="chip">Pipeline Dashboard</span>
+      <span class="chip">MCP auto-config</span>
+    </div>
+  </section>
+
+  <!-- 3. PIPELINE -->
+  <section class="pipeline">
+    <div class="pipe-head">
+      <span class="dot"></span>
+      <span class="title">Pipeline · Quy trình</span>
+      <span class="sub">docs/sdlc/epics/EPIC-1000</span>
+    </div>
+
+    <div class="rail">
+
+      <article class="phase" data-idx="1">
+        <div class="node"></div>
+        <div class="top">
+          <span class="num">01</span>
+          <span class="name-en">Plan</span>
+          <span class="name-vn">Lập kế hoạch</span>
+        </div>
+        <div class="meta">
+          <span class="pill"><span class="k">Agent</span><span class="v">Product Owner</span></span>
+          <span class="pill"><span class="k">Artifact</span><span class="v">Epic + PRD</span></span>
+        </div>
+        <p class="desc">
+          Turns business goals into an epic and PRD with clear scope and acceptance criteria.
+          <span class="vn">Chuyển mục tiêu business thành epic và PRD, phạm vi rõ, tiêu chí nghiệm thu.</span>
+        </p>
+      </article>
+
+      <article class="phase" data-idx="2">
+        <div class="node"></div>
+        <div class="top">
+          <span class="num">02</span>
+          <span class="name-en">Design</span>
+          <span class="name-vn">Thiết kế kỹ thuật</span>
+        </div>
+        <div class="meta">
+          <span class="pill"><span class="k">Agent</span><span class="v">Tech Lead</span></span>
+          <span class="pill"><span class="k">Artifact</span><span class="v">Tech Design</span></span>
+        </div>
+        <p class="desc">
+          Picks architecture, data flow, and trade-offs before a single line of code is written.
+          <span class="vn">Chọn kiến trúc, luồng dữ liệu, đánh đổi — trước khi viết dòng code nào.</span>
+        </p>
+      </article>
+
+      <article class="phase" data-idx="3">
+        <div class="node"></div>
+        <div class="top">
+          <span class="num">03</span>
+          <span class="name-en">Test Plan</span>
+          <span class="name-vn">Kế hoạch kiểm thử</span>
+        </div>
+        <div class="meta">
+          <span class="pill"><span class="k">Agent</span><span class="v">QA Engineer</span></span>
+          <span class="pill"><span class="k">Artifact</span><span class="v">Test Plan</span></span>
+        </div>
+        <p class="desc">
+          Defines test cases, coverage goals, and risk areas up-front — not after the bug ships.
+          <span class="vn">Định nghĩa test case, độ phủ, vùng rủi ro — chứ không đợi bug ra prod mới viết.</span>
+        </p>
+      </article>
+
+      <article class="phase" data-idx="4">
+        <div class="node"></div>
+        <div class="top">
+          <span class="num">04</span>
+          <span class="name-en">Implement</span>
+          <span class="name-vn">Triển khai</span>
+        </div>
+        <div class="meta">
+          <span class="pill"><span class="k">Agent</span><span class="v">Developer</span></span>
+          <span class="pill"><span class="k">Artifact</span><span class="v">Feature branch</span></span>
+        </div>
+        <p class="desc">
+          Writes code against the tech design and test plan; every commit traces back to the epic.
+          <span class="vn">Viết code bám tech design và test plan; mỗi commit truy ngược về epic.</span>
+        </p>
+      </article>
+
+      <article class="phase" data-idx="5">
+        <div class="node"></div>
+        <div class="top">
+          <span class="num">05</span>
+          <span class="name-en">Review</span>
+          <span class="name-vn">Đánh giá code</span>
+        </div>
+        <div class="meta">
+          <span class="pill"><span class="k">Agent</span><span class="v">Tech Lead</span></span>
+          <span class="pill"><span class="k">Artifact</span><span class="v">Approval</span></span>
+        </div>
+        <p class="desc">
+          Checks design fit, edge cases, and code quality before merge — not just lint.
+          <span class="vn">Kiểm tra khớp thiết kế, edge case, chất lượng code — không chỉ chạy lint.</span>
+        </p>
+      </article>
+
+      <article class="phase" data-idx="6">
+        <div class="node"></div>
+        <div class="top">
+          <span class="num">06</span>
+          <span class="name-en">UAT</span>
+          <span class="name-vn">Kiểm thử nghiệm thu</span>
+        </div>
+        <div class="meta">
+          <span class="pill"><span class="k">Agent</span><span class="v">QA Engineer</span></span>
+          <span class="pill"><span class="k">Artifact</span><span class="v">UAT Script</span></span>
+        </div>
+        <p class="desc">
+          Runs the acceptance script with the PRD in hand; sign-off only when criteria are met.
+          <span class="vn">Chạy script nghiệm thu với PRD; chỉ sign-off khi đạt đủ tiêu chí.</span>
+        </p>
+      </article>
+
+      <article class="phase" data-idx="7">
+        <div class="node"></div>
+        <div class="top">
+          <span class="num">07</span>
+          <span class="name-en">Release</span>
+          <span class="name-vn">Phát hành</span>
+        </div>
+        <div class="meta">
+          <span class="pill"><span class="k">Agent</span><span class="v">Release Manager</span></span>
+          <span class="pill"><span class="k">Artifact</span><span class="v">Git tag</span></span>
+        </div>
+        <p class="desc">
+          Cuts the tag, drafts release notes, and owns the rollback playbook if things break.
+          <span class="vn">Cắt tag, soạn release note, giữ playbook rollback phòng khi có sự cố.</span>
+        </p>
+      </article>
+
+      <article class="phase" data-idx="8">
+        <div class="node"></div>
+        <div class="top">
+          <span class="num">08</span>
+          <span class="name-en">Monitor</span>
+          <span class="name-vn">Giám sát</span>
+        </div>
+        <div class="meta">
+          <span class="pill"><span class="k">Agent</span><span class="v">SRE</span></span>
+          <span class="pill"><span class="k">Artifact</span><span class="v">Health report</span></span>
+        </div>
+        <p class="desc">
+          Watches metrics and alerts after ship; feeds regressions back to Plan.
+          <span class="vn">Theo dõi metric và alert sau release; phản hồi ngược về giai đoạn Plan.</span>
+        </p>
+      </article>
+
+      <article class="phase" data-idx="9">
+        <div class="node"></div>
+        <div class="top">
+          <span class="num">09</span>
+          <span class="name-en">Doc Sync</span>
+          <span class="name-vn">Đồng bộ tài liệu</span>
+        </div>
+        <div class="meta">
+          <span class="pill"><span class="k">Agent</span><span class="v">Archivist</span></span>
+          <span class="pill"><span class="k">Artifact</span><span class="v">Reverse-sync doc</span></span>
+        </div>
+        <p class="desc">
+          Reverse-syncs what actually shipped back into the docs — truth stays with the code.
+          <span class="vn">Đồng bộ ngược những gì thực sự ship về docs — sự thật luôn bám theo code.</span>
+        </p>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- 4. FOLLOW / CTA -->
+  <section class="cta">
+    <p class="follow-label">Theo dõi · Follow</p>
+    <h2>Muốn xem chi tiết?<br>Ghé GitHub repo.</h2>
+    <p class="en">Want the full story? Check the GitHub repo.</p>
+    <div class="repo">
+      <span class="gh">GH</span>
+      <span class="url">github.com/<b>hueanmy/aidlc-extension</b></span>
+    </div>
+    <p class="hint">★ Star · Fork · Install từ VS Code Marketplace</p>
+  </section>
+
+</div>
+
+<script>
+  const phases = Array.from(document.querySelectorAll('.phase'));
+  const PIPELINE_START_MS = 7400;     // matches CSS pipeIn delay
+  const PER_PHASE_MS = 3900;          // 9 * 3.9 = 35.1s -> ends ~42.5s
+  const RAIL_PADDING_TOP = 360;
+
+  function scrollToPhase(i) {
+    const el = phases[i];
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const targetTop = rect.top + window.scrollY - RAIL_PADDING_TOP;
+    window.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+  }
+
+  phases.forEach((p, i) => {
+    setTimeout(() => {
+      phases.forEach(x => x.classList.remove('active'));
+      p.classList.add('active');
+      scrollToPhase(i);
+    }, PIPELINE_START_MS + i * PER_PHASE_MS);
+  });
+
+  // Reset scroll before CTA fades in
+  setTimeout(() => {
+    phases.forEach(x => x.classList.remove('active'));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, PIPELINE_START_MS + phases.length * PER_PHASE_MS + 200);
+</script>
+</body>
+</html>
