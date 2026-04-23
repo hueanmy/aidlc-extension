@@ -1,17 +1,63 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+/**
+ * Phase status values.
+ *
+ * The orchestrator (cf-sdlc-pipeline) writes `docs/sdlc/epics/<id>/phases/<phase>/status.json`
+ * with one of these values. Legacy epics without status.json fall back to
+ * file-existence inference, which reports only 'done' / 'pending'.
+ *
+ * Canonical UI mapping (see PipelineProvider.getIcon):
+ *   passed / done          → ✅ green check
+ *   in_progress / in-progress → ⏳ yellow spinner
+ *   in_review              → 🔍 eye
+ *   awaiting_human_review  → 🔔 bell  (click to open review panel)
+ *   rejected               → ❌ red x  (with reject_to + reason in tooltip)
+ *   stale                  → ⚠️ warning (upstream rejected, must re-run)
+ *   failed_needs_human     → 🔴 error (auto-reviewer gave up)
+ *   blocked                → (legacy) error icon
+ *   pending                → ○ empty circle
+ */
+export type PhaseStatusValue =
+  | 'done'
+  | 'passed'
+  | 'in-progress'
+  | 'in_progress'
+  | 'in_review'
+  | 'awaiting_human_review'
+  | 'rejected'
+  | 'stale'
+  | 'failed_needs_human'
+  | 'pending'
+  | 'blocked';
+
+export interface PhaseReview {
+  decision: 'pass' | 'reject';
+  reviewer: string;
+  at?: string;
+  reject_to?: string;
+  reason: string;
+  checklist_results?: Record<string, 'pass' | 'fail'>;
+}
+
 export interface PhaseStatus {
   id: string;
   name: string;
   agent: string;
   agentEmoji: string;
   command: string;
-  status: 'done' | 'in-progress' | 'pending' | 'blocked';
+  status: PhaseStatusValue;
   artifact: string | null;
   artifactPath: string | null;
   input: string;
   output: string;
+  /** Populated when status.json exists (orchestrator-managed). */
+  revision?: number;
+  lastReview?: PhaseReview;
+  updatedAt?: string;
+  /** Free-form user feedback carried on status.json (see pipeline schema). */
+  userFeedback?: string;
 }
 
 export interface EpicStatus {
@@ -21,6 +67,20 @@ export interface EpicStatus {
   phases: PhaseStatus[];
   currentPhase: number;
   progress: number; // 0-100
+  /** True when at least one phase is awaiting_human_review — surfaces a badge. */
+  hasAwaitingReview: boolean;
+  /** True when at least one phase is failed_needs_human. */
+  hasFailure: boolean;
+}
+
+function normalizeStatus(value: string | undefined): PhaseStatusValue | undefined {
+  if (!value) { return undefined; }
+  const allowed: PhaseStatusValue[] = [
+    'done', 'passed', 'in-progress', 'in_progress', 'in_review',
+    'awaiting_human_review', 'rejected', 'stale', 'failed_needs_human',
+    'pending', 'blocked',
+  ];
+  return (allowed as string[]).includes(value) ? (value as PhaseStatusValue) : undefined;
 }
 
 /**
@@ -83,128 +143,169 @@ export class EpicScanner {
     const enabledIds = this.readEnabledPhases(epicDir);
     const phases = allPhases.filter(p => enabledIds.includes(p.id));
     const currentPhase = this.detectCurrentPhase(phases);
-    const doneCount = phases.filter(p => p.status === 'done').length;
+    const doneCount = phases.filter(p => p.status === 'done' || p.status === 'passed').length;
     const progress = Math.round((doneCount / phases.length) * 100);
 
-    // Mark current phase as in-progress
-    if (currentPhase < phases.length && phases[currentPhase].status === 'pending') {
+    // Mark current phase as in-progress only if no explicit orchestrator state
+    // (pending + no last_review = legacy flow, safe to auto-advance the display).
+    if (currentPhase < phases.length && phases[currentPhase].status === 'pending' && !phases[currentPhase].lastReview) {
       phases[currentPhase].status = 'in-progress';
     }
 
-    return { key, title, folderPath: epicDir, phases, currentPhase, progress };
+    const hasAwaitingReview = phases.some(p => p.status === 'awaiting_human_review');
+    const hasFailure = phases.some(p => p.status === 'failed_needs_human');
+
+    return { key, title, folderPath: epicDir, phases, currentPhase, progress, hasAwaitingReview, hasFailure };
   }
 
   private buildPhases(key: string, epicDir: string): PhaseStatus[] {
+    const enriched = (id: string, base: Omit<PhaseStatus, 'status' | 'revision' | 'lastReview' | 'updatedAt' | 'userFeedback'>): PhaseStatus => {
+      const orchestrator = this.readOrchestratorStatus(epicDir, id);
+      const legacy = this.checkPhase(epicDir, key, id);
+      return {
+        ...base,
+        status: orchestrator?.status ?? legacy,
+        revision: orchestrator?.revision,
+        lastReview: orchestrator?.lastReview,
+        updatedAt: orchestrator?.updatedAt,
+        userFeedback: orchestrator?.userFeedback,
+      };
+    };
+
     return [
-      {
+      enriched('plan', {
         id: 'plan',
         name: 'Plan',
         agent: 'Product Owner',
         agentEmoji: 'PO',
         command: `/epic ${key} + /prd ${key}`,
-        status: this.checkPhase(epicDir, key, 'plan'),
         artifact: this.artifactExists(epicDir, 'PRD.md') ? 'PRD.md' : this.artifactExists(epicDir, `${key}.md`) ? `${key}.md` : null,
         artifactPath: this.getArtifactPath(epicDir, 'PRD.md') || this.getArtifactPath(epicDir, `${key}.md`),
         input: 'Jira ticket, Figma designs, business context',
         output: 'Epic Doc + PRD with Acceptance Criteria (EPIC-XXXX-AC*)',
-      },
-      {
+      }),
+      enriched('design', {
         id: 'design',
         name: 'Design',
         agent: 'Tech Lead',
         agentEmoji: 'TL',
         command: `/tech-design ${key}`,
-        status: this.checkPhase(epicDir, key, 'design'),
         artifact: this.artifactExists(epicDir, 'TECH-DESIGN.md') ? 'TECH-DESIGN.md' : null,
         artifactPath: this.getArtifactPath(epicDir, 'TECH-DESIGN.md'),
         input: 'PRD, DIContainer.swift, AppState.swift, existing code',
         output: 'Architecture, API contract, DI plan, File impact list',
-      },
-      {
+      }),
+      enriched('test-plan', {
         id: 'test-plan',
         name: 'Test Plan',
         agent: 'QA Engineer',
         agentEmoji: 'QA',
         command: `/test-plan ${key}`,
-        status: this.checkPhase(epicDir, key, 'test-plan'),
         artifact: this.artifactExists(epicDir, 'TEST-PLAN.md') ? 'TEST-PLAN.md' : null,
         artifactPath: this.getArtifactPath(epicDir, 'TEST-PLAN.md'),
         input: 'PRD acceptance criteria, Tech Design file impact, ITS',
         output: 'Test cases (UT/UI/CAM/NET/LC/PM/PF), Device matrix',
-      },
-      {
+      }),
+      enriched('implement', {
         id: 'implement',
         name: 'Implement',
         agent: 'Developer',
         agentEmoji: 'Dev',
         command: `git checkout -b feature/${key}-desc`,
-        status: this.checkPhase(epicDir, key, 'implement'),
         artifact: null,
         artifactPath: null,
         input: 'Tech Design blueprint, Test Plan test IDs, Coding rules',
         output: 'Swift files on feature branch, Unit tests, PR commits',
-      },
-      {
+      }),
+      enriched('review', {
         id: 'review',
         name: 'Review',
         agent: 'Tech Lead',
         agentEmoji: 'TL',
         command: '/review',
-        status: this.checkPhase(epicDir, key, 'review'),
         artifact: null,
         artifactPath: null,
         input: 'Git diff, PRD, Tech Design, Test Plan',
         output: 'AC validation table, Architecture check, Verdict',
-      },
-      {
+      }),
+      enriched('uat', {
         id: 'uat',
         name: 'UAT',
         agent: 'QA Engineer',
         agentEmoji: 'QA',
         command: `/uat ${key} + /deploy uat`,
-        status: this.checkPhase(epicDir, key, 'uat'),
         artifact: this.artifactExists(epicDir, 'UAT-SCRIPT.md') ? 'UAT-SCRIPT.md' : null,
         artifactPath: this.getArtifactPath(epicDir, 'UAT-SCRIPT.md'),
         input: 'PRD acceptance criteria, Merged code',
         output: 'UAT Script, TestFlight UAT build, Tester sign-off',
-      },
-      {
+      }),
+      enriched('release', {
         id: 'release',
         name: 'Release',
         agent: 'Release Manager',
         agentEmoji: 'RM',
         command: '/release X.Y.Z + /deploy prod',
-        status: this.checkPhase(epicDir, key, 'release'),
         artifact: null,
         artifactPath: null,
         input: 'Git log, Epic UAT status, WhatsNew template',
         output: 'Release checklist, App Store notes, 7 WhatsNew JSONs, Git tag',
-      },
-      {
+      }),
+      enriched('monitor', {
         id: 'monitor',
         name: 'Monitor',
         agent: 'SRE',
         agentEmoji: 'SRE',
         command: '/monitor vX.Y.Z',
-        status: this.checkPhase(epicDir, key, 'monitor'),
         artifact: null,
         artifactPath: null,
         input: 'App Store Connect crashes, Segment events, Intercom tickets',
         output: 'Health Report, KHI table, GO/HOTFIX decision',
-      },
-      {
+      }),
+      enriched('doc-sync', {
         id: 'doc-sync',
         name: 'Doc Sync',
         agent: 'Archivist',
         agentEmoji: 'Arc',
         command: `/doc-sync ${key}`,
-        status: this.checkPhase(epicDir, key, 'doc-sync'),
         artifact: this.artifactExists(epicDir, 'DOC-REVERSE-SYNC.md') ? 'DOC-REVERSE-SYNC.md' : null,
         artifactPath: this.getArtifactPath(epicDir, 'DOC-REVERSE-SYNC.md'),
         input: 'PRD plan, Tech Design plan, Actual git commits',
         output: 'Updated core-business docs, Reverse-sync checklist',
-      },
+      }),
     ];
+  }
+
+  /**
+   * Read docs/sdlc/epics/<KEY>/phases/<phase>/status.json, written by the
+   * orchestrator. Returns null when the file doesn't exist (legacy epics).
+   */
+  private readOrchestratorStatus(
+    epicDir: string,
+    phaseId: string
+  ): { status: PhaseStatusValue; revision?: number; lastReview?: PhaseReview; updatedAt?: string; userFeedback?: string } | null {
+    const p = path.join(epicDir, 'phases', phaseId, 'status.json');
+    if (!fs.existsSync(p)) { return null; }
+    try {
+      const raw = fs.readFileSync(p, 'utf8');
+      const parsed = JSON.parse(raw) as Partial<{
+        status: string;
+        revision: number;
+        last_review: PhaseReview;
+        updated_at: string;
+        user_feedback: string;
+      }>;
+      const status = normalizeStatus(parsed.status);
+      if (!status) { return null; }
+      return {
+        status,
+        revision: typeof parsed.revision === 'number' ? parsed.revision : undefined,
+        lastReview: parsed.last_review,
+        updatedAt: parsed.updated_at,
+        userFeedback: typeof parsed.user_feedback === 'string' ? parsed.user_feedback : undefined,
+      };
+    } catch {
+      return null;
+    }
   }
 
   private checkPhase(epicDir: string, key: string, phase: string): 'done' | 'pending' {

@@ -1,11 +1,17 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import { PipelineProvider } from './pipelineProvider';
 import { DashboardPanel } from './dashboardPanel';
 import { SettingsPanel } from './settingsPanel';
 import { EpicStatus, PhaseStatus } from './epicScanner';
 import { ensureMcpConfig } from './mcpConfigurator';
 import { ensureEpicsBootstrap } from './epicBootstrapper';
+import { ReviewPanel } from './reviewPanel';
+
+const PHASE_ORDER = [
+  'plan', 'design', 'test-plan', 'implement', 'review', 'uat', 'release', 'monitor', 'doc-sync',
+] as const;
 
 export function activate(context: vscode.ExtensionContext) {
   const outputChannel = vscode.window.createOutputChannel('SDLC Pipeline');
@@ -177,6 +183,119 @@ export function activate(context: vscode.ExtensionContext) {
       }
     );
 
+    // Alias so the tree can show a different icon ($(refresh)) for already-done
+    // phases. Delegates to runStep — same semantics.
+    const rerunStepCmd = vscode.commands.registerCommand(
+      'cfPipeline.rerunStep',
+      (phase: PhaseStatus, epic: EpicStatus) =>
+        vscode.commands.executeCommand('cfPipeline.runStep', phase, epic),
+    );
+
+    const runStepCmd = vscode.commands.registerCommand(
+      'cfPipeline.runStep',
+      async (phase: PhaseStatus, epic: EpicStatus) => {
+        if (!phase || !epic) { return; }
+
+        const s = phase.status;
+        const isRerun =
+          s === 'passed' || s === 'done' || s === 'in_progress' ||
+          s === 'in-progress' || s === 'in_review';
+
+        if (isRerun) {
+          const confirm = await vscode.window.showWarningMessage(
+            `Re-run "${phase.name}" for ${epic.key}? Current artifacts will be archived and downstream phases marked stale.`,
+            { modal: false },
+            'Re-run',
+            'Cancel',
+          );
+          if (confirm !== 'Re-run') { return; }
+          markPhaseForRerun(phase, epic);
+        }
+
+        await vscode.commands.executeCommand('cfPipeline.advanceEpic', epic.key);
+      }
+    );
+
+    const feedbackAndRerunCmd = vscode.commands.registerCommand(
+      'cfPipeline.feedbackAndRerun',
+      async (phase: PhaseStatus, epic: EpicStatus) => {
+        if (!phase || !epic) { return; }
+
+        const existingFeedback = phase.userFeedback ?? '';
+        const rejectReason = phase.lastReview?.reason ?? '';
+
+        const feedback = await vscode.window.showInputBox({
+          title: `Update feedback for ${epic.key} / ${phase.name}`,
+          prompt: rejectReason
+            ? `Auto-reviewer said: "${rejectReason}". Add your note for the next worker run.`
+            : 'Leave a note for the next worker run.',
+          value: existingFeedback,
+          placeHolder: 'e.g. Focus on the failing acceptance criterion AC02 and add the missing error state.',
+          ignoreFocusOut: true,
+        });
+
+        if (feedback === undefined) { return; } // cancelled
+        writeUserFeedback(phase, epic, feedback.trim());
+        pipelineProvider?.refresh();
+
+        await vscode.commands.executeCommand('cfPipeline.advanceEpic', epic.key);
+      }
+    );
+
+    const advanceEpicCmd = vscode.commands.registerCommand(
+      'cfPipeline.advanceEpic',
+      async (epicOrKey: EpicStatus | string) => {
+        const epicKey = typeof epicOrKey === 'string' ? epicOrKey : epicOrKey?.key;
+        if (!epicKey) {
+          void vscode.window.showWarningMessage('No epic key provided.');
+          return;
+        }
+        const slash = `/advance-epic ${epicKey}`;
+        await vscode.env.clipboard.writeText(slash);
+
+        // Best-effort: focus Claude Code chat if installed. Extension ID /
+        // view IDs vary, so try a short list and fall back silently.
+        const chatCommands = [
+          'claude-code.focusChatView',
+          'claude.openChat',
+          'workbench.action.chat.open',
+          'workbench.view.extension.claude-code',
+        ];
+        for (const cmd of chatCommands) {
+          try {
+            await vscode.commands.executeCommand(cmd);
+            break;
+          } catch { /* try next */ }
+        }
+
+        void vscode.window.showInformationMessage(
+          `Copied "${slash}" to clipboard. Paste into Claude Code chat (Cmd+V) + Enter to continue.`
+        );
+      }
+    );
+
+    const reviewGateCmd = vscode.commands.registerCommand(
+      'cfPipeline.reviewGate',
+      (phase: PhaseStatus, epic: EpicStatus) => {
+        if (!phase || !epic) { return; }
+        if (phase.status !== 'awaiting_human_review') {
+          void vscode.window.showInformationMessage(
+            `Phase "${phase.name}" is "${phase.status}", not awaiting human review — nothing to approve or reject here.`
+          );
+          return;
+        }
+        const reviewer = resolveReviewerId();
+        ReviewPanel.show(
+          context.extensionUri,
+          workspaceRoot,
+          phase,
+          epic,
+          reviewer,
+          () => pipelineProvider?.refresh(),
+        );
+      }
+    );
+
     const openPhaseSessionCmd = vscode.commands.registerCommand(
       'cfPipeline.openPhaseSession',
       async (phase: PhaseStatus, epic: EpicStatus) => {
@@ -204,22 +323,33 @@ export function activate(context: vscode.ExtensionContext) {
       }
     );
 
-    // Dynamic file watcher that updates when epics path changes
-    let watcher: vscode.FileSystemWatcher | undefined;
+    // Dynamic file watchers that update when epics path changes.
+    // We watch BOTH *.md (PRD, TECH-DESIGN, etc. — legacy phase detection)
+    // and status.json (orchestrator-written phase state — the authoritative
+    // source once orchestrator is used).
+    let mdWatcher: vscode.FileSystemWatcher | undefined;
+    let statusWatcher: vscode.FileSystemWatcher | undefined;
     function recreateWatcher() {
       if (!pipelineProvider) {
         return;
       }
       try {
-        watcher?.dispose();
+        mdWatcher?.dispose();
+        statusWatcher?.dispose();
         const isAbsolute = path.isAbsolute(epicsRelativePath);
-        const watchPattern = isAbsolute
+        const mdPattern = isAbsolute
           ? new vscode.RelativePattern(vscode.Uri.file(epicsRelativePath), '**/*.md')
           : `**/${epicsRelativePath}/**/*.md`;
-        watcher = vscode.workspace.createFileSystemWatcher(watchPattern);
-        watcher.onDidChange(() => pipelineProvider.refresh());
-        watcher.onDidCreate(() => pipelineProvider.refresh());
-        watcher.onDidDelete(() => pipelineProvider.refresh());
+        const statusPattern = isAbsolute
+          ? new vscode.RelativePattern(vscode.Uri.file(epicsRelativePath), '**/status.json')
+          : `**/${epicsRelativePath}/**/status.json`;
+        mdWatcher = vscode.workspace.createFileSystemWatcher(mdPattern);
+        statusWatcher = vscode.workspace.createFileSystemWatcher(statusPattern);
+        for (const w of [mdWatcher, statusWatcher]) {
+          w.onDidChange(() => pipelineProvider.refresh());
+          w.onDidCreate(() => pipelineProvider.refresh());
+          w.onDidDelete(() => pipelineProvider.refresh());
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         outputChannel.appendLine(`Watcher setup failed for epics path "${epicsRelativePath}": ${message}`);
@@ -259,7 +389,12 @@ export function activate(context: vscode.ExtensionContext) {
       }
     });
 
-    const watcherDisposable = { dispose: () => watcher?.dispose() };
+    const watcherDisposable = {
+      dispose: () => {
+        mdWatcher?.dispose();
+        statusWatcher?.dispose();
+      },
+    };
 
     const disposables: vscode.Disposable[] = [
       refreshCmd,
@@ -269,6 +404,11 @@ export function activate(context: vscode.ExtensionContext) {
       openArtifactCmd,
       runPhaseCmd,
       openPhaseSessionCmd,
+      reviewGateCmd,
+      advanceEpicCmd,
+      runStepCmd,
+      rerunStepCmd,
+      feedbackAndRerunCmd,
       watcherDisposable,
       configListener,
     ];
@@ -303,6 +443,86 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {}
+
+/**
+ * Mark a phase for re-run (user triggered). Flips status to `stale` without
+ * bumping revision — the orchestrator's `start_phase` will archive and bump
+ * when the loop reaches this phase. Also marks any passed/done downstream
+ * phases as stale so they're re-run in sequence.
+ *
+ * Writes status.json directly; no MCP call.
+ */
+function markPhaseForRerun(phase: PhaseStatus, epic: EpicStatus): void {
+  const fromIdx = PHASE_ORDER.indexOf(phase.id as typeof PHASE_ORDER[number]);
+  if (fromIdx < 0) { return; }
+
+  const thisPath = phaseStatusPath(epic.folderPath, phase.id);
+  const thisCurrent = readPhaseStatusFile(thisPath) ?? { phase: phase.id, revision: 1 };
+  fs.writeFileSync(
+    thisPath,
+    JSON.stringify({ ...thisCurrent, status: 'stale', updated_at: new Date().toISOString() }, null, 2) + '\n',
+    'utf8'
+  );
+
+  for (let i = fromIdx + 1; i < PHASE_ORDER.length; i++) {
+    const downstream = PHASE_ORDER[i];
+    const dPath = phaseStatusPath(epic.folderPath, downstream);
+    const dCurrent = readPhaseStatusFile(dPath);
+    if (!dCurrent) { continue; }
+    if (dCurrent.status === 'passed' || dCurrent.status === 'done') {
+      fs.writeFileSync(
+        dPath,
+        JSON.stringify({ ...dCurrent, status: 'stale', updated_at: new Date().toISOString() }, null, 2) + '\n',
+        'utf8'
+      );
+    }
+  }
+}
+
+/**
+ * Write the user's feedback string onto a phase's status.json. Preserves all
+ * other fields. Worker will see this at next run via phase_context.userFeedback.
+ */
+function writeUserFeedback(phase: PhaseStatus, epic: EpicStatus, feedback: string): void {
+  const p = phaseStatusPath(epic.folderPath, phase.id);
+  const current = readPhaseStatusFile(p) ?? { phase: phase.id, status: phase.status, revision: phase.revision ?? 1 };
+  const next = {
+    ...current,
+    user_feedback: feedback.length > 0 ? feedback : undefined,
+    updated_at: new Date().toISOString(),
+  };
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(next, null, 2) + '\n', 'utf8');
+}
+
+function phaseStatusPath(epicFolderPath: string, phaseId: string): string {
+  return path.join(epicFolderPath, 'phases', phaseId, 'status.json');
+}
+
+function readPhaseStatusFile(p: string): Record<string, unknown> | null {
+  if (!fs.existsSync(p)) { return null; }
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Best-effort reviewer identifier recorded in status.json's last_review.reviewer.
+ * Falls back to the OS user if no git identity is configured.
+ */
+function resolveReviewerId(): string {
+  try {
+    const { execSync } = require('child_process');
+    const email = execSync('git config user.email', { encoding: 'utf8', timeout: 2000 }).trim();
+    if (email) { return `human:${email}`; }
+  } catch {
+    /* ignore */
+  }
+  const user = process.env.USER || process.env.USERNAME || 'unknown';
+  return `human:${user}`;
+}
 
 function buildPhaseSessionBrief(phase: PhaseStatus, epic: EpicStatus): string {
   const lines = [

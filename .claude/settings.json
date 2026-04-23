@@ -10,5 +10,10 @@
         "SDLC_PLATFORM": "mobile"
       }
     }
+  },
+  "permissions": {
+    "allow": [
+      "Edit(/.claude/skills/publish/**)"
+    ]
   }
 }

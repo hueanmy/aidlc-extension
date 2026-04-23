@@ -1,9 +1,9 @@
 ---
 name: publish
-description: Bump version, update CHANGELOG, package the VSIX, publish to Open VSX (open-vsx.org/extension/hueanmy/aidlc), then commit and tag. Invoke via /publish [patch|minor|major] — default patch.
+description: Bump version, update CHANGELOG, package the VSIX, publish to Open VSX and VS Code Marketplace, then commit and tag. Invoke via /publish [patch|minor|major] — default patch.
 ---
 
-# /publish — release this extension to Open VSX
+# /publish — release this extension to Open VSX + VS Code Marketplace
 
 End-to-end release flow for this VSCode extension. Every step is mandatory; stop and report if any step fails — do NOT continue past a failure.
 
@@ -20,6 +20,8 @@ Run these checks in parallel and abort on any failure:
 - `git status --porcelain` — must be empty (clean working tree). If dirty, stop and list the dirty files; do not stash.
 - `test -n "$OVSX_PAT"` (via `printenv OVSX_PAT | head -c 4`) — must be non-empty. If missing, stop with:
   > `OVSX_PAT` not set. Create a token at https://open-vsx.org/user-settings/tokens then `export OVSX_PAT=<token>` and retry.
+- `test -n "$VSCE_PAT"` (via `printenv VSCE_PAT | head -c 4`) — must be non-empty. If missing, stop with:
+  > `VSCE_PAT` not set. Create an Azure DevOps PAT (scope: Marketplace → Manage, org: All accessible) at https://dev.azure.com → User settings → Personal access tokens, then `export VSCE_PAT=<token>` and retry.
 - Read current `version` from [package.json](../../../package.json).
 
 ## 2. Compute new version
@@ -100,6 +102,15 @@ npx -y ovsx publish aidlc-<new-version>.vsix -p "$OVSX_PAT"
 If this fails, the commit and tag already exist locally — report the failure clearly and tell the user:
 > Local commit + tag `v<new-version>` created, but Open VSX publish failed. Fix the error, then retry with `npx -y ovsx publish aidlc-<new-version>.vsix -p "$OVSX_PAT"`. Do NOT re-run /publish.
 
+## 8b. Publish to VS Code Marketplace
+
+```
+npx -y @vscode/vsce publish --packagePath aidlc-<new-version>.vsix -p "$VSCE_PAT"
+```
+
+If this fails, Open VSX already succeeded and the commit/tag exist locally — report the failure and tell the user:
+> Open VSX published + local tag `v<new-version>` created, but VS Code Marketplace publish failed. Fix the error (usually a stale/invalid `VSCE_PAT`), then retry with `npx -y @vscode/vsce publish --packagePath aidlc-<new-version>.vsix -p "$VSCE_PAT"`. Do NOT re-run /publish.
+
 ## 9. Push
 
 ```
@@ -111,7 +122,8 @@ git push origin "v<new-version>"
 
 One concise block:
 - New version
-- Link: https://open-vsx.org/extension/hueanmy/aidlc
+- Open VSX: https://open-vsx.org/extension/hueanmy/aidlc
+- VS Code Marketplace: https://marketplace.visualstudio.com/items?itemName=hueanmy.aidlc
 - VSIX filename
 - Commit SHA + tag
 

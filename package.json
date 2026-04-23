@@ -2,7 +2,7 @@
   "name": "aidlc",
   "displayName": "aidlc",
   "description": "AI-driven SDLC in VS Code, integrated with Claude Code, Jira, and Figma. Use slash commands /epic, /prd, /tech-design, /test-plan, /review, /release, /monitor to drive each phase by Jira epic key — pulling context from Jira tickets and Figma designs, with tree view and dashboard tracking status per epic.",
-  "version": "0.5.12",
+  "version": "0.6.0",
   "publisher": "hueanmy",
   "license": "MIT",
   "repository": {
@@ -34,7 +34,12 @@
     "onCommand:cfPipeline.openSettings",
     "onCommand:cfPipeline.openArtifact",
     "onCommand:cfPipeline.runPhase",
-    "onCommand:cfPipeline.openPhaseSession"
+    "onCommand:cfPipeline.openPhaseSession",
+    "onCommand:cfPipeline.reviewGate",
+    "onCommand:cfPipeline.advanceEpic",
+    "onCommand:cfPipeline.runStep",
+    "onCommand:cfPipeline.rerunStep",
+    "onCommand:cfPipeline.feedbackAndRerun"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -158,6 +163,36 @@
         "command": "cfPipeline.openPhaseSession",
         "title": "Open Isolated Phase Session",
         "category": "SDLC"
+      },
+      {
+        "command": "cfPipeline.reviewGate",
+        "title": "Review Gate (Approve / Reject)",
+        "icon": "$(bell-dot)",
+        "category": "SDLC"
+      },
+      {
+        "command": "cfPipeline.advanceEpic",
+        "title": "Advance Epic (/advance-epic)",
+        "icon": "$(play-circle)",
+        "category": "SDLC"
+      },
+      {
+        "command": "cfPipeline.runStep",
+        "title": "Run Step",
+        "icon": "$(play)",
+        "category": "SDLC"
+      },
+      {
+        "command": "cfPipeline.rerunStep",
+        "title": "Re-run Step",
+        "icon": "$(refresh)",
+        "category": "SDLC"
+      },
+      {
+        "command": "cfPipeline.feedbackAndRerun",
+        "title": "Update Feedback + Re-run",
+        "icon": "$(comment-discussion)",
+        "category": "SDLC"
       }
     ],
     "menus": {
@@ -187,6 +222,31 @@
         {
           "command": "cfPipeline.openPhaseSession",
           "when": "view == cfPipelineView && viewItem == phase",
+          "group": "inline"
+        },
+        {
+          "command": "cfPipeline.reviewGate",
+          "when": "view == cfPipelineView && viewItem == phase-review",
+          "group": "inline"
+        },
+        {
+          "command": "cfPipeline.runStep",
+          "when": "view == cfPipelineView && viewItem == phase-run",
+          "group": "inline"
+        },
+        {
+          "command": "cfPipeline.rerunStep",
+          "when": "view == cfPipelineView && viewItem == phase-rerun",
+          "group": "inline"
+        },
+        {
+          "command": "cfPipeline.feedbackAndRerun",
+          "when": "view == cfPipelineView && viewItem == phase-feedback",
+          "group": "inline"
+        },
+        {
+          "command": "cfPipeline.advanceEpic",
+          "when": "view == cfPipelineView && viewItem == epic",
           "group": "inline"
         }
       ]

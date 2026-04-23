@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0
+
+- Integrate with cf-sdlc-pipeline orchestrator: read per-phase `status.json` for authoritative state (passed / rejected / stale / awaiting_human_review / failed_needs_human) alongside legacy file-existence check
+- Tree view: per-status icons + revision label; epic-level 🔔 / ⛔ badges when any phase needs attention
+- New Review Gate webview for `awaiting_human_review` phases — shows auto-reviewer checklist, artifact links, and Approve / Reject with cascade-to-upstream
+- Per-phase inline actions: ▶ Run (next pending / stale), 🔄 Re-run (passed / in-progress — archives + marks downstream stale), 💬 Update feedback + Re-run (rejected / failed — writes `user_feedback` for worker)
+- Epic inline ▶ Advance button — copies `/advance-epic <KEY>` to clipboard and focuses Claude Code chat
+- File watcher now also tracks `status.json` so tree refreshes on orchestrator state changes, not just `.md` edits
+
 ## 0.5.12
 
 - fix(dashboard): lift hovered epic card above siblings so popup is never covered
