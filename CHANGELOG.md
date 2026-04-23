@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+
+- fix: clicking any inline tree-view button (💬 Add Feedback, 👁 Open Review, 🔔 Review Gate, 🔄 Re-run, ▶ Run, 💬 Update Feedback + Re-run) now correctly invokes its command. Previously the handlers expected `(phase, epic)` but VS Code passes the TreeItem as a single argument for inline menu actions, so clicks were silently no-op
+
 ## 0.6.0
 
 - Integrate with cf-sdlc-pipeline orchestrator: read per-phase `status.json` for authoritative state (passed / rejected / stale / awaiting_human_review / failed_needs_human) alongside legacy file-existence check

@@ -1,5 +1,6 @@
 .DS_Store
 node_modules/
+scripts/demo/out-agents/
 out/
 *.vsix
 .claude/settings.local.json
