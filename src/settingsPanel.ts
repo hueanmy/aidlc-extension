@@ -18,7 +18,7 @@ const ALL_PHASES = [
   { id: 'test-plan', name: 'Test Plan', agent: 'QA Engineer', emoji: 'QA' },
   { id: 'implement', name: 'Implement', agent: 'Developer', emoji: 'Dev' },
   { id: 'review', name: 'Review', agent: 'Tech Lead', emoji: 'TL' },
-  { id: 'uat', name: 'UAT', agent: 'QA Engineer', emoji: 'QA' },
+  { id: 'execute-test', name: 'Execute Test', agent: 'QA Engineer', emoji: 'QA' },
   { id: 'release', name: 'Release', agent: 'Release Manager', emoji: 'RM' },
   { id: 'monitor', name: 'Monitor', agent: 'SRE', emoji: 'SRE' },
   { id: 'doc-sync', name: 'Doc Sync', agent: 'Archivist', emoji: 'Arc' },
@@ -116,7 +116,7 @@ export class SettingsPanel {
     phases?: string[];
     mcpPackage?: string;
     platform?: string;
-  }) {
+  }): Promise<void> {
     if (msg.type === 'save' && msg.epicDir && msg.phases) {
       SettingsPanel.writeConfig(msg.epicDir, { enabledPhases: msg.phases });
       this.onConfigChanged();
@@ -136,6 +136,10 @@ export class SettingsPanel {
       await this.handleSaveMcp(msg.mcpPackage, msg.platform);
     } else if (msg.type === 'resetMcp') {
       await this.handleResetMcp();
+    } else if (msg.type === 'loadExampleProject') {
+      await vscode.commands.executeCommand('cfPipeline.loadExampleProject');
+    } else if (msg.type === 'clearExampleProject') {
+      await vscode.commands.executeCommand('cfPipeline.clearExampleProject');
     }
   }
 
@@ -220,15 +224,15 @@ export class SettingsPanel {
   :root {
     --text: rgba(255,255,255,0.92);
     --text-muted: rgba(255,255,255,0.52);
-    --accent: #8cb8e0;
-    --accent-2: #a796d4;
+    --accent: #5eead4;
+    --accent-2: #2dd4bf;
     --accent-3: #eca4b8;
     --done: #86d4a8;
     --progress: #e8c872;
     --silver: #b8bcc8;
     --glass: rgba(255,255,255,0.06);
     --glass-strong: rgba(255,255,255,0.1);
-    --glass-border: rgba(255,255,255,0.14);
+    --glass-border: rgba(94,234,212,0.18);
     --glass-shadow:
       inset 0 1px 0 rgba(255,255,255,0.18),
       inset 0 -1px 0 rgba(0,0,0,0.28),
@@ -245,10 +249,10 @@ export class SettingsPanel {
     color: var(--text);
     padding: 32px 28px 80px;
     background:
-      radial-gradient(1200px 700px at 85% -10%, rgba(167,150,212,0.20), transparent 60%),
-      radial-gradient(900px 600px at -10% 110%, rgba(140,184,224,0.16), transparent 55%),
+      radial-gradient(1200px 700px at 85% -10%, rgba(45,212,191,0.20), transparent 60%),
+      radial-gradient(900px 600px at -10% 110%, rgba(94,234,212,0.16), transparent 55%),
       radial-gradient(700px 500px at 50% 50%, rgba(236,164,184,0.08), transparent 70%),
-      linear-gradient(180deg, #101425 0%, #0a0d18 100%);
+      linear-gradient(180deg, #07090f 0%, #03050a 100%);
     background-attachment: fixed;
     position: relative;
     overflow-x: hidden;
@@ -267,13 +271,13 @@ export class SettingsPanel {
   body::before {
     width: 560px; height: 560px;
     top: -120px; right: -120px;
-    background: radial-gradient(circle at 30% 30%, #8cb8e0, transparent 60%);
+    background: radial-gradient(circle at 30% 30%, #5eead4, transparent 60%);
     animation: drift1 22s ease-in-out infinite alternate;
   }
   body::after {
     width: 680px; height: 680px;
     bottom: -220px; left: -180px;
-    background: radial-gradient(circle at 60% 60%, #a796d4, transparent 60%);
+    background: radial-gradient(circle at 60% 60%, #2dd4bf, transparent 60%);
     animation: drift2 28s ease-in-out infinite alternate;
   }
   @keyframes drift1 { to { transform: translate(-60px, 80px) scale(1.1); } }
@@ -282,10 +286,21 @@ export class SettingsPanel {
   h1 {
     font-size: 28px; font-weight: 700; letter-spacing: -0.02em;
     margin-bottom: 6px;
-    background: linear-gradient(135deg, #ffffff 0%, #cfddee 40%, #d4cbe6 75%, #eccdd6 100%);
+    background: linear-gradient(135deg, #c084fc 0%, #e879f9 50%, #f472b6 100%);
     -webkit-background-clip: text; background-clip: text; color: transparent;
   }
   .subtitle { color: var(--text-muted); font-size: 13px; margin-bottom: 28px; }
+  .section-header {
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.55);
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    margin: 36px 0 18px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(94,234,212,0.16);
+  }
+  .section-header:first-of-type { margin-top: 8px; }
 
   /* ---- Glass card base ---- */
   .path-card, .apply-all, .epic-card {
@@ -315,7 +330,7 @@ export class SettingsPanel {
     font-size: 12px;
     color: var(--accent);
     background: rgba(0,0,0,0.25);
-    border: 1px solid rgba(140,184,224,0.2);
+    border: 1px solid rgba(94,234,212,0.2);
     border-radius: 10px;
     padding: 10px 14px;
     margin-bottom: 14px;
@@ -334,11 +349,11 @@ export class SettingsPanel {
     -webkit-backdrop-filter: blur(14px);
     transition: transform 0.15s ease, border-color 0.2s ease, background 0.2s ease;
   }
-  .phase-chip:hover { transform: translateY(-1px); border-color: rgba(140,184,224,0.4); }
+  .phase-chip:hover { transform: translateY(-1px); border-color: rgba(94,234,212,0.4); }
   .phase-chip.selected {
-    background: linear-gradient(135deg, rgba(140,184,224,0.22), rgba(167,150,212,0.22));
-    border-color: rgba(140,184,224,0.5);
-    box-shadow: 0 0 18px rgba(140,184,224,0.2);
+    background: linear-gradient(135deg, rgba(94,234,212,0.22), rgba(45,212,191,0.22));
+    border-color: rgba(94,234,212,0.5);
+    box-shadow: 0 0 18px rgba(94,234,212,0.2);
   }
   .phase-chip .check {
     width: 16px; height: 16px; border-radius: 5px;
@@ -363,15 +378,15 @@ export class SettingsPanel {
   .btn-primary {
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
     color: #0b0b12;
-    box-shadow: 0 8px 24px -8px rgba(140,184,224,0.55), inset 0 1px 0 rgba(255,255,255,0.4);
+    box-shadow: 0 8px 24px -8px rgba(94,234,212,0.55), inset 0 1px 0 rgba(255,255,255,0.4);
   }
-  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 12px 30px -8px rgba(167,150,212,0.65), inset 0 1px 0 rgba(255,255,255,0.5); }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 12px 30px -8px rgba(45,212,191,0.65), inset 0 1px 0 rgba(255,255,255,0.5); }
   .btn-secondary {
     background: rgba(255,255,255,0.06);
     border-color: rgba(255,255,255,0.14);
     color: var(--text);
   }
-  .btn-secondary:hover { background: rgba(255,255,255,0.1); border-color: rgba(140,184,224,0.35); }
+  .btn-secondary:hover { background: rgba(255,255,255,0.1); border-color: rgba(94,234,212,0.35); }
   .btn-row { display: flex; gap: 10px; flex-wrap: wrap; position: relative; }
 
   .epic-card { margin-bottom: 12px; }
@@ -406,13 +421,13 @@ export class SettingsPanel {
   .phase-row label { display: flex; align-items: center; gap: 10px; cursor: pointer; flex: 1; font-size: 13px; }
   .phase-row input[type="checkbox"] {
     width: 16px; height: 16px;
-    accent-color: #8cb8e0; cursor: pointer;
+    accent-color: #5eead4; cursor: pointer;
   }
   .phase-name { font-weight: 600; color: #fff; min-width: 94px; }
   .phase-agent { color: var(--text-muted); font-size: 11px; }
   .phase-emoji {
-    background: linear-gradient(135deg, rgba(140,184,224,0.22), rgba(167,150,212,0.22));
-    border: 1px solid rgba(140,184,224,0.3);
+    background: linear-gradient(135deg, rgba(94,234,212,0.22), rgba(45,212,191,0.22));
+    border: 1px solid rgba(94,234,212,0.3);
     border-radius: 6px; padding: 2px 8px;
     font-size: 10px; font-weight: 700;
     color: #e9f6ff;
@@ -422,7 +437,7 @@ export class SettingsPanel {
   .hint { color: var(--text-muted); font-size: 12px; margin-bottom: 10px; line-height: 1.55; position: relative; }
   .hint code {
     background: rgba(0,0,0,0.25);
-    border: 1px solid rgba(140,184,224,0.22);
+    border: 1px solid rgba(94,234,212,0.22);
     border-radius: 6px; padding: 1px 7px;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
     color: var(--accent);
@@ -445,8 +460,8 @@ export class SettingsPanel {
     position: relative;
   }
   .field-input:focus {
-    border-color: rgba(140,184,224,0.55);
-    box-shadow: 0 0 0 4px rgba(140,184,224,0.12);
+    border-color: rgba(94,234,212,0.55);
+    box-shadow: 0 0 0 4px rgba(94,234,212,0.12);
   }
   .preset-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; position: relative; }
   .preset-chip {
@@ -460,7 +475,7 @@ export class SettingsPanel {
     backdrop-filter: blur(12px);
     transition: all 0.15s;
   }
-  .preset-chip:hover { border-color: rgba(140,184,224,0.5); color: var(--accent); transform: translateY(-1px); }
+  .preset-chip:hover { border-color: rgba(94,234,212,0.5); color: var(--accent); transform: translateY(-1px); }
   .platform-row { display: flex; flex-wrap: wrap; gap: 10px; position: relative; }
   .platform-opt {
     display: flex; align-items: center; gap: 8px;
@@ -472,12 +487,12 @@ export class SettingsPanel {
     backdrop-filter: blur(12px);
     transition: all 0.15s;
   }
-  .platform-opt:hover { border-color: rgba(140,184,224,0.45); transform: translateY(-1px); }
-  .platform-opt input[type="radio"] { accent-color: #8cb8e0; cursor: pointer; }
+  .platform-opt:hover { border-color: rgba(94,234,212,0.45); transform: translateY(-1px); }
+  .platform-opt input[type="radio"] { accent-color: #5eead4; cursor: pointer; }
   .platform-opt:has(input[type="radio"]:checked) {
-    background: linear-gradient(135deg, rgba(140,184,224,0.22), rgba(167,150,212,0.22));
-    border-color: rgba(140,184,224,0.5);
-    box-shadow: 0 0 18px rgba(140,184,224,0.2);
+    background: linear-gradient(135deg, rgba(94,234,212,0.22), rgba(45,212,191,0.22));
+    border-color: rgba(94,234,212,0.5);
+    box-shadow: 0 0 18px rgba(94,234,212,0.2);
   }
   .platform-opt input[type="radio"]:checked + span {
     background: linear-gradient(135deg, var(--accent), var(--accent-2));
@@ -490,11 +505,13 @@ export class SettingsPanel {
 <h1>Pipeline Settings</h1>
 <p class="subtitle">Configure the SDLC MCP server and which phases each epic needs to go through</p>
 
+<div class="section-header">Environment</div>
+
 <div class="path-card">
   <h2>MCP Pipeline Source</h2>
-  <p class="hint">Which pipeline package Claude Code loads. Use <code>github:owner/repo</code> for a custom fork (e.g. <code>github:yourcompany/cf-sdlc-pipeline</code>) or an npm package name once published.</p>
+  <p class="hint">Which pipeline package Claude Code loads. Use <code>github:owner/repo</code> for a custom fork (e.g. <code>github:hueanmy/aidlc-pipeline</code>) or an npm package name once published.</p>
   <label class="field-label">Package spec</label>
-  <input type="text" class="field-input" id="mcpPackageInput" placeholder="e.g. github:yourcompany/cf-sdlc-pipeline or cf-sdlc-pipeline" />
+  <input type="text" class="field-input" id="mcpPackageInput" placeholder="e.g. github:hueanmy/aidlc-pipeline" />
   <label class="field-label" style="margin-top: 14px;">Platform</label>
   <div class="platform-row" id="platformRow">
     <label class="platform-opt"><input type="radio" name="platform" value="mobile" /><span>mobile</span></label>
@@ -511,12 +528,23 @@ export class SettingsPanel {
 </div>
 
 <div class="path-card">
+  <h2>Example Project</h2>
+  <p class="hint">New to AIDLC? Generate a fully-bootstrapped example workspace (sample epic, sample core-business / ITS docs, plus auto-synced agents / skills / schemas from the MCP package). It opens in a separate folder so it never touches your real codebase. You can clear it any time and re-create it later.</p>
+  <div class="btn-row">
+    <button class="btn btn-primary" onclick="loadExampleProject()">Load Example Project</button>
+    <button class="btn btn-secondary" onclick="clearExampleProject()">Clear Example Project</button>
+  </div>
+</div>
+
+<div class="path-card">
   <h2>Epics Folder</h2>
   <div class="path-value" id="epicsPath"></div>
   <div class="btn-row">
     <button class="btn btn-secondary" onclick="selectFolder()">Change Folder</button>
   </div>
 </div>
+
+<div class="section-header">Pipeline Phases</div>
 
 <div class="apply-all">
   <h2>Apply to All Epics</h2>
@@ -648,6 +676,14 @@ export class SettingsPanel {
   function resetMcp() {
     if (!confirm('Clear MCP package and disable auto-configure? Extension will not install any MCP until you set one explicitly.')) return;
     vscode.postMessage({ type: 'resetMcp' });
+  }
+
+  function loadExampleProject() {
+    vscode.postMessage({ type: 'loadExampleProject' });
+  }
+
+  function clearExampleProject() {
+    vscode.postMessage({ type: 'clearExampleProject' });
   }
 
   renderEpicsPath();

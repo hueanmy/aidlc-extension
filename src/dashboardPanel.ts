@@ -55,8 +55,8 @@ export class DashboardPanel {
   :root {
     --text: rgba(255,255,255,0.92);
     --text-muted: rgba(255,255,255,0.52);
-    --accent: #8cb8e0;
-    --accent-2: #a796d4;
+    --accent: #5eead4;
+    --accent-2: #2dd4bf;
     --accent-3: #eca4b8;
     --done: #86d4a8;
     --progress: #e8c872;
@@ -65,7 +65,7 @@ export class DashboardPanel {
     --pending: rgba(255,255,255,0.4);
     --glass: rgba(255,255,255,0.06);
     --glass-strong: rgba(255,255,255,0.1);
-    --glass-border: rgba(255,255,255,0.14);
+    --glass-border: rgba(94,234,212,0.18);
     --glass-shadow:
       0 1px 0 rgba(255,255,255,0.18) inset,
       0 -1px 0 rgba(0,0,0,0.28) inset,
@@ -81,10 +81,10 @@ export class DashboardPanel {
     color: var(--text);
     padding: 32px 28px 80px;
     background:
-      radial-gradient(1200px 700px at 85% -10%, rgba(167,150,212,0.20), transparent 60%),
-      radial-gradient(900px 600px at -10% 110%, rgba(140,184,224,0.16), transparent 55%),
+      radial-gradient(1200px 700px at 85% -10%, rgba(45,212,191,0.20), transparent 60%),
+      radial-gradient(900px 600px at -10% 110%, rgba(94,234,212,0.16), transparent 55%),
       radial-gradient(700px 500px at 50% 50%, rgba(236,164,184,0.08), transparent 70%),
-      linear-gradient(180deg, #101425 0%, #0a0d18 100%);
+      linear-gradient(180deg, #07090f 0%, #03050a 100%);
     background-attachment: fixed;
     position: relative;
     overflow-x: hidden;
@@ -103,13 +103,13 @@ export class DashboardPanel {
   body::before {
     width: 560px; height: 560px;
     top: -120px; right: -120px;
-    background: radial-gradient(circle at 30% 30%, #8cb8e0, transparent 60%);
+    background: radial-gradient(circle at 30% 30%, #5eead4, transparent 60%);
     animation: drift1 22s ease-in-out infinite alternate;
   }
   body::after {
     width: 680px; height: 680px;
     bottom: -220px; left: -180px;
-    background: radial-gradient(circle at 60% 60%, #a796d4, transparent 60%);
+    background: radial-gradient(circle at 60% 60%, #2dd4bf, transparent 60%);
     animation: drift2 28s ease-in-out infinite alternate;
   }
   @keyframes drift1 { to { transform: translate(-60px, 80px) scale(1.1); } }
@@ -120,7 +120,7 @@ export class DashboardPanel {
     font-weight: 700;
     letter-spacing: -0.02em;
     margin-bottom: 6px;
-    background: linear-gradient(135deg, #ffffff 0%, #cfddee 40%, #d4cbe6 75%, #eccdd6 100%);
+    background: linear-gradient(135deg, #c084fc 0%, #e879f9 50%, #f472b6 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -131,6 +131,17 @@ export class DashboardPanel {
     margin-bottom: 28px;
     letter-spacing: 0.01em;
   }
+  .section-header {
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.55);
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    margin: 36px 0 18px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(94,234,212,0.16);
+  }
+  .section-header:first-of-type { margin-top: 8px; }
 
   /* ---- Glass card base ---- */
   .epic-card, .stat-card {
@@ -162,7 +173,7 @@ export class DashboardPanel {
     box-shadow:
       0 1px 0 rgba(255,255,255,0.22) inset,
       0 -1px 0 rgba(0,0,0,0.3) inset,
-      0 30px 70px -20px rgba(140,184,224,0.2),
+      0 30px 70px -20px rgba(94,234,212,0.2),
       0 2px 10px rgba(0,0,0,0.3);
   }
   .epic-header {
@@ -183,7 +194,7 @@ export class DashboardPanel {
     transition: transform 0.25s ease, border-color 0.2s ease, color 0.2s ease;
     backdrop-filter: blur(12px);
   }
-  .expand-btn:hover { border-color: rgba(140,184,224,0.45); color: var(--accent); }
+  .expand-btn:hover { border-color: rgba(94,234,212,0.45); color: var(--accent); }
   .expand-btn svg { width: 14px; height: 14px; }
   .epic-card.collapsed .expand-btn { transform: rotate(-90deg); }
   .epic-card.collapsed .epic-body { display: none; }
@@ -205,7 +216,7 @@ export class DashboardPanel {
     backdrop-filter: blur(12px);
     border: 1px solid rgba(255,255,255,0.18);
   }
-  .progress-badge.done { background: linear-gradient(135deg, #86d4a8, #8cb8e0); }
+  .progress-badge.done { background: linear-gradient(135deg, #86d4a8, #5eead4); }
   .progress-badge.active { background: linear-gradient(135deg, #e8c872, #eca4b8); }
   .progress-badge.new {
     background: rgba(255,255,255,0.08); color: var(--text);
@@ -225,7 +236,7 @@ export class DashboardPanel {
     height: 100%;
     border-radius: 999px;
     background: linear-gradient(90deg, var(--accent), var(--accent-2), var(--accent-3)) !important;
-    box-shadow: 0 0 12px rgba(167,150,212,0.55);
+    box-shadow: 0 0 12px rgba(45,212,191,0.55);
     transition: width 0.5s cubic-bezier(.2,.9,.2,1);
   }
 
@@ -253,7 +264,7 @@ export class DashboardPanel {
   }
   .phase.done + .phase .phase-connector,
   .phase.done .phase-connector {
-    background: linear-gradient(90deg, #86d4a8, #8cb8e0) !important;
+    background: linear-gradient(90deg, #86d4a8, #5eead4) !important;
     box-shadow: 0 0 8px rgba(134,212,168,0.38);
   }
   .phase:last-child .phase-connector { display: none; }
@@ -355,8 +366,8 @@ export class DashboardPanel {
   .phase-detail .cmd {
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     color: var(--accent);
-    background: rgba(140,184,224,0.1);
-    border: 1px solid rgba(140,184,224,0.22);
+    background: rgba(94,234,212,0.1);
+    border: 1px solid rgba(94,234,212,0.22);
     padding: 2px 8px; border-radius: 6px; font-size: 10px;
   }
 
@@ -392,9 +403,10 @@ export class DashboardPanel {
 <h1>SDLC Pipeline Dashboard</h1>
 <p class="subtitle">SDLC pipeline tracker for all active epics</p>
 
+<div class="section-header">Pipeline Overview</div>
 ${this.renderStats(epics)}
 
-${epics.length === 0 ? '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No epics found in <code>docs/sdlc/epics/</code></p>' : ''}
+${epics.length === 0 ? '<p style="color: var(--text-muted); text-align: center; padding: 40px;">No epics found in <code>docs/sdlc/epics/</code></p>' : '<div class="section-header">Active Epics</div>'}
 
 ${epics.map(epic => this.renderEpicCard(epic)).join('\n')}
 

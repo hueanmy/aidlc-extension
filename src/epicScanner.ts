@@ -228,16 +228,16 @@ export class EpicScanner {
         input: 'Git diff, PRD, Tech Design, Test Plan',
         output: 'AC validation table, Architecture check, Verdict',
       }),
-      enriched('uat', {
-        id: 'uat',
-        name: 'UAT',
+      enriched('execute-test', {
+        id: 'execute-test',
+        name: 'Execute Test',
         agent: 'QA Engineer',
         agentEmoji: 'QA',
-        command: `/uat ${key} + /deploy uat`,
-        artifact: this.artifactExists(epicDir, 'UAT-SCRIPT.md') ? 'UAT-SCRIPT.md' : null,
-        artifactPath: this.getArtifactPath(epicDir, 'UAT-SCRIPT.md'),
+        command: `/execute-test ${key} + /deploy uat`,
+        artifact: this.artifactExists(epicDir, 'TEST-SCRIPT.md') ? 'TEST-SCRIPT.md' : null,
+        artifactPath: this.getArtifactPath(epicDir, 'TEST-SCRIPT.md'),
         input: 'PRD acceptance criteria, Merged code',
-        output: 'UAT Script, TestFlight UAT build, Tester sign-off',
+        output: 'Test Script, TestFlight UAT build, Tester sign-off',
       }),
       enriched('release', {
         id: 'release',
@@ -247,7 +247,7 @@ export class EpicScanner {
         command: '/release X.Y.Z + /deploy prod',
         artifact: null,
         artifactPath: null,
-        input: 'Git log, Epic UAT status, WhatsNew template',
+        input: 'Git log, Epic test execution status, WhatsNew template',
         output: 'Release checklist, App Store notes, 7 WhatsNew JSONs, Git tag',
       }),
       enriched('monitor', {
@@ -321,8 +321,8 @@ export class EpicScanner {
       case 'review':
         // Check if APPROVAL.md has "approved" or review passed markers
         return this.hasApproval(epicDir) ? 'done' : 'pending';
-      case 'uat':
-        return this.hasContent(epicDir, 'UAT-SCRIPT.md') ? 'done' : 'pending';
+      case 'execute-test':
+        return this.hasContent(epicDir, 'TEST-SCRIPT.md') ? 'done' : 'pending';
       case 'release':
         return this.hasReleaseTag(key) ? 'done' : 'pending';
       case 'monitor':
@@ -414,7 +414,7 @@ export class EpicScanner {
       } catch { /* ignore */ }
     }
     // Default: all phases
-    return ['plan', 'design', 'test-plan', 'implement', 'review', 'uat', 'release', 'monitor', 'doc-sync'];
+    return ['plan', 'design', 'test-plan', 'implement', 'review', 'execute-test', 'release', 'monitor', 'doc-sync'];
   }
 
   private extractTitle(epicDir: string, key: string): string {

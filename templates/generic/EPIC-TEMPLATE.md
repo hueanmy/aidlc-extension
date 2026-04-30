@@ -94,7 +94,7 @@ _Who benefits and how? Include metrics if possible (e.g., "reduce upload failure
 | 1. Planning | PRD + Tech Design + Test Plan + Approval | All artifacts approved | ⬜ |
 | 2. Core Implementation | EPIC-XXXX-01, EPIC-XXXX-02 | Working feature on DEV | ⬜ |
 | 3. Testing & Polish | Edge cases, device testing, bug fixes | All tests passing | ⬜ |
-| 4. UAT & Release | UAT sign-off, release build | Included in vX.Y.Z | ⬜ |
+| 4. Execute Test & Release | Test execution sign-off, release build | Included in vX.Y.Z | ⬜ |
 | 5. Doc Reverse-Sync | Update docs from what was built | Docs reflect reality | ⬜ |
 
 ---
@@ -123,8 +123,8 @@ _Who benefits and how? Include metrics if possible (e.g., "reduce upload failure
 | Integration Tests | Passing | ⬜ | (CI link) |
 | **Delivery** | | | |
 | CI/CD Build | TestFlight build | ⬜ | (TestFlight link) |
-| UAT Script | UAT test script | ⬜ | `epics/EPIC-XXXX/UAT-SCRIPT.md` |
-| UAT | UAT sign-off | ⬜ | |
+| Test Script | Test script for execution | ⬜ | `epics/EPIC-XXXX/TEST-SCRIPT.md` |
+| Execute Test | Test execution sign-off | ⬜ | |
 | Release | Included in version | ⬜ | vX.Y.Z |
 | **Closure** | | | |
 | Doc Reverse-Sync | Docs updated | ⬜ | `epics/EPIC-XXXX/DOC-REVERSE-SYNC.md` |

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0
+
+- **breaking**: phase `uat` renamed to `execute-test`; artifact `UAT-SCRIPT.md` renamed to `TEST-SCRIPT.md`. Display label changes from "UAT" to "Execute Test"
+- feat: idempotent migration of legacy epic layouts on activation — automatically renames `phases/uat/` → `phases/execute-test/`, `UAT-SCRIPT.md` → `TEST-SCRIPT.md` (incl. archives), updates `status.json` phase field and `pipeline.json` enabledPhases. Shows info notification after migrating
+- compatibility: pairs with `cf-sdlc-pipeline` v2.2.0+ (MCP server side uses matching names)
+
 ## 0.6.3
 
 - chore(demo): add agents.html + record-agents.mjs playwright recording scripts

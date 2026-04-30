@@ -6,11 +6,12 @@ import { DashboardPanel } from './dashboardPanel';
 import { SettingsPanel } from './settingsPanel';
 import { EpicStatus, PhaseStatus } from './epicScanner';
 import { ensureMcpConfig } from './mcpConfigurator';
-import { ensureEpicsBootstrap } from './epicBootstrapper';
+import { migrateEpics } from './epicMigrator';
 import { ReviewPanel } from './reviewPanel';
+import { loadExampleProject, clearExampleProject } from './exampleProject';
 
 const PHASE_ORDER = [
-  'plan', 'design', 'test-plan', 'implement', 'review', 'uat', 'release', 'monitor', 'doc-sync',
+  'plan', 'design', 'test-plan', 'implement', 'review', 'execute-test', 'release', 'monitor', 'doc-sync',
 ] as const;
 
 // Tree-view inline menu actions (`view/item/context` with `group: "inline"`)
@@ -62,21 +63,24 @@ export function activate(context: vscode.ExtensionContext) {
 
     const config = vscode.workspace.getConfiguration('cfPipeline');
     let epicsRelativePath: string = config.get<string>('epicsPath') || 'docs/sdlc/epics';
-    const configuredTemplatePath = (config.get<string>('templateSourcePath') || '').trim();
-    const templateSourcePath = configuredTemplatePath.length > 0
-      ? configuredTemplatePath
-      : path.join(context.extensionPath, 'templates', 'generic');
 
-    const bootstrapResult = ensureEpicsBootstrap(
-      workspaceRoot,
-      epicsRelativePath,
-      templateSourcePath,
-      (msg) => outputChannel.appendLine(`[Bootstrap] ${msg}`),
-    );
-    if (bootstrapResult.created) {
-      void vscode.window.showInformationMessage(
-        `Created default epic ${bootstrapResult.epicKey} in ${bootstrapResult.epicsDir}`,
+    // Idempotent migration of legacy epic layouts (e.g. uat → execute-test).
+    // Runs before bootstrap so scaffolded files never collide with migrated ones.
+    try {
+      const epicsDirAbs = path.resolve(workspaceRoot, epicsRelativePath);
+      const migrated = migrateEpics(
+        epicsDirAbs,
+        (msg) => outputChannel.appendLine(`[Migrate] ${msg}`),
       );
+      if (migrated.length > 0) {
+        for (const m of migrated) outputChannel.appendLine(`[Migrate] ${m}`);
+        void vscode.window.showInformationMessage(
+          `Migrated ${migrated.length} epic file${migrated.length === 1 ? '' : 's'} to new phase naming (see SDLC Pipeline output for details).`,
+        );
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      outputChannel.appendLine(`[Migrate] Skipped due to error: ${message}`);
     }
 
     outputChannel.appendLine(`Epics path: ${epicsRelativePath}`);
@@ -169,13 +173,6 @@ export function activate(context: vscode.ExtensionContext) {
           hasWorkspaceFolder ? vscode.ConfigurationTarget.Workspace : vscode.ConfigurationTarget.Global,
         );
 
-        ensureEpicsBootstrap(
-          workspaceRoot,
-          newPath,
-          templateSourcePath,
-          (msg) => outputChannel.appendLine(`[Bootstrap] ${msg}`),
-        );
-
         // Update provider and watcher
         pipelineProvider.setEpicsPath(newPath);
         recreateWatcher();
@@ -200,6 +197,38 @@ export function activate(context: vscode.ExtensionContext) {
           pipelineProvider.refresh();
         });
       }
+    );
+
+    const loadExampleProjectCmd = vscode.commands.registerCommand(
+      'cfPipeline.loadExampleProject',
+      async () => {
+        try {
+          await loadExampleProject({
+            extensionPath: context.extensionPath,
+            log: (msg) => outputChannel.appendLine(`[Example] ${msg}`),
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          outputChannel.appendLine(`[Example] load failed: ${message}`);
+          void vscode.window.showErrorMessage(`Failed to load example project: ${message}`);
+        }
+      },
+    );
+
+    const clearExampleProjectCmd = vscode.commands.registerCommand(
+      'cfPipeline.clearExampleProject',
+      async () => {
+        try {
+          await clearExampleProject({
+            extensionPath: context.extensionPath,
+            log: (msg) => outputChannel.appendLine(`[Example] ${msg}`),
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          outputChannel.appendLine(`[Example] clear failed: ${message}`);
+          void vscode.window.showErrorMessage(`Failed to clear example project: ${message}`);
+        }
+      },
     );
 
     // Alias so the tree can show a different icon ($(refresh)) for already-done
@@ -398,6 +427,7 @@ export function activate(context: vscode.ExtensionContext) {
     // source once orchestrator is used).
     let mdWatcher: vscode.FileSystemWatcher | undefined;
     let statusWatcher: vscode.FileSystemWatcher | undefined;
+    let pipelineWatcher: vscode.FileSystemWatcher | undefined;
     function recreateWatcher() {
       if (!pipelineProvider) {
         return;
@@ -405,6 +435,7 @@ export function activate(context: vscode.ExtensionContext) {
       try {
         mdWatcher?.dispose();
         statusWatcher?.dispose();
+        pipelineWatcher?.dispose();
         const isAbsolute = path.isAbsolute(epicsRelativePath);
         const mdPattern = isAbsolute
           ? new vscode.RelativePattern(vscode.Uri.file(epicsRelativePath), '**/*.md')
@@ -412,9 +443,13 @@ export function activate(context: vscode.ExtensionContext) {
         const statusPattern = isAbsolute
           ? new vscode.RelativePattern(vscode.Uri.file(epicsRelativePath), '**/status.json')
           : `**/${epicsRelativePath}/**/status.json`;
+        const pipelinePattern = isAbsolute
+          ? new vscode.RelativePattern(vscode.Uri.file(epicsRelativePath), '**/pipeline.json')
+          : `**/${epicsRelativePath}/**/pipeline.json`;
         mdWatcher = vscode.workspace.createFileSystemWatcher(mdPattern);
         statusWatcher = vscode.workspace.createFileSystemWatcher(statusPattern);
-        for (const w of [mdWatcher, statusWatcher]) {
+        pipelineWatcher = vscode.workspace.createFileSystemWatcher(pipelinePattern);
+        for (const w of [mdWatcher, statusWatcher, pipelineWatcher]) {
           w.onDidChange(() => pipelineProvider.refresh());
           w.onDidCreate(() => pipelineProvider.refresh());
           w.onDidDelete(() => pipelineProvider.refresh());
@@ -444,12 +479,6 @@ export function activate(context: vscode.ExtensionContext) {
       if (e.affectsConfiguration('cfPipeline.epicsPath')) {
         const newPath = vscode.workspace.getConfiguration('cfPipeline').get<string>('epicsPath') || 'docs/sdlc/epics';
         if (pipelineProvider && newPath !== epicsRelativePath) {
-          ensureEpicsBootstrap(
-            workspaceRoot,
-            newPath,
-            templateSourcePath,
-            (msg) => outputChannel.appendLine(`[Bootstrap] ${msg}`),
-          );
           epicsRelativePath = newPath;
           pipelineProvider.setEpicsPath(newPath);
           recreateWatcher();
@@ -462,6 +491,7 @@ export function activate(context: vscode.ExtensionContext) {
       dispose: () => {
         mdWatcher?.dispose();
         statusWatcher?.dispose();
+        pipelineWatcher?.dispose();
       },
     };
 
@@ -480,6 +510,8 @@ export function activate(context: vscode.ExtensionContext) {
       runStepCmd,
       rerunStepCmd,
       feedbackAndRerunCmd,
+      loadExampleProjectCmd,
+      clearExampleProjectCmd,
       watcherDisposable,
       configListener,
     ];
@@ -529,6 +561,7 @@ function markPhaseForRerun(phase: PhaseStatus, epic: EpicStatus): void {
 
   const thisPath = phaseStatusPath(epic.folderPath, phase.id);
   const thisCurrent = readPhaseStatusFile(thisPath) ?? { phase: phase.id, revision: 1 };
+  fs.mkdirSync(path.dirname(thisPath), { recursive: true });
   fs.writeFileSync(
     thisPath,
     JSON.stringify({ ...thisCurrent, status: 'stale', updated_at: new Date().toISOString() }, null, 2) + '\n',

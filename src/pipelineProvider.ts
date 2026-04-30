@@ -28,6 +28,7 @@ export class PipelineProvider implements vscode.TreeDataProvider<TreeItem> {
   refresh(): void {
     this.epics = this.scanner.scanAll();
     this._onDidChangeTreeData.fire(undefined);
+    void vscode.commands.executeCommand('setContext', 'cfPipeline.empty', this.epics.length === 0);
   }
 
   getEpics(): EpicStatus[] {

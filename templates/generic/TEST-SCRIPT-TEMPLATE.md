@@ -1,9 +1,9 @@
-# UAT Test Script: [Feature Title]
+# Test Script: [Feature Title]
 
 > **Epic**: [EPIC-XXXX — Epic Title](../epics/EPIC-XXXX/EPIC-XXXX.md)
 > **TestFlight Build**: vX.Y.Z (Build XX)
 > **Environment**: UAT (`uat.dreem.ai`)
-> Copy to `docs/sdlc/epics/EPIC-XXXX/UAT-SCRIPT.md`
+> Copy to `docs/sdlc/epics/EPIC-XXXX/TEST-SCRIPT.md`
 >
 > This script is for **non-technical testers** (PM, stakeholders). Write steps they can follow on their device.
 
@@ -84,7 +84,7 @@
 
 ---
 
-## UAT Verdict
+## Test Verdict
 
 | Criterion | Status |
 |-----------|--------|

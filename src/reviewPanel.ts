@@ -18,7 +18,7 @@ import { EpicStatus, PhaseStatus, PhaseReview } from './epicScanner';
  */
 
 const PHASE_ORDER = [
-  'plan', 'design', 'test-plan', 'implement', 'review', 'uat', 'release', 'monitor', 'doc-sync',
+  'plan', 'design', 'test-plan', 'implement', 'review', 'execute-test', 'release', 'monitor', 'doc-sync',
 ] as const;
 export class ReviewPanel {
   private static currentPanel: ReviewPanel | undefined;
@@ -33,10 +33,10 @@ export class ReviewPanel {
     'test-plan': ['plan', 'design'],
     'implement': ['plan', 'design', 'test-plan'],
     'review': ['plan', 'design', 'test-plan', 'implement'],
-    'uat': ['plan', 'design', 'test-plan', 'implement', 'review'],
-    'release': ['plan', 'design', 'test-plan', 'implement', 'review', 'uat'],
-    'monitor': ['plan', 'design', 'test-plan', 'implement', 'review', 'uat', 'release'],
-    'doc-sync': ['plan', 'design', 'test-plan', 'implement', 'review', 'uat', 'release', 'monitor'],
+    'execute-test': ['plan', 'design', 'test-plan', 'implement', 'review'],
+    'release': ['plan', 'design', 'test-plan', 'implement', 'review', 'execute-test'],
+    'monitor': ['plan', 'design', 'test-plan', 'implement', 'review', 'execute-test', 'release'],
+    'doc-sync': ['plan', 'design', 'test-plan', 'implement', 'review', 'execute-test', 'release', 'monitor'],
   };
 
   static show(

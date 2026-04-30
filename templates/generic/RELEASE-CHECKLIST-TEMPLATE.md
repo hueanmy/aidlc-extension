@@ -17,7 +17,7 @@
 
 ## Epics in This Release
 
-| Epic | Title | UAT Status | Doc Sync |
+| Epic | Title | Test Execution Status | Doc Sync |
 |------|-------|-----------|----------|
 | EPIC-XXXX | | ⬜ Passed | ⬜ Done |
 | EPIC-YYYY | | ⬜ Passed | ⬜ Done |
@@ -39,9 +39,9 @@
 - [ ] SwiftLint: no new errors introduced
 - [ ] Performance: no regressions from monitoring baseline
 
-### UAT Sign-off
+### Test Execution Sign-off
 - [ ] UAT build distributed via TestFlight
-- [ ] All epic UAT scripts executed and passed
+- [ ] All epic test scripts executed and passed
 - [ ] PM sign-off received: _________ (date: _____)
 - [ ] QA sign-off received: _________ (date: _____)
 

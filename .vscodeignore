@@ -10,3 +10,5 @@ install.sh
 scripts/**
 media/demo.mp4
 media/demo.gif
+docs/**
+aidlc-*.vsix
