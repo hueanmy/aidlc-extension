@@ -57,7 +57,7 @@ export class PipelineProvider implements vscode.TreeDataProvider<TreeItem> {
       items.push(new InfoItem('Input', element.phase.input, 'arrow-right'));
       items.push(new InfoItem('Output', element.phase.output, 'package'));
       if (element.phase.artifactPath) {
-        items.push(new InfoItem('Artifact', element.phase.artifact || '', 'file', element.phase.artifactPath));
+        items.push(new InfoItem('Artifact', element.phase.artifact || '', 'file', element.phase.artifactPath, element.epic.key));
       }
       items.push(new InfoItem('Command', element.phase.command, 'terminal'));
       return items;
@@ -268,17 +268,26 @@ class InfoItem extends vscode.TreeItem {
     value: string,
     icon: string,
     filePath?: string,
+    epicKey?: string,
   ) {
     super(label, vscode.TreeItemCollapsibleState.None);
     this.description = value;
     this.iconPath = new vscode.ThemeIcon(icon);
 
     if (filePath) {
-      this.command = {
-        command: 'vscode.open',
-        title: 'Open',
-        arguments: [vscode.Uri.file(filePath)],
-      };
+      // For artifacts, route through cfPipeline.openOrCreateArtifact so the
+      // template seeds on first click instead of showing "file not found".
+      this.command = epicKey
+        ? {
+            command: 'cfPipeline.openOrCreateArtifact',
+            title: 'Open or create artifact',
+            arguments: [filePath, epicKey],
+          }
+        : {
+            command: 'vscode.open',
+            title: 'Open',
+            arguments: [vscode.Uri.file(filePath)],
+          };
     }
   }
 }

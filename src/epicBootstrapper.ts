@@ -79,6 +79,32 @@ export function ensureEpicsBootstrap(
   return { created: true, epicKey, epicsDir };
 }
 
+/**
+ * Render an artifact's template content for `epicKey`. Used by the tree-view
+ * artifact-click flow to lazily create a phase artifact (e.g. PRD.md) the
+ * first time the user clicks it. Returns rendered text — caller writes it.
+ *
+ * Looks up `artifactName` (e.g. "PRD.md", or `${epicKey}.md` for the epic
+ * doc) in TEMPLATE_FILE_MAP. Falls back to a minimal stub if no template
+ * source is shipped or the source file is missing.
+ */
+export function getArtifactTemplate(
+  artifactName: string,
+  epicKey: string,
+  templateRoot: string,
+): string {
+  const entry = TEMPLATE_FILE_MAP.find(
+    (m) => m.target.replace('__EPIC_KEY__', epicKey) === artifactName,
+  );
+  if (entry) {
+    const sourceFile = path.join(templateRoot, entry.source);
+    if (fs.existsSync(sourceFile)) {
+      return renderTemplate(fs.readFileSync(sourceFile, 'utf8'), epicKey);
+    }
+  }
+  return fallbackTemplate(artifactName, epicKey);
+}
+
 function renderTemplate(content: string, epicKey: string): string {
   const today = new Date().toISOString().slice(0, 10);
   return content

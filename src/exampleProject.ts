@@ -10,9 +10,11 @@ const DEFAULT_FOLDER_NAME = 'aidlc-example';
 const SYNC_TIMEOUT_MS = 90_000;
 const EXAMPLE_REPO_URL = 'https://github.com/hueanmy/aidlc-pipeline.git';
 const EXAMPLE_REPO_SUBFOLDER = path.join('examples', 'demo-project');
-const DEMO_DOCS_WRAPPER = path.join('docs', 'demo-project');
-const DEMO_EPICS_PATH = path.join(DEMO_DOCS_WRAPPER, 'sdlc', 'epics');
-const CLONE_TIMEOUT_MS = 60_000;
+// Use the MCP server's default epics path so slash commands (/tech-design, /test-plan, …)
+// write into the same folder the extension scans. A wrapper subdirectory would silently
+// split outputs across two locations.
+const DEMO_EPICS_PATH = path.join('docs', 'sdlc', 'epics');
+const CLONE_TIMEOUT_MS = 180_000;
 
 export interface ExampleProjectContext {
   extensionPath: string;
@@ -30,18 +32,26 @@ export async function loadExampleProject(ctx: ExampleProjectContext): Promise<vo
     return;
   }
 
-  const target = await resolveTargetFolder();
-  if (!target) {
+  const resolved = await resolveTargetFolder();
+  if (!resolved) {
     return;
   }
 
+  if (resolved.action === 'open') {
+    ctx.log(`Opening existing example project at ${resolved.target}`);
+    await openCreatedProject(resolved.target);
+    return;
+  }
+
+  const target = resolved.target;
   fs.mkdirSync(target, { recursive: true });
   ctx.log(`Creating example project at ${target}`);
 
   const fetched = await fetchExampleFromGithub(target, ctx.log);
-  if (!fetched) {
+  if (!fetched.ok) {
+    const reason = fetched.reason ? ` Reason: ${fetched.reason}.` : '';
     void vscode.window.showErrorMessage(
-      `Failed to download example project from ${EXAMPLE_REPO_URL}. Check the SDLC Pipeline output for details.`,
+      `Failed to download example project from ${EXAMPLE_REPO_URL}.${reason} See SDLC Pipeline output for details.`,
     );
     return;
   }
@@ -112,19 +122,29 @@ export async function clearExampleProject(ctx: ExampleProjectContext): Promise<v
   void vscode.window.showInformationMessage(`Removed ${target}.`);
 }
 
-async function resolveTargetFolder(): Promise<string | undefined> {
+type ResolvedTarget = { target: string; action: 'create' | 'open' };
+
+async function resolveTargetFolder(): Promise<ResolvedTarget | undefined> {
   const target = path.join(os.homedir(), DEFAULT_FOLDER_NAME);
 
   if (fs.existsSync(target) && fs.readdirSync(target).length > 0) {
+    const choices = looksLikeExampleProject(target)
+      ? (['Open Existing', 'Overwrite', 'Choose Different Location'] as const)
+      : (['Overwrite', 'Choose Different Location'] as const);
+    const prompt = looksLikeExampleProject(target)
+      ? `${target} already has an AIDLC example. Open it, overwrite with a fresh copy, or pick a different location?`
+      : `${target} already exists and is not empty. Overwrite it or pick a different location?`;
     const choice = await vscode.window.showWarningMessage(
-      `${target} already exists and is not empty. Overwrite it?`,
+      prompt,
       { modal: true },
-      'Overwrite',
-      'Choose Different Location',
+      ...choices,
     );
+    if (choice === 'Open Existing') {
+      return { target, action: 'open' };
+    }
     if (choice === 'Overwrite') {
       fs.rmSync(target, { recursive: true, force: true });
-      return target;
+      return { target, action: 'create' };
     }
     if (choice === 'Choose Different Location') {
       return await pickAlternateLocation();
@@ -132,10 +152,10 @@ async function resolveTargetFolder(): Promise<string | undefined> {
     return undefined;
   }
 
-  return target;
+  return { target, action: 'create' };
 }
 
-async function pickAlternateLocation(): Promise<string | undefined> {
+async function pickAlternateLocation(): Promise<ResolvedTarget | undefined> {
   const parentPick = await vscode.window.showOpenDialog({
     canSelectFolders: true,
     canSelectFiles: false,
@@ -169,38 +189,60 @@ async function pickAlternateLocation(): Promise<string | undefined> {
   }
   const target = path.join(parent, name.trim());
   if (fs.existsSync(target) && fs.readdirSync(target).length > 0) {
-    const ok = await vscode.window.showWarningMessage(
-      `${target} already exists and is not empty. Overwrite it?`,
-      { modal: true },
-      'Overwrite',
-    );
-    if (ok !== 'Overwrite') {
-      return undefined;
+    if (looksLikeExampleProject(target)) {
+      const choice = await vscode.window.showWarningMessage(
+        `${target} already has an AIDLC example. Open it or overwrite with a fresh copy?`,
+        { modal: true },
+        'Open Existing',
+        'Overwrite',
+      );
+      if (choice === 'Open Existing') {
+        return { target, action: 'open' };
+      }
+      if (choice !== 'Overwrite') {
+        return undefined;
+      }
+      fs.rmSync(target, { recursive: true, force: true });
+    } else {
+      const ok = await vscode.window.showWarningMessage(
+        `${target} already exists and is not empty. Overwrite it?`,
+        { modal: true },
+        'Overwrite',
+      );
+      if (ok !== 'Overwrite') {
+        return undefined;
+      }
+      fs.rmSync(target, { recursive: true, force: true });
     }
-    fs.rmSync(target, { recursive: true, force: true });
   }
-  return target;
+  return { target, action: 'create' };
+}
+
+interface FetchResult {
+  ok: boolean;
+  reason?: string;
 }
 
 async function fetchExampleFromGithub(
   target: string,
   log: (msg: string) => void,
-): Promise<boolean> {
+): Promise<FetchResult> {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aidlc-example-'));
   try {
     log(`Cloning ${EXAMPLE_REPO_URL} (depth=1) into ${tmpDir}…`);
-    const cloneOk = await runGitClone(tmpDir, log);
-    if (!cloneOk) {
-      return false;
+    const clone = await runGitClone(tmpDir, log);
+    if (!clone.ok) {
+      return clone;
     }
     const sourceDir = path.join(tmpDir, EXAMPLE_REPO_SUBFOLDER);
     if (!fs.existsSync(sourceDir)) {
-      log(`[error] ${EXAMPLE_REPO_SUBFOLDER} not found in cloned repo`);
-      return false;
+      const reason = `${EXAMPLE_REPO_SUBFOLDER} not found in cloned repo`;
+      log(`[error] ${reason}`);
+      return { ok: false, reason };
     }
     copyDemoProject(sourceDir, target);
-    log(`Copied ${EXAMPLE_REPO_SUBFOLDER} → ${target} (docs wrapped under ${DEMO_DOCS_WRAPPER})`);
-    return true;
+    log(`Copied ${EXAMPLE_REPO_SUBFOLDER} → ${target}`);
+    return { ok: true };
   } finally {
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -210,60 +252,74 @@ async function fetchExampleFromGithub(
   }
 }
 
-function runGitClone(tmpDir: string, log: (msg: string) => void): Promise<boolean> {
+function runGitClone(tmpDir: string, log: (msg: string) => void): Promise<FetchResult> {
   return new Promise((resolve) => {
     let proc: ReturnType<typeof spawn>;
     try {
       proc = spawn('git', ['clone', '--depth', '1', EXAMPLE_REPO_URL, tmpDir], {
         stdio: ['ignore', 'pipe', 'pipe'],
+        env: withAugmentedPath(process.env),
       });
     } catch (err) {
-      log(`[clone] spawn failed: ${err instanceof Error ? err.message : String(err)} — is git installed?`);
-      resolve(false);
+      const detail = err instanceof Error ? err.message : String(err);
+      const reason = `git spawn failed (${detail}) — is git installed and on PATH?`;
+      log(`[clone] ${reason}`);
+      resolve({ ok: false, reason });
       return;
     }
 
     let settled = false;
-    const finish = (ok: boolean) => {
+    let lastErrLine = '';
+    const finish = (result: FetchResult) => {
       if (settled) {
         return;
       }
       settled = true;
       clearTimeout(watchdog);
       try {
-        if (!ok && !proc.killed) {
+        if (!result.ok && !proc.killed) {
           proc.kill('SIGTERM');
         }
       } catch {
         /* ignore */
       }
-      resolve(ok);
+      resolve(result);
     };
 
     const watchdog = setTimeout(() => {
       log('[clone] timed out — killing git process');
-      finish(false);
+      finish({ ok: false, reason: `clone timed out after ${Math.round(CLONE_TIMEOUT_MS / 1000)}s` });
     }, CLONE_TIMEOUT_MS);
 
     const handle = (chunk: Buffer) => {
       for (const line of chunk.toString().split(/\r?\n/)) {
-        if (line.trim().length > 0) {
-          log(`[clone] ${line.trim()}`);
+        const trimmed = line.trim();
+        if (trimmed.length > 0) {
+          log(`[clone] ${trimmed}`);
+          if (/error|fatal/i.test(trimmed)) {
+            lastErrLine = trimmed;
+          }
         }
       }
     };
     proc.stdout?.on('data', handle);
     proc.stderr?.on('data', handle);
     proc.on('error', (err) => {
-      log(`[clone] process error: ${err.message}`);
-      finish(false);
+      const reason = err.message.includes('ENOENT')
+        ? 'git not found on PATH (ENOENT) — install git or add it to PATH'
+        : `git process error: ${err.message}`;
+      log(`[clone] ${reason}`);
+      finish({ ok: false, reason });
     });
     proc.on('close', (code) => {
       if (code === 0) {
-        finish(true);
+        finish({ ok: true });
       } else {
-        log(`[clone] git exited with code ${code}`);
-        finish(false);
+        const reason = lastErrLine
+          ? `git exited with code ${code}: ${lastErrLine}`
+          : `git exited with code ${code}`;
+        log(`[clone] ${reason}`);
+        finish({ ok: false, reason });
       }
     });
   });
@@ -273,12 +329,11 @@ function copyDemoProject(src: string, target: string): void {
   fs.mkdirSync(target, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
     const sp = path.join(src, entry.name);
-    if (entry.isDirectory() && entry.name === 'docs') {
-      copyRecursive(sp, path.join(target, DEMO_DOCS_WRAPPER));
-    } else if (entry.isDirectory()) {
-      copyRecursive(sp, path.join(target, entry.name));
+    const dp = path.join(target, entry.name);
+    if (entry.isDirectory()) {
+      copyRecursive(sp, dp);
     } else if (entry.isFile()) {
-      fs.copyFileSync(sp, path.join(target, entry.name));
+      fs.copyFileSync(sp, dp);
     }
   }
 }
@@ -352,7 +407,7 @@ async function triggerMcpSync(
   return new Promise((resolve) => {
     let proc: ReturnType<typeof spawn>;
     try {
-      proc = spawn(command, ['-y', pkg], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+      proc = spawn(command, ['-y', pkg], { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: withAugmentedPath(process.env) });
     } catch (err) {
       log(`[sync] spawn failed: ${err instanceof Error ? err.message : String(err)}`);
       resolve();
@@ -418,4 +473,19 @@ function looksLikeExampleProject(target: string): boolean {
   const settings = path.join(target, '.claude', 'settings.json');
   const epics = path.join(target, DEMO_EPICS_PATH);
   return fs.existsSync(settings) && fs.existsSync(epics);
+}
+
+// VS Code launched from Finder/Dock on macOS doesn't inherit a login shell PATH,
+// so spawned `git`/`npx` may resolve to "not found" even when installed via
+// Homebrew. Prepend the standard install dirs so spawn() finds them.
+function withAugmentedPath(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const extra = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'];
+  const current = env.PATH || '';
+  const parts = current.split(path.delimiter).filter(Boolean);
+  for (const dir of extra) {
+    if (!parts.includes(dir)) {
+      parts.push(dir);
+    }
+  }
+  return { ...env, PATH: parts.join(path.delimiter) };
 }

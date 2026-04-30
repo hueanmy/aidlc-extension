@@ -7,6 +7,7 @@ import { SettingsPanel } from './settingsPanel';
 import { EpicStatus, PhaseStatus } from './epicScanner';
 import { ensureMcpConfig } from './mcpConfigurator';
 import { migrateEpics } from './epicMigrator';
+import { getArtifactTemplate } from './epicBootstrapper';
 import { ReviewPanel } from './reviewPanel';
 import { loadExampleProject, clearExampleProject } from './exampleProject';
 
@@ -126,6 +127,25 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
       }
     });
+
+    // Lazy artifact creator. Tree-view artifact rows hit this instead of
+    // vscode.open so a missing PRD.md / TECH-DESIGN.md / etc. gets seeded
+    // from templates/generic/ at first click instead of erroring out.
+    const openOrCreateArtifactCmd = vscode.commands.registerCommand(
+      'cfPipeline.openOrCreateArtifact',
+      async (filePath: string, epicKey: string) => {
+        if (!filePath) { return; }
+        if (!fs.existsSync(filePath)) {
+          const templateRoot = path.join(context.extensionPath, 'templates', 'generic');
+          const artifactName = path.basename(filePath);
+          const content = getArtifactTemplate(artifactName, epicKey, templateRoot);
+          fs.mkdirSync(path.dirname(filePath), { recursive: true });
+          fs.writeFileSync(filePath, content, 'utf8');
+          outputChannel.appendLine(`[Artifact] seeded ${artifactName} from template for ${epicKey}`);
+        }
+        await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(filePath));
+      },
+    );
 
     const runPhaseCmd = vscode.commands.registerCommand('cfPipeline.runPhase', (command: string) => {
       if (command) {
@@ -501,6 +521,7 @@ export function activate(context: vscode.ExtensionContext) {
       selectEpicsFolderCmd,
       openSettingsCmd,
       openArtifactCmd,
+      openOrCreateArtifactCmd,
       runPhaseCmd,
       openPhaseSessionCmd,
       reviewGateCmd,
