@@ -4,6 +4,11 @@
 
 - **breaking**: phase `uat` renamed to `execute-test`; artifact `UAT-SCRIPT.md` renamed to `TEST-SCRIPT.md`. Display label changes from "UAT" to "Execute Test"
 - feat: idempotent migration of legacy epic layouts on activation — automatically renames `phases/uat/` → `phases/execute-test/`, `UAT-SCRIPT.md` → `TEST-SCRIPT.md` (incl. archives), updates `status.json` phase field and `pipeline.json` enabledPhases. Shows info notification after migrating
+- feat(ui): teal accent palette + dark gradient background for Dashboard and Settings panels, with uppercase section headers and a violet→pink h1 gradient
+- feat: extension activation no longer auto-seeds a sample EPIC-1000 — empty workspaces now show the welcome view, with a navbar rocket button that hides once epics exist (driven by `cfPipeline.empty` context key)
+- feat: file watcher catches `pipeline.json` create/delete so removing an epic folder refreshes the tree without manual reload
+- feat: `Load Example Project` shows a confirm dialog before cloning the demo + opening it in a new window
+- chore: rename `UAT-SCRIPT-TEMPLATE.md` → `TEST-SCRIPT-TEMPLATE.md`, refresh epic + release-checklist templates
 - compatibility: pairs with `cf-sdlc-pipeline` v2.2.0+ (MCP server side uses matching names)
 
 ## 0.6.3

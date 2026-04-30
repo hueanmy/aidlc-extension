@@ -8,15 +8,16 @@ Track SDLC pipeline progress for software epics directly in VS Code. Visualize e
 
 - **Epic Tree View** — sidebar panel showing all epics and their pipeline phases
 - **Pipeline Dashboard** — visual dashboard with progress bars, phase dots, and hover details
-- **Phase Status** — each phase shows: pending, in-progress, done, or blocked
-- **Agent Ownership** — see which agent (PO, Tech Lead, QA, Dev, RM, SRE) owns each phase
+- **Phase Status** — each phase shows: pending, in-progress, done, awaiting review, rejected, or stale
+- **Agent Ownership** — see which agent (PO, Tech Lead, QA, Dev, RM, SRE, Archivist) owns each phase
 - **Pipeline Settings** — enable/disable phases per epic via a settings panel
 - **Isolated Phase Sessions** — open a dedicated editor session scoped to a single phase
-- **Claude Code MCP auto-config** — extension wires up the SDLC MCP server; skills and agents become available inside Claude Code without manual setup
+- **Inline Run / Re-run / Review actions** — drive each phase from the tree without leaving the sidebar
+- **Example Project loader** — bootstrap a fully-wired demo workspace (sample epic + agents + skills + schemas) in one click
 
 ## How It Works
 
-The extension scans your `docs/sdlc/epics/` folder for epic artifacts (PRD, Tech Design, Test Plan, etc.) and determines pipeline status based on file content — no external service required.
+The extension scans your `docs/sdlc/epics/` folder for epic artifacts (PRD, Tech Design, Test Plan, etc.) and determines pipeline status from per-phase `status.json` files written by the orchestrator (or from file presence for legacy epics).
 
 ### Pipeline Phases
 
@@ -27,33 +28,39 @@ The extension scans your `docs/sdlc/epics/` folder for epic artifacts (PRD, Tech
 | Test Plan | QA Engineer | Test Plan |
 | Implement | Developer | Feature branch |
 | Review | Tech Lead | Approval |
-| UAT | QA Engineer | UAT Script |
+| Execute Test | QA Engineer | Test Script |
 | Release | Release Manager | Git tag |
 | Monitor | SRE | Health report |
 | Doc Sync | Archivist | Reverse-sync doc |
 
 ## Getting Started
 
-1. Install the extension (VS Code Marketplace or Open VSX)
-2. Open a workspace folder
-3. The SDLC Pipeline icon appears in the activity bar
-4. On first activation, the extension:
-   - Creates `docs/sdlc/epics/EPIC-1000/` with a starter epic + template set
-   - Writes `.claude/settings.json` so Claude Code auto-loads the SDLC MCP server
+1. Install the extension (VS Code Marketplace or Open VSX).
+2. Open a workspace folder.
+3. Click the **SDLC Pipeline** icon in the activity bar.
+4. The sidebar tree opens. From here:
+   - **Workspace already has `docs/sdlc/epics/<KEY>/` folders** → epics show up immediately.
+   - **Empty workspace** → the tree shows a welcome card with three options:
+     - **Load Example Project** (🚀 also pinned to the navbar) — clones a demo workspace at `~/aidlc-example`, wires the MCP server, and opens it in a new window. A confirm dialog runs first so you can cancel an accidental click.
+     - **Open Pipeline Settings** — point at an MCP package + platform (the extension never auto-installs anything).
+     - **Select Epics Folder** — pick an existing folder elsewhere on disk.
+
+The extension never seeds sample epics into your workspace automatically. If you want a starter epic, click **Load Example Project**.
 
 ### Configuration
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `cfPipeline.epicsPath` | `docs/sdlc/epics` | Relative path to the SDLC epics folder |
-| `cfPipeline.platform` | `mobile` | One of `mobile`, `web`, `backend`, `desktop`, `generic` — controls which platform overlays load |
-| `cfPipeline.mcpPackage` | `github:hueanmy/aidlc-pipeline` | MCP package spec — accepts an npm name or `github:owner/repo` |
-| `cfPipeline.mcpServerName` | `sdlc` | Key used under `mcpServers.<name>` in `.claude/settings.json` |
-| `cfPipeline.autoConfigureMcp` | `true` | If `false`, extension will not touch `.claude/settings.json` |
+| `cfPipeline.platform` | `generic` | One of `mobile`, `web`, `backend`, `desktop`, `generic` — passed to the MCP server as `SDLC_PLATFORM` env var |
+| `cfPipeline.mcpPackage` | _(empty)_ | MCP package spec — npm name or `github:owner/repo`. Leave empty to skip auto-config |
+| `cfPipeline.mcpServerName` | `sdlc` | Key written under `mcpServers.<name>` in `.claude/settings.json` |
+| `cfPipeline.mcpCommand` | `npx` | Command used by Claude Code to launch the MCP server |
+| `cfPipeline.autoConfigureMcp` | `false` | When `true`, extension appends the MCP entry into `.claude/settings.json` on activation. Off by default — flip to `true` only after setting `mcpPackage` |
 
 ### Use your own pipeline
 
-If you have a private fork (e.g. company-specific SDLC with core-business docs), you can point the extension at it:
+If you have a private fork (e.g. company-specific SDLC with core-business docs), point the extension at it:
 
 1. Open the **Pipeline Settings** panel (sidebar → `…` → `Pipeline Settings`, or Command Palette → `SDLC: Pipeline Settings`).
 2. Scroll to **MCP Pipeline Source** at the top.
@@ -61,13 +68,13 @@ If you have a private fork (e.g. company-specific SDLC with core-business docs),
    - `github:yourcompany/cf-sdlc-pipeline` (GitHub repo, public or private with SSH auth)
    - `@yourcompany/sdlc-pipeline` (once published to npm)
 4. Pick the platform that matches your project.
-5. Click **Apply & Reload MCP** — the extension rewrites `.claude/settings.json` and Claude Code loads your pipeline on the next tool call.
+5. Click **Apply & Reload MCP** — the extension appends `mcpServers.<name>` to `.claude/settings.json` (never overwrites an existing entry) and Claude Code loads your pipeline on the next tool call.
 
-To switch back, click **Reset to Default**.
+To clear it, click **Clear & Disable Auto-Configure**.
 
 ## How Sync Works (MCP Server)
 
-When Claude Code boots the MCP server (triggered on the first MCP tool invocation per session), it runs `syncWorkspace()` against your project root. The server is published from [`hueanmy/aidlc-pipeline`](https://github.com/hueanmy/aidlc-pipeline) — pulled via `npx -y github:hueanmy/aidlc-pipeline` (or the npm package when available).
+When Claude Code boots the MCP server (triggered on the first MCP tool invocation per session), it runs `syncWorkspace()` against your project root. The reference server is published from [`hueanmy/aidlc-pipeline`](https://github.com/hueanmy/aidlc-pipeline) — pulled via `npx -y github:hueanmy/aidlc-pipeline` (or the npm package when available).
 
 ### What gets synced on every boot
 
@@ -76,7 +83,7 @@ Into **your project** (cwd = workspace root):
 ```
 <workspace>/
 ├── .claude/
-│   ├── settings.json            # written by extension
+│   ├── settings.json            # appended by extension when autoConfigureMcp=true
 │   ├── skills/
 │   │   ├── _gate-check.md
 │   │   ├── prd/SKILL.md         # merged: generic + platform overlay
@@ -91,12 +98,10 @@ Into **your project** (cwd = workspace root):
 └── docs/
     └── sdlc/
         ├── workflow/README.md    # scaffold (only if missing)
-        └── epics/
-            └── EPIC-1000/        # sample epic (only if missing)
-                ├── EPIC-1000.md
-                ├── PRD.md
-                └── ITS.md
+        └── epics/                # your real epics live here
 ```
+
+> The extension itself does **not** create any epic folders. The MCP package may scaffold a `workflow/README.md` on first run; epics are yours to author (or fetched from the example project).
 
 ### Layered merge (platform overrides)
 
@@ -124,7 +129,7 @@ npx -y github:hueanmy/aidlc-pipeline
 
 ## Use with Claude Code
 
-The extension auto-configures an MCP server in `.claude/settings.json`. Drive each phase by **Jira epic key** with slash commands — pass the key (e.g. `ABC-123`) and the pipeline will pull context from Jira automatically (requires the Atlassian MCP):
+Once you've set `cfPipeline.mcpPackage` and enabled `autoConfigureMcp` (or written `.claude/settings.json` by hand), drive each phase with slash commands. Pass the Jira epic key (e.g. `ABC-123`) and the pipeline pulls context from Jira automatically (requires the Atlassian MCP):
 
 | Step | Slash command | Agent | What it does |
 |------|---------------|-------|--------------|
@@ -134,7 +139,7 @@ The extension auto-configures an MCP server in `.claude/settings.json`. Drive ea
 | 4 | `/test-plan EPIC-KEY-123` | QA | Unit/UI/integration test cases |
 | 5 | `/coding-rules` | — | Show project coding standards |
 | 6 | `/review <pr>` | Tech Lead | Validate PR against epic docs |
-| 7 | `/uat EPIC-KEY-123` | QA | UAT script for stakeholders |
+| 7 | `/execute-test EPIC-KEY-123` | QA | Test script for stakeholders |
 | 8 | `/release` | RM | Release notes + tag |
 | 9 | `/deploy` | RM | Build & deploy to target env |
 | 10 | `/monitor` | SRE | Post-release health report |
@@ -142,6 +147,8 @@ The extension auto-configures an MCP server in `.claude/settings.json`. Drive ea
 | 12 | `/doc-sync EPIC-KEY-123` | Archivist | Reverse-sync docs from shipped code |
 
 Use `/dashboard` to see pipeline status across all epics, or `/pipeline EPIC-KEY-123` to run the full SDLC sequentially.
+
+You can also drive phases without leaving the tree view — every phase row exposes inline actions (▶ Run / 🔄 Re-run / 💬 Update Feedback / 🔔 Review Gate) that copy the right slash command to your clipboard and focus the Claude Code chat panel.
 
 ### Walkthrough — start an epic from scratch
 
@@ -187,12 +194,12 @@ Out of band — developer cuts `feature/ABC-123-...` and builds the code. Claude
 ```
 - Validates the PR diff against PRD + Tech Design + Test Plan and flags gaps.
 
-**7. UAT → Release → Monitor**
+**7. Execute test → Release → Monitor**
 ```
-/uat ABC-123      # QA generates UAT script
-/release          # RM prepares release notes + git tag
-/deploy           # RM deploys to uat/prod
-/monitor          # SRE pulls crash + analytics for the first 24–48h
+/execute-test ABC-123  # QA generates test script
+/release               # RM prepares release notes + git tag
+/deploy                # RM deploys to test/prod
+/monitor               # SRE pulls crash + analytics for the first 24–48h
 ```
 
 **8. Close the loop**
@@ -210,9 +217,17 @@ All commands are available via `Cmd+Shift+P` (or `Ctrl+Shift+P`):
 | Command | Description |
 |---------|-------------|
 | `SDLC: Open Pipeline Dashboard` | Open the visual pipeline dashboard |
+| `SDLC: Pipeline Settings` | Open the pipeline settings panel (MCP source, per-epic phases, example loader) |
 | `SDLC: Refresh Pipeline Status` | Re-scan epics and update status |
 | `SDLC: Select Epics Folder` | Change the epics folder location |
-| `SDLC: Pipeline Settings` | Open pipeline settings panel |
+| `SDLC: Load Example Project` | Clone the demo workspace into `~/aidlc-example` and open it in a new window |
+| `SDLC: Clear Example Project` | Delete an example project (with confirmation) |
+| `SDLC: Run Step` / `Re-run Step` | Run or re-run a single phase from the tree |
+| `SDLC: Update Feedback + Re-run` | Add reviewer feedback to a rejected phase and re-trigger it |
+| `SDLC: Review Gate` / `Open Review Panel` | Approve / reject an `awaiting_human_review` phase |
+| `SDLC: Add Feedback Note` | Attach a note to any phase's `status.json` without re-running |
+| `SDLC: Advance Epic` | Copy `/advance-epic <KEY>` to the clipboard and focus Claude Code chat |
+| `SDLC: Open Isolated Phase Session` | Open a fresh editor brief scoped to a single phase |
 
 ## Troubleshooting
 
@@ -227,31 +242,32 @@ All commands are available via `Cmd+Shift+P` (or `Ctrl+Shift+P`):
 
 ### `.claude/skills/` or `.claude/agents/` is empty after activation
 
-**Cause**: the MCP server either hasn't run yet, or `npx` failed silently.
+**Cause**: the MCP server either hasn't run yet, or `npx` failed silently — or `cfPipeline.autoConfigureMcp` is `false` (the default), so no MCP entry was written at all.
 
 **Fix**:
-1. Check the **SDLC Pipeline** output channel (View → Output → "SDLC Pipeline") for errors.
-2. Verify `.claude/settings.json` contains a `mcpServers.sdlc` entry with `command: "npx"` and `args: ["-y", "github:hueanmy/aidlc-pipeline"]`.
-3. Try running it manually in a terminal from your workspace root:
+1. Set `cfPipeline.mcpPackage` to your package spec, then flip `cfPipeline.autoConfigureMcp` to `true`.
+2. Reload the window — extension appends `mcpServers.<name>` to `.claude/settings.json`.
+3. Verify the entry has `command: "npx"` and `args: ["-y", "<your package>"]`.
+4. If the MCP entry exists but skills/agents are still empty, run it manually:
    ```bash
    cd /path/to/your/project
    npx -y github:hueanmy/aidlc-pipeline
    ```
    If this works, `.claude/skills/` and `.claude/agents/` will populate. Kill with `Ctrl+C`.
-4. If npx errors: `rm -rf ~/.npm/_npx` to clear the package cache, retry.
+5. If npx errors: `rm -rf ~/.npm/_npx` to clear the package cache, retry.
 
-### MCP config not written to `.claude/settings.json`
+### Extension didn't write `.claude/settings.json` on activation
 
-**Cause**: the extension skips configuration if `cfPipeline.autoConfigureMcp` is `false`, or if it detects an existing `mcpServers.sdlc` entry (it won't overwrite).
+**Cause**: by design — `cfPipeline.autoConfigureMcp` defaults to `false`. The extension only writes the file when you explicitly enable auto-config (or click **Apply & Reload MCP** in Pipeline Settings).
 
 **Fix**:
-1. Verify `cfPipeline.autoConfigureMcp` is `true` in VS Code settings.
-2. If `mcpServers.sdlc` already exists but is misconfigured: delete that entry from `.claude/settings.json`, reload the window.
-3. Open Command Palette → `SDLC: Refresh Pipeline Status` to re-trigger auto-config.
+1. Open Pipeline Settings → MCP Pipeline Source.
+2. Enter your `mcpPackage`, pick your platform, and click **Apply & Reload MCP**.
+3. The extension appends the MCP entry without touching any other server already in `settings.json`.
 
 ### Slash commands use old or outdated content
 
-**Cause**: `npx` caches the GitHub tarball; new commits to `aidlc-pipeline` aren't picked up automatically.
+**Cause**: `npx` caches the GitHub tarball; new commits to your pipeline package aren't picked up automatically.
 
 **Fix**:
 ```bash
@@ -261,11 +277,11 @@ Then reload Claude Code. The next MCP boot will re-download the latest `main` fr
 
 ### "MCP server `sdlc` already configured, leaving as-is" in output
 
-This is **expected** behavior after the first activation — the extension protects your hand-edited MCP config. If you need to reset:
+This is **expected** — the extension is append-only and never overwrites an existing `mcpServers.<name>` entry. To replace it:
 
-1. Open `.claude/settings.json`
-2. Delete the `mcpServers.sdlc` entry
-3. Reload VS Code window — the extension will re-create it with the latest defaults.
+1. Open `.claude/settings.json`.
+2. Delete the `mcpServers.<name>` entry.
+3. Reload VS Code window — extension re-appends with current settings.
 
 ### Epic folder doesn't show up in the sidebar
 
@@ -273,9 +289,16 @@ This is **expected** behavior after the first activation — the extension prote
 
 **Fix**: rename the folder to match the pattern. Folders like `my-feature/` or `abc-123/` (lowercase) are ignored.
 
+### Tree view stays empty after I add an epic folder
+
+The file watcher updates on `*.md`, `pipeline.json`, and `status.json` changes. If you add only an empty folder (no files), the tree won't refresh. Either:
+
+1. Add at least one `.md`, `pipeline.json`, or `status.json` to the new epic folder, or
+2. Click the **Refresh** button in the tree's title bar.
+
 ### Platform-specific agents not loading
 
-**Cause**: only `platforms/mobile/` has overrides shipped today. Other platforms (`web`, `backend`, `desktop`, `generic`) fall back to generic content — this is normal.
+**Cause**: only `platforms/mobile/` has overrides shipped today in the reference pipeline. Other platforms (`web`, `backend`, `desktop`, `generic`) fall back to generic content — this is normal.
 
 **Fix**: if you need platform-specific overlays, contribute them upstream to [`hueanmy/aidlc-pipeline`](https://github.com/hueanmy/aidlc-pipeline) under `platforms/<name>/`.
 
@@ -285,13 +308,9 @@ This is **expected** behavior after the first activation — the extension prote
 
 **Fix**: File → Open Folder → select your project root → reload.
 
-### Nothing in `docs/sdlc/epics/` after activation
+### Tree view is empty and I don't want to start from scratch
 
-**Cause**: the extension only seeds `EPIC-1000` on the **very first** activation if the folder is empty. If there's already any folder inside, no seed is created.
-
-**Fix**:
-1. Run `SDLC: Select Epics Folder` and pick a new empty folder, or
-2. Manually delete any `*-NNNN/` folder first, reload window, and activation will seed `EPIC-1000`.
+Click **Load Example Project** in the welcome card or the rocket icon in the tree's title bar. The extension confirms before cloning, then opens the demo at `~/aidlc-example` in a new window.
 
 ### Where to find logs
 

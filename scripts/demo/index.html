@@ -123,7 +123,7 @@
     background: #555;
     box-shadow: 0 0 0 2px #252526;
   }
-  .phase-dot.done { background: #4ec9b0; }
+  .phase-dot.done { background: #5eead4; }
   .phase-dot.progress { background: #dcdcaa; animation: pulse 1.5s ease infinite; }
   .phase-dot.blocked { background: #f48771; }
   @keyframes pulse { 50% { opacity: 0.5; } }
@@ -212,7 +212,8 @@
     align-items: center;
   }
   .dashboard-row.hover {
-    border-color: #0078d4;
+    border-color: #5eead4;
+    box-shadow: 0 0 18px rgba(94,234,212,0.18);
     animation: row-hover 2s ease 18.5s;
   }
   @keyframes row-hover {
@@ -227,9 +228,10 @@
   }
   .progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, #4ec9b0, #0078d4);
+    background: linear-gradient(90deg, #5eead4, #2dd4bf);
     width: 0;
     border-radius: 4px;
+    box-shadow: 0 0 10px rgba(94,234,212,0.45);
   }
   .dashboard-view.active .progress-fill.p1 { animation: fill-bar 1.4s ease 12s forwards; }
   .dashboard-view.active .progress-fill.p2 { animation: fill-bar-55 1.4s ease 12.2s forwards; }
@@ -251,7 +253,7 @@
   .pill {
     width: 20px; height: 6px; border-radius: 3px; background: #444;
   }
-  .pill.done { background: #4ec9b0; }
+  .pill.done { background: #5eead4; }
   .pill.progress { background: #dcdcaa; }
   .pill.blocked { background: #f48771; }
 
@@ -278,7 +280,7 @@
   }
   .toggle {
     width: 32px; height: 18px; border-radius: 9px;
-    background: #0078d4;
+    background: #2dd4bf;
     position: relative;
     transition: background 0.3s;
   }
@@ -301,7 +303,7 @@
     to { background: #555; }
   }
   @keyframes toggle-on {
-    to { background: #0078d4; }
+    to { background: #2dd4bf; }
   }
 
   /* Editor (final phase session) */
@@ -335,7 +337,7 @@
   .endcard .brand {
     font-size: 34px;
     font-weight: 600;
-    background: linear-gradient(90deg, #4ec9b0, #569cd6, #c586c0);
+    background: linear-gradient(135deg, #c084fc 0%, #e879f9 50%, #f472b6 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
   }
@@ -400,7 +402,7 @@
         <div class="phase-row"><span class="phase-dot done"></span><span class="phase-label">Test Plan</span><span class="phase-agent">QA</span></div>
         <div class="phase-row"><span class="phase-dot progress"></span><span class="phase-label">Implement</span><span class="phase-agent">Dev</span></div>
         <div class="phase-row"><span class="phase-dot"></span><span class="phase-label">Review</span><span class="phase-agent">Tech Lead</span></div>
-        <div class="phase-row"><span class="phase-dot"></span><span class="phase-label">UAT</span><span class="phase-agent">QA</span></div>
+        <div class="phase-row"><span class="phase-dot"></span><span class="phase-label">Execute Test</span><span class="phase-agent">QA</span></div>
         <div class="phase-row"><span class="phase-dot"></span><span class="phase-label">Release</span><span class="phase-agent">RM</span></div>
         <div class="phase-row"><span class="phase-dot"></span><span class="phase-label">Monitor</span><span class="phase-agent">SRE</span></div>
         <div class="phase-row"><span class="phase-dot"></span><span class="phase-label">Doc Sync</span><span class="phase-agent">Archivist</span></div>
@@ -511,7 +513,7 @@
       <div class="phase-toggle"><span>Test Plan</span><div class="toggle"></div></div>
       <div class="phase-toggle"><span>Implement</span><div class="toggle"></div></div>
       <div class="phase-toggle"><span>Review</span><div class="toggle"></div></div>
-      <div class="phase-toggle"><span>UAT</span><div class="toggle uat"></div></div>
+      <div class="phase-toggle"><span>Execute Test</span><div class="toggle uat"></div></div>
       <div class="phase-toggle"><span>Release</span><div class="toggle"></div></div>
       <div class="phase-toggle"><span>Monitor</span><div class="toggle"></div></div>
       <div class="phase-toggle"><span>Doc Sync</span><div class="toggle"></div></div>
