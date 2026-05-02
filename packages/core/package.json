@@ -1,0 +1,18 @@
+{
+  "name": "@aidlc/core",
+  "version": "0.0.1",
+  "description": "AIDLC core engine — workspace loader, runner registry, pipeline executor. Pure TypeScript (no vscode dep).",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "compile": "tsc -p ./",
+    "build": "tsc -p ./",
+    "clean": "rm -rf dist"
+  },
+  "private": true,
+  "license": "MIT"
+}

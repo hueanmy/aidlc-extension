@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.2
+
+- feat(ui): redesigned sidebar as a webview — header with logo gradient, "▶ Open Claude CLI" button, per-epic phase strip dots colored by status, action pills (Run / Review / Re-run / Feedback) on each phase row, click row to expand inline details (Input / Output / Command / Artifact + Open Session / Feedback / Review buttons). Replaces the native TreeView.
+- feat(terminal): new `cfPipeline.openClaudeTerminal` command — opens a zsh terminal in the bottom panel with `claude` CLI auto-launched; reuses existing terminal if open.
+- chore(monorepo): repo restructured to pnpm workspaces with `packages/extension/` (this package) + `packages/core/` (placeholder for v2 engine). No runtime change for users.
+
 ## 0.7.1
 
 - chore: migrate publisher from `hueanmy` to `aidlc-io`, source repo to `aidlc-io/aidlc`, and extension `name` from `aidlc` to `aidlc-workspace` (Marketplace requires globally-unique names). New identifier is `aidlc-io.aidlc-workspace`. Marketplace UI still shows "aidlc" via `displayName`. Users on the old `hueanmy.aidlc` listing must reinstall from the new one — a redirect notice will ship as a final 0.7.x release on the old listing.
