@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1
+
+- chore: migrate publisher from `hueanmy` to `aidlc-io` and source repo to `aidlc-io/aidlc`. Marketplace listing moves to the new publisher; users on the old listing will need to reinstall from the new one.
+
 ## 0.7.0
 
 - **breaking**: phase `uat` renamed to `execute-test`; artifact `UAT-SCRIPT.md` renamed to `TEST-SCRIPT.md`. Display label changes from "UAT" to "Execute Test"
