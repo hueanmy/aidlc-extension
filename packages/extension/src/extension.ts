@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { PipelineProvider } from './pipelineProvider';
+import { PipelineWebviewProvider } from './pipelineWebviewProvider';
 import { DashboardPanel } from './dashboardPanel';
 import { SettingsPanel } from './settingsPanel';
 import { EpicStatus, PhaseStatus } from './epicScanner';
@@ -86,18 +86,21 @@ export function activate(context: vscode.ExtensionContext) {
 
     outputChannel.appendLine(`Epics path: ${epicsRelativePath}`);
 
-    let pipelineProvider: PipelineProvider | undefined;
+    let pipelineProvider: PipelineWebviewProvider | undefined;
     let providerRegistration: vscode.Disposable | undefined;
-    let treeView: vscode.TreeView<unknown> | undefined;
 
     if (workspaceRoot) {
       try {
-        pipelineProvider = new PipelineProvider(workspaceRoot, epicsRelativePath);
-        providerRegistration = vscode.window.registerTreeDataProvider('cfPipelineView', pipelineProvider);
-        treeView = vscode.window.createTreeView('cfPipelineView', {
-          treeDataProvider: pipelineProvider,
-          showCollapseAll: false,
-        });
+        pipelineProvider = new PipelineWebviewProvider(
+          context.extensionUri,
+          workspaceRoot,
+          epicsRelativePath,
+        );
+        providerRegistration = vscode.window.registerWebviewViewProvider(
+          PipelineWebviewProvider.viewType,
+          pipelineProvider,
+          { webviewOptions: { retainContextWhenHidden: true } },
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         outputChannel.appendLine(`Provider initialization failed: ${message}`);
@@ -248,6 +251,35 @@ export function activate(context: vscode.ExtensionContext) {
           outputChannel.appendLine(`[Example] clear failed: ${message}`);
           void vscode.window.showErrorMessage(`Failed to clear example project: ${message}`);
         }
+      },
+    );
+
+    // Reuses an existing AIDLC · Claude terminal if one is open so the user
+    // doesn't end up with a stack of Claude REPLs after multiple clicks.
+    // cwd: only set when the workspace folder actually exists on disk —
+    // when no workspace is open, `workspaceRoot` is a synthetic globalStorage
+    // path that VSCode rejects ("Starting directory does not exist").
+    const openClaudeTerminalCmd = vscode.commands.registerCommand(
+      'cfPipeline.openClaudeTerminal',
+      () => {
+        const TERMINAL_NAME = 'AIDLC · Claude';
+        const existing = vscode.window.terminals.find(t => t.name === TERMINAL_NAME);
+        if (existing) {
+          existing.show(false);
+          return;
+        }
+        const cwd = hasWorkspaceFolder && fs.existsSync(workspaceRoot)
+          ? workspaceRoot
+          : undefined;
+        const terminal = vscode.window.createTerminal({
+          name: TERMINAL_NAME,
+          cwd,
+          shellPath: '/bin/zsh',
+          iconPath: new vscode.ThemeIcon('rocket'),
+          location: vscode.TerminalLocation.Panel,
+        });
+        terminal.show(false);
+        terminal.sendText('claude', true);
       },
     );
 
@@ -533,14 +565,12 @@ export function activate(context: vscode.ExtensionContext) {
       feedbackAndRerunCmd,
       loadExampleProjectCmd,
       clearExampleProjectCmd,
+      openClaudeTerminalCmd,
       watcherDisposable,
       configListener,
     ];
     if (providerRegistration) {
       disposables.push(providerRegistration);
-    }
-    if (treeView) {
-      disposables.push(treeView);
     }
     context.subscriptions.push(...disposables);
 
