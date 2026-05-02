@@ -2,7 +2,7 @@
 
 ## 0.7.1
 
-- chore: migrate publisher from `hueanmy` to `aidlc-io` and source repo to `aidlc-io/aidlc`. Marketplace listing moves to the new publisher; users on the old listing will need to reinstall from the new one.
+- chore: migrate publisher from `hueanmy` to `aidlc-io`, source repo to `aidlc-io/aidlc`, and extension `name` from `aidlc` to `aidlc-workspace` (Marketplace requires globally-unique names). New identifier is `aidlc-io.aidlc-workspace`. Marketplace UI still shows "aidlc" via `displayName`. Users on the old `hueanmy.aidlc` listing must reinstall from the new one — a redirect notice will ship as a final 0.7.x release on the old listing.
 
 ## 0.7.0
 
