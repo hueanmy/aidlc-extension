@@ -745,11 +745,11 @@ function renderWorkflows() {
   if (isCol) { return html; }
 
   if (builtins.length > 0) {
-    html += '<div class="subgroup-label">Extension</div>';
+    html += '<div class="subgroup-label">Common</div>';
     for (const t of builtins) { html += renderTemplate(t, true); }
   }
   if (project.length > 0) {
-    html += '<div class="subgroup-label">Project</div>';
+    html += '<div class="subgroup-label">Custom</div>';
     for (const t of project) { html += renderTemplate(t, false); }
   }
   return html;
