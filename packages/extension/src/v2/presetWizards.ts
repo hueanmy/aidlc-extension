@@ -120,7 +120,15 @@ export async function savePresetCommand(store: PresetStore): Promise<void> {
 
 // ── applyPreset ──────────────────────────────────────────────────────────
 
-export async function applyPresetCommand(store: PresetStore): Promise<void> {
+/**
+ * Apply a preset. When `presetId` is given (sidebar click), skip the quick-
+ * pick and apply that one directly. Without it, the command shows the
+ * picker (command-palette / Builder button entry points).
+ */
+export async function applyPresetCommand(
+  store: PresetStore,
+  presetId?: string,
+): Promise<void> {
   const root = requireRoot('Apply Preset');
   if (!root) { return; }
 
@@ -136,22 +144,34 @@ export async function applyPresetCommand(store: PresetStore): Promise<void> {
     return;
   }
 
-  const picked = await vscode.window.showQuickPick(
-    presets.map((p) => ({
-      label: p.builtin ? `$(verified) ${p.name}` : p.name,
-      description: p.builtin ? `${p.id} · built-in` : `${p.id} · project`,
-      detail: presetDetailLine(p),
-      preset: p,
-    })),
-    { placeHolder: 'Pick a template to apply', ignoreFocusOut: true, matchOnDetail: true },
-  );
-  if (!picked) { return; }
+  let preset: WorkspacePreset | undefined;
+  if (presetId) {
+    preset = presets.find((p) => p.id === presetId);
+    if (!preset) {
+      void vscode.window.showWarningMessage(
+        `AIDLC: template \`${presetId}\` not found. It may have been deleted.`,
+      );
+      return;
+    }
+  } else {
+    const picked = await vscode.window.showQuickPick(
+      presets.map((p) => ({
+        label: p.builtin ? `$(verified) ${p.name}` : p.name,
+        description: p.builtin ? `${p.id} · built-in` : `${p.id} · project`,
+        detail: presetDetailLine(p),
+        preset: p,
+      })),
+      { placeHolder: 'Pick a template to apply', ignoreFocusOut: true, matchOnDetail: true },
+    );
+    if (!picked) { return; }
+    preset = picked.preset;
+  }
 
   const existing = readYaml(root);
   let overwrite = false;
   if (existing) {
     const choice = await vscode.window.showWarningMessage(
-      `This project already has .aidlc/workspace.yaml. Overwrite with preset \`${picked.preset.id}\`?`,
+      `This project already has .aidlc/workspace.yaml. Overwrite with preset \`${preset.id}\`?`,
       { modal: false },
       'Overwrite', 'Cancel',
     );
@@ -160,7 +180,7 @@ export async function applyPresetCommand(store: PresetStore): Promise<void> {
   }
 
   const workspaceName = vscode.workspace.workspaceFolders?.[0]?.name ?? path.basename(root);
-  const result = PresetStore.applyTo(root, picked.preset, workspaceName, { overwrite });
+  const result = PresetStore.applyTo(root, preset, workspaceName, { overwrite });
 
   if (result.written.length === 0 && result.skipped.length > 0) {
     void vscode.window.showWarningMessage(
@@ -171,7 +191,7 @@ export async function applyPresetCommand(store: PresetStore): Promise<void> {
 
   void vscode.window
     .showInformationMessage(
-      `Applied preset \`${picked.preset.id}\` (${result.written.length} files written).`,
+      `Applied preset \`${preset.id}\` (${result.written.length} files written).`,
       'Open Builder',
     )
     .then((choice) => {

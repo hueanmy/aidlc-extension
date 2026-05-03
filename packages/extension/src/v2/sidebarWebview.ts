@@ -17,6 +17,13 @@ import * as path from 'path';
 import { readYaml } from './yamlIO';
 import { WORKSPACE_DIR, WORKSPACE_FILENAME } from '@aidlc/core';
 import { listEpics } from './epicsList';
+import type { PresetStore } from './presetStore';
+
+interface TemplateRef {
+  id: string;
+  name: string;
+  description: string;
+}
 
 interface SidebarState {
   hasFolder: boolean;
@@ -29,9 +36,12 @@ interface SidebarState {
   /** Last 3 epics with status, for the "Recent Epics" mini-list. */
   recentEpics: Array<{ id: string; title: string; status: string; statePath: string }>;
   slashCommands: Array<{ name: string; target: string }>;
+  /** Workspace templates split by source — built-in (extension) vs project. */
+  builtinTemplates: TemplateRef[];
+  projectTemplates: TemplateRef[];
 }
 
-function buildState(): SidebarState {
+function buildState(presetStore: PresetStore | null): SidebarState {
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (!folder) {
     return {
@@ -41,6 +51,7 @@ function buildState(): SidebarState {
       agentsCount: 0, skillsCount: 0, pipelinesCount: 0,
       epicsCount: 0, recentEpics: [],
       slashCommands: [],
+      builtinTemplates: [], projectTemplates: [],
     };
   }
 
@@ -56,6 +67,11 @@ function buildState(): SidebarState {
     statePath: e.statePath,
   }));
 
+  // Templates also live independent of workspace.yaml — surface them even
+  // when the project hasn't been initialized yet, so the user can apply one
+  // as their first action.
+  const { builtinTemplates, projectTemplates } = listTemplates(presetStore, root);
+
   if (!doc) {
     return {
       hasFolder: true,
@@ -64,6 +80,7 @@ function buildState(): SidebarState {
       agentsCount: 0, skillsCount: 0, pipelinesCount: 0,
       epicsCount: allEpics.length, recentEpics,
       slashCommands: [],
+      builtinTemplates, projectTemplates,
     };
   }
 
@@ -87,14 +104,38 @@ function buildState(): SidebarState {
           ? `pipeline ${(c as { pipeline: string }).pipeline}`
           : '',
     })),
+    builtinTemplates,
+    projectTemplates,
   };
+}
+
+function listTemplates(
+  store: PresetStore | null,
+  root: string,
+): { builtinTemplates: TemplateRef[]; projectTemplates: TemplateRef[] } {
+  if (!store) { return { builtinTemplates: [], projectTemplates: [] }; }
+  try {
+    const all = store.list(root);
+    const builtinTemplates: TemplateRef[] = [];
+    const projectTemplates: TemplateRef[] = [];
+    for (const p of all) {
+      const ref = { id: p.id, name: p.name, description: p.description };
+      if (p.builtin) { builtinTemplates.push(ref); } else { projectTemplates.push(ref); }
+    }
+    return { builtinTemplates, projectTemplates };
+  } catch {
+    return { builtinTemplates: [], projectTemplates: [] };
+  }
 }
 
 export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'aidlcSidebar';
   private view: vscode.WebviewView | undefined;
 
-  constructor(private readonly extensionUri: vscode.Uri) {}
+  constructor(
+    private readonly extensionUri: vscode.Uri,
+    private readonly presetStore: PresetStore | null = null,
+  ) {}
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
@@ -112,7 +153,7 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
 
   refresh(): void {
     if (!this.view) { return; }
-    void this.view.webview.postMessage({ type: 'state', state: buildState() });
+    void this.view.webview.postMessage({ type: 'state', state: buildState(this.presetStore) });
   }
 
   private async handleMessage(msg: { type: string; [k: string]: unknown }): Promise<void> {
@@ -160,6 +201,12 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
         const yp = path.join(root, WORKSPACE_DIR, WORKSPACE_FILENAME);
         const doc = await vscode.workspace.openTextDocument(yp);
         await vscode.window.showTextDocument(doc, { preview: false });
+        return;
+      }
+      case 'applyTemplate': {
+        const id = String(msg.id ?? '');
+        if (!id) { return; }
+        await vscode.commands.executeCommand('aidlc.applyPreset', id);
         return;
       }
       case 'refresh':
@@ -371,10 +418,30 @@ body {
   font-weight: 700;
 }
 .section-title-row {
-  display: flex; align-items: baseline; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between;
   padding-right: 4px;
 }
 .section-title-row .section-title { padding-right: 0; }
+.section-toggle {
+  display: flex; align-items: center; gap: 6px;
+  background: transparent; border: none;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 8px 4px 4px;
+  color: var(--text-faint);
+  flex: 1;
+  text-align: left;
+}
+.section-toggle:hover { color: var(--text-soft); }
+.section-toggle:hover .section-chevron { color: var(--accent); }
+.section-chevron {
+  font-size: 9px;
+  color: var(--text-faint);
+  width: 10px;
+  display: inline-block;
+  transition: transform .15s ease;
+}
+.section-chevron.collapsed { transform: rotate(-90deg); }
 .section-link {
   font-size: 10px; color: var(--text-soft);
   cursor: pointer; padding: 8px 4px 4px;
@@ -382,6 +449,35 @@ body {
   text-decoration: none;
 }
 .section-link:hover { color: var(--accent); }
+.subgroup-label {
+  font-size: 9px; letter-spacing: 1.2px; text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 6px 4px 3px;
+  font-weight: 600;
+}
+.tpl {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px;
+  background: var(--glass);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  font-size: 10.5px;
+  margin-bottom: 4px;
+  cursor: pointer;
+  transition: all .12s ease;
+}
+.tpl:hover { background: var(--glass-strong); border-color: var(--glass-border); }
+.tpl-icon { font-size: 11px; flex-shrink: 0; opacity: .8; }
+.tpl-name {
+  font-weight: 600; color: var(--accent);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+.tpl-desc {
+  color: var(--text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 1; min-width: 0;
+}
 .slash {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 10px;
@@ -465,6 +561,16 @@ body {
 const SIDEBAR_JS = `
 const vscode = acquireVsCodeApi();
 let state = null;
+/** Persisted UI prefs — which sections the user has collapsed. */
+const persisted = vscode.getState() || {};
+const collapsed = Object.assign(
+  { recentEpics: false, slashCommands: true, workflows: false },
+  persisted.collapsed || {},
+);
+
+function persistUi() {
+  vscode.setState(Object.assign({}, vscode.getState() || {}, { collapsed }));
+}
 
 window.addEventListener('message', (e) => {
   const msg = e.data;
@@ -474,7 +580,9 @@ window.addEventListener('message', (e) => {
   }
 });
 
-function post(type) { vscode.postMessage({ type }); }
+function post(type, payload) {
+  vscode.postMessage(Object.assign({ type }, payload || {}));
+}
 
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
@@ -559,6 +667,7 @@ function renderActive() {
 
   if (!state.configExists) {
     html += '<div class="hint">No <code>workspace.yaml</code> yet — use the <strong>▦</strong> icon at the top to open the Builder and scaffold one.</div>';
+    html += renderWorkflows();
     return html;
   }
 
@@ -572,30 +681,89 @@ function renderActive() {
   html += '</div>';
 
   if (state.recentEpics.length > 0) {
+    const isCol = !!collapsed.recentEpics;
+    const chev = '<span class="section-chevron' + (isCol ? ' collapsed' : '') + '">▾</span>';
     html += '<div class="section-title-row">';
-    html += '<span class="section-title">Recent Epics</span>';
+    html += '<button class="section-toggle" data-action="toggleSection" data-section="recentEpics">';
+    html += chev + '<span class="section-title">Recent Epics</span>';
+    html += '</button>';
     html += '<a class="section-link" data-action="openEpicsList">All ' + state.epicsCount + ' →</a>';
     html += '</div>';
-    for (const e of state.recentEpics) {
-      const dot = '<span class="epic-mini-dot dot-' + escapeHtml(e.status) + '"></span>';
-      const title = e.title ? ' · ' + escapeHtml(e.title) : '';
-      html += '<div class="epic-mini" data-action="openEpicState" data-path="' + escapeHtml(e.statePath) + '">';
-      html += dot + '<span class="epic-mini-id">' + escapeHtml(e.id) + '</span><span class="epic-mini-title">' + title + '</span>';
-      html += '</div>';
+    if (!isCol) {
+      for (const e of state.recentEpics) {
+        const dot = '<span class="epic-mini-dot dot-' + escapeHtml(e.status) + '"></span>';
+        const title = e.title ? ' · ' + escapeHtml(e.title) : '';
+        html += '<div class="epic-mini" data-action="openEpicState" data-path="' + escapeHtml(e.statePath) + '">';
+        html += dot + '<span class="epic-mini-id">' + escapeHtml(e.id) + '</span><span class="epic-mini-title">' + title + '</span>';
+        html += '</div>';
+      }
     }
   }
 
   if (state.slashCommands.length > 0) {
-    html += '<div class="section-title">Slash commands</div>';
-    for (const c of state.slashCommands) {
-      html += '<div class="slash">';
-      html += '<span class="slash-name">' + escapeHtml(c.name) + '</span>';
-      html += '<span class="slash-target">→ ' + escapeHtml(c.target) + '</span>';
-      html += '</div>';
+    const isCol = !!collapsed.slashCommands;
+    const chev = '<span class="section-chevron' + (isCol ? ' collapsed' : '') + '">▾</span>';
+    html += '<div class="section-title-row">';
+    html += '<button class="section-toggle" data-action="toggleSection" data-section="slashCommands">';
+    html += chev + '<span class="section-title">Slash commands</span>';
+    html += '</button>';
+    html += '</div>';
+    if (!isCol) {
+      for (const c of state.slashCommands) {
+        html += '<div class="slash">';
+        html += '<span class="slash-name">' + escapeHtml(c.name) + '</span>';
+        html += '<span class="slash-target">→ ' + escapeHtml(c.target) + '</span>';
+        html += '</div>';
+      }
     }
   }
 
+  html += renderWorkflows();
+
   return html;
+}
+
+/**
+ * Workflows section — workspace templates split by source. Built-in
+ * (extension) templates first, then project-scoped templates from
+ * .aidlc/templates/. Click applies the template (with overwrite confirm
+ * if workspace.yaml already exists).
+ */
+function renderWorkflows() {
+  const builtins = state.builtinTemplates || [];
+  const project = state.projectTemplates || [];
+  if (builtins.length === 0 && project.length === 0) { return ''; }
+
+  const isCol = !!collapsed.workflows;
+  const chev = '<span class="section-chevron' + (isCol ? ' collapsed' : '') + '">▾</span>';
+  let html = '<div class="section-title-row">';
+  html += '<button class="section-toggle" data-action="toggleSection" data-section="workflows">';
+  html += chev + '<span class="section-title">Workflows</span>';
+  html += '</button>';
+  html += '</div>';
+
+  if (isCol) { return html; }
+
+  if (builtins.length > 0) {
+    html += '<div class="subgroup-label">Extension</div>';
+    for (const t of builtins) { html += renderTemplate(t, true); }
+  }
+  if (project.length > 0) {
+    html += '<div class="subgroup-label">Project</div>';
+    for (const t of project) { html += renderTemplate(t, false); }
+  }
+  return html;
+}
+
+function renderTemplate(t, isBuiltin) {
+  const icon = isBuiltin ? '✦' : '◆';
+  const desc = t.description ? escapeHtml(t.description) : escapeHtml(t.id);
+  let h = '<div class="tpl" data-action="applyTemplate" data-id="' + escapeHtml(t.id) + '" title="Apply template ' + escapeHtml(t.id) + '">';
+  h += '<span class="tpl-icon">' + icon + '</span>';
+  h += '<span class="tpl-name">' + escapeHtml(t.name) + '</span>';
+  h += '<span class="tpl-desc">· ' + desc + '</span>';
+  h += '</div>';
+  return h;
 }
 
 function renderFooter() {
@@ -606,7 +774,29 @@ function renderFooter() {
 document.addEventListener('click', (e) => {
   const target = e.target.closest('[data-action]');
   if (!target) { return; }
-  post(target.dataset.action);
+  const action = target.dataset.action;
+
+  if (action === 'toggleSection') {
+    const key = target.dataset.section;
+    if (key) {
+      collapsed[key] = !collapsed[key];
+      persistUi();
+      render();
+    }
+    return;
+  }
+
+  if (action === 'openEpicState') {
+    vscode.postMessage({ type: action, path: target.dataset.path });
+    return;
+  }
+
+  if (action === 'applyTemplate') {
+    vscode.postMessage({ type: action, id: target.dataset.id });
+    return;
+  }
+
+  post(action);
 });
 
 post('ready');

@@ -28,10 +28,11 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Commands (Show Workspace Config, Init, Add Skill/Agent/Pipeline, Open
   // Builder, Open Claude CLI). All under `aidlc.*` namespace.
-  context.subscriptions.push(...registerV2WorkspaceCommands(context, output));
+  const { disposables, presetStore } = registerV2WorkspaceCommands(context, output);
+  context.subscriptions.push(...disposables);
 
   // Sidebar webview — minimalist launcher into the Builder panel.
-  const sidebar = new SidebarWebviewProvider(context.extensionUri);
+  const sidebar = new SidebarWebviewProvider(context.extensionUri, presetStore);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       SidebarWebviewProvider.viewType,
@@ -50,6 +51,17 @@ export function activate(context: vscode.ExtensionContext): void {
     watcher.onDidCreate(refresh, null, context.subscriptions);
     watcher.onDidDelete(refresh, null, context.subscriptions);
     context.subscriptions.push(watcher);
+  }
+
+  // Watch project-scoped templates so the sidebar's Workflows section updates
+  // when users save / delete templates via the Builder or command palette.
+  const templatesWatcher = createTemplatesWatcher();
+  if (templatesWatcher) {
+    const refresh = () => sidebar.refresh();
+    templatesWatcher.onDidChange(refresh, null, context.subscriptions);
+    templatesWatcher.onDidCreate(refresh, null, context.subscriptions);
+    templatesWatcher.onDidDelete(refresh, null, context.subscriptions);
+    context.subscriptions.push(templatesWatcher);
   }
 
   // Re-build watcher when the user opens/closes a folder so a freshly opened
@@ -84,6 +96,21 @@ function createWorkspaceYamlWatcher(): vscode.FileSystemWatcher | null {
   const pattern = new vscode.RelativePattern(
     folder,
     path.join(WORKSPACE_DIR, WORKSPACE_FILENAME),
+  );
+  return vscode.workspace.createFileSystemWatcher(pattern);
+}
+
+/**
+ * Watcher for `<workspace>/.aidlc/templates/*.json` — project-scoped user
+ * templates. Built-in templates ship with the extension and don't change
+ * at runtime, so they don't need a watcher.
+ */
+function createTemplatesWatcher(): vscode.FileSystemWatcher | null {
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  if (!folder) { return null; }
+  const pattern = new vscode.RelativePattern(
+    folder,
+    path.join(WORKSPACE_DIR, 'templates', '*.json'),
   );
   return vscode.workspace.createFileSystemWatcher(pattern);
 }

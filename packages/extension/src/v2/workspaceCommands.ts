@@ -86,7 +86,7 @@ like help with today. Keep your reply to two sentences.
 export function registerV2WorkspaceCommands(
   context: vscode.ExtensionContext,
   output: vscode.OutputChannel,
-): vscode.Disposable[] {
+): { disposables: vscode.Disposable[]; presetStore: PresetStore } {
   const showCmd = vscode.commands.registerCommand(
     'aidlc.showWorkspaceConfig',
     () => showWorkspaceConfig(output),
@@ -130,7 +130,11 @@ export function registerV2WorkspaceCommands(
 
   const applyPresetCmd = vscode.commands.registerCommand(
     'aidlc.applyPreset',
-    () => applyPresetCommand(presetStore),
+    (presetId?: unknown) =>
+      applyPresetCommand(
+        presetStore,
+        typeof presetId === 'string' ? presetId : undefined,
+      ),
   );
 
   const deletePresetCmd = vscode.commands.registerCommand(
@@ -175,21 +179,24 @@ export function registerV2WorkspaceCommands(
     },
   );
 
-  return [
-    showCmd,
-    initCmd,
-    addSkillCmd,
-    addAgentCmd,
-    addPipelineCmd,
-    openBuilderCmd,
-    openClaudeTerminalCmd,
-    savePresetCmd,
-    applyPresetCmd,
-    deletePresetCmd,
-    startEpicCmd,
-    openEpicsListCmd,
-    insertDemoEpicCmd,
-  ];
+  return {
+    disposables: [
+      showCmd,
+      initCmd,
+      addSkillCmd,
+      addAgentCmd,
+      addPipelineCmd,
+      openBuilderCmd,
+      openClaudeTerminalCmd,
+      savePresetCmd,
+      applyPresetCmd,
+      deletePresetCmd,
+      startEpicCmd,
+      openEpicsListCmd,
+      insertDemoEpicCmd,
+    ],
+    presetStore,
+  };
 }
 
 function getWorkspaceRoot(): string | undefined {
