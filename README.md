@@ -29,7 +29,7 @@ The legacy `hueanmy.aidlc` listing remains published but is no longer updated.
 ## Status
 
 - [x] Phase 0 — monorepo scaffold (`packages/extension`, `packages/core` placeholder)
-- [ ] Phase 1 — core engine (`WorkspaceSchema`, `WorkspaceLoader`, `RunnerRegistry`, `PipelineExecutor`)
+- [x] Phase 1 — core engine: `WorkspaceSchema` (Zod), `WorkspaceLoader`, `EnvResolver`, `SkillLoader`, `RunnerRegistry` + `DefaultRunner` (claude CLI shell-out) + `CustomRunnerLoader`. 24 tests pass. **`PipelineExecutor` deferred to Phase 1.5.**
 - [ ] Phase 2 — extension shell rewrite (consume `@aidlc/core`, replace tree view with workspace.yaml driven UI)
 - [ ] Phase 3 — Config UI (4-tab webview: Agents / Skills / Env / Pipelines)
 - [ ] Phase 4 — AIDLC Terminal + slash command router

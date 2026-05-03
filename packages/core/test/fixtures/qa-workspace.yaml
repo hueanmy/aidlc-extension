@@ -1,0 +1,62 @@
+version: "1.0"
+name: "QA Workspace"
+
+agents:
+  - id: test-converter
+    name: "Cypress → Playwright Converter"
+    skill: convert-test
+    model: claude-sonnet-4-5
+    env:
+      SOURCE_DIR: ./cypress/e2e
+      TARGET_DIR: ./playwright/tests
+
+  - id: doc-writer
+    name: "Documentation Writer"
+    skill: my-doc-skill
+    model: claude-opus-4-5
+
+  - id: my-special-agent
+    name: "Special Agent"
+    skill: my-skill
+    runner: custom
+    runner_path: ./.aidlc/runners/my-runner.js
+
+skills:
+  - id: convert-test
+    builtin: true
+  - id: my-doc-skill
+    path: ./.aidlc/skills/my-doc-skill.md
+  - id: my-skill
+    path: ./.aidlc/skills/my-skill.md
+
+environment:
+  ANTHROPIC_API_KEY: "${env:ANTHROPIC_API_KEY}"
+  BASE_URL: "${env:APP_URL}"
+  STATIC_VAR: "literal-value"
+
+slash_commands:
+  - name: "/convert"
+    agent: test-converter
+  - name: "/run-all"
+    pipeline: full-migration
+
+pipelines:
+  - id: full-migration
+    steps: [test-converter, doc-writer]
+    on_failure: stop
+
+state:
+  entity: epic
+  root: docs/sdlc/epics
+  schema:
+    status: pending
+    phase: string
+
+sidebar:
+  views:
+    - type: file-tree
+      label: SDLC Epics
+      glob: "docs/sdlc/epics/*/*.md"
+      group_by: parent_dir
+    - type: agents-list
+    - type: run-history

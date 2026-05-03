@@ -11,8 +11,19 @@
   "scripts": {
     "compile": "tsc -p ./",
     "build": "tsc -p ./",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "private": true,
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "js-yaml": "^4.1.1",
+    "zod": "^4.4.2"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.19.39",
+    "vitest": "^4.1.5"
+  }
 }

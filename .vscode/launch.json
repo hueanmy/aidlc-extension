@@ -2,17 +2,17 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run AIDLC Extension",
+      "name": "Run AIDLC Flow Extension",
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}",
-        "${workspaceFolder}"
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/extension"
       ],
       "outFiles": [
-        "${workspaceFolder}/out/**/*.js"
+        "${workspaceFolder}/packages/extension/out/**/*.js",
+        "${workspaceFolder}/packages/core/dist/**/*.js"
       ],
-      "preLaunchTask": "npm: compile"
+      "preLaunchTask": "pnpm: compile-all"
     }
   ]
 }

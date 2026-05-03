@@ -1,8 +1,8 @@
 {
   "name": "aidlc-flow",
   "displayName": "AIDLC Flow",
-  "description": "AI-driven SDLC in VS Code, integrated with Claude Code, Jira, and Figma. Use slash commands /epic, /prd, /tech-design, /test-plan, /review, /release, /monitor to drive each phase by Jira epic key — pulling context from Jira tickets and Figma designs, with tree view and dashboard tracking status per epic.",
-  "version": "0.7.2",
+  "description": "Agent workflow runner for VS Code — define agents, skills, and pipelines in workspace.yaml. Build, edit, and run AI workflows visually without leaving the editor.",
+  "version": "0.8.0",
   "publisher": "aidlc-io",
   "license": "MIT",
   "repository": {
@@ -11,13 +11,13 @@
   },
   "icon": "media/icon.png",
   "keywords": [
-    "sdlc",
+    "ai",
+    "agents",
+    "claude",
+    "workflow",
+    "automation",
     "pipeline",
-    "epic",
-    "agile",
-    "project management",
-    "tracker",
-    "workflow"
+    "workspace"
   ],
   "engines": {
     "vscode": "^1.85.0"
@@ -25,233 +25,123 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [
-    "workspaceContains:docs/sdlc/epics",
-    "onStartupFinished",
-    "onCommand:cfPipeline.refresh",
-    "onCommand:cfPipeline.openDashboard",
-    "onCommand:cfPipeline.selectEpicsFolder",
-    "onCommand:cfPipeline.openSettings",
-    "onCommand:cfPipeline.openArtifact",
-    "onCommand:cfPipeline.runPhase",
-    "onCommand:cfPipeline.openPhaseSession",
-    "onCommand:cfPipeline.reviewGate",
-    "onCommand:cfPipeline.openReview",
-    "onCommand:cfPipeline.addFeedback",
-    "onCommand:cfPipeline.advanceEpic",
-    "onCommand:cfPipeline.runStep",
-    "onCommand:cfPipeline.rerunStep",
-    "onCommand:cfPipeline.feedbackAndRerun",
-    "onCommand:cfPipeline.loadExampleProject",
-    "onCommand:cfPipeline.clearExampleProject",
-    "onCommand:cfPipeline.openClaudeTerminal"
-  ],
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "sdlc-pipeline",
-          "title": "SDLC Pipeline",
+          "id": "aidlc",
+          "title": "AIDLC",
           "icon": "media/pipeline-icon.svg"
         }
       ]
     },
     "views": {
-      "sdlc-pipeline": [
+      "aidlc": [
         {
-          "id": "cfPipelineView",
-          "name": "Epic Pipeline",
+          "id": "aidlcSidebar",
+          "name": "Workspace",
           "icon": "media/pipeline-icon.svg",
           "type": "webview"
         }
       ]
     },
-    "configuration": {
-      "title": "SDLC Pipeline",
-      "properties": {
-        "cfPipeline.epicsPath": {
-          "type": "string",
-          "default": "docs/sdlc/epics",
-          "description": "Relative path from workspace root to the SDLC epics folder."
-        },
-        "cfPipeline.templateSourcePath": {
-          "type": "string",
-          "default": "",
-          "description": "Optional path to epic templates. Leave empty to use bundled templates shipped with this extension."
-        },
-        "cfPipeline.platform": {
-          "type": "string",
-          "default": "generic",
-          "enum": [
-            "mobile",
-            "web",
-            "backend",
-            "desktop",
-            "generic"
-          ],
-          "description": "Platform type passed to the MCP server as SDLC_PLATFORM env var. Extension itself ships no skills or agents — your MCP server decides what to load."
-        },
-        "cfPipeline.mcpPackage": {
-          "type": "string",
-          "default": "",
-          "description": "MCP package spec (npm name or npx-compatible GitHub spec, e.g. 'github:owner/repo'). Leave empty to skip auto-config — extension will not install any MCP until you fill this in."
-        },
-        "cfPipeline.mcpServerName": {
-          "type": "string",
-          "default": "sdlc",
-          "description": "MCP server key written into .claude/settings.json under mcpServers.<name>."
-        },
-        "cfPipeline.mcpCommand": {
-          "type": "string",
-          "default": "npx",
-          "description": "MCP server command for Claude settings (for example: npx, uvx, node)."
-        },
-        "cfPipeline.mcpArgs": {
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "description": "Optional MCP server args. If empty, extension uses ['-y', mcpPackage]."
-        },
-        "cfPipeline.mcpEnv": {
-          "type": "object",
-          "default": {},
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "Additional environment variables merged into MCP server env."
-        },
-        "cfPipeline.autoConfigureMcp": {
-          "type": "boolean",
-          "default": false,
-          "description": "Automatically configure Claude Code MCP server on activation. Disabled by default — enable only after you have set cfPipeline.mcpPackage (or cfPipeline.mcpArgs) to your own MCP."
-        }
-      }
-    },
     "commands": [
       {
-        "command": "cfPipeline.refresh",
-        "title": "Refresh Pipeline Status",
-        "icon": "$(refresh)",
-        "category": "SDLC"
+        "command": "aidlc.openBuilder",
+        "title": "Open Workspace Builder",
+        "icon": "$(layout-panel)",
+        "category": "AIDLC"
       },
       {
-        "command": "cfPipeline.openDashboard",
-        "title": "Open Pipeline Dashboard",
-        "icon": "$(dashboard)",
-        "category": "SDLC"
+        "command": "aidlc.showWorkspaceConfig",
+        "title": "Show Workspace Config",
+        "icon": "$(file-code)",
+        "category": "AIDLC"
       },
       {
-        "command": "cfPipeline.selectEpicsFolder",
-        "title": "Select Epics Folder",
-        "icon": "$(folder-opened)",
-        "category": "SDLC"
-      },
-      {
-        "command": "cfPipeline.openSettings",
-        "title": "Pipeline Settings",
-        "icon": "$(gear)",
-        "category": "SDLC"
-      },
-      {
-        "command": "cfPipeline.openArtifact",
-        "title": "Open Artifact",
-        "category": "SDLC"
-      },
-      {
-        "command": "cfPipeline.runPhase",
-        "title": "Run Phase Command",
-        "category": "SDLC"
-      },
-      {
-        "command": "cfPipeline.openPhaseSession",
-        "title": "Open Isolated Phase Session",
-        "category": "SDLC"
-      },
-      {
-        "command": "cfPipeline.reviewGate",
-        "title": "Review Gate (Approve / Reject)",
-        "icon": "$(bell-dot)",
-        "category": "SDLC"
-      },
-      {
-        "command": "cfPipeline.advanceEpic",
-        "title": "Advance Epic (/advance-epic)",
-        "icon": "$(play-circle)",
-        "category": "SDLC"
-      },
-      {
-        "command": "cfPipeline.runStep",
-        "title": "Run Step",
-        "icon": "$(play)",
-        "category": "SDLC"
-      },
-      {
-        "command": "cfPipeline.rerunStep",
-        "title": "Re-run Step",
-        "icon": "$(refresh)",
-        "category": "SDLC"
-      },
-      {
-        "command": "cfPipeline.feedbackAndRerun",
-        "title": "Update Feedback + Re-run",
-        "icon": "$(comment-discussion)",
-        "category": "SDLC"
-      },
-      {
-        "command": "cfPipeline.openReview",
-        "title": "Open Review Panel (manual)",
-        "icon": "$(eye)",
-        "category": "SDLC"
-      },
-      {
-        "command": "cfPipeline.addFeedback",
-        "title": "Add Feedback Note",
-        "icon": "$(comment)",
-        "category": "SDLC"
-      },
-      {
-        "command": "cfPipeline.loadExampleProject",
-        "title": "Load Example Project",
+        "command": "aidlc.initWorkspace",
+        "title": "Init Sample Workspace",
         "icon": "$(rocket)",
-        "category": "SDLC"
+        "category": "AIDLC"
       },
       {
-        "command": "cfPipeline.clearExampleProject",
-        "title": "Clear Example Project",
-        "icon": "$(trash)",
-        "category": "SDLC"
+        "command": "aidlc.addSkill",
+        "title": "Add Skill (template / paste / upload / blank)",
+        "icon": "$(file-code)",
+        "category": "AIDLC"
       },
       {
-        "command": "cfPipeline.openClaudeTerminal",
+        "command": "aidlc.addAgent",
+        "title": "Add Agent",
+        "icon": "$(person)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.addPipeline",
+        "title": "Add Pipeline (chain agents)",
+        "icon": "$(list-ordered)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.openClaudeTerminal",
         "title": "Open Claude CLI Terminal",
         "icon": "$(terminal)",
-        "category": "SDLC"
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.savePreset",
+        "title": "Save Workspace as Template",
+        "icon": "$(save)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.applyPreset",
+        "title": "Load Template",
+        "icon": "$(symbol-snippet)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.deletePreset",
+        "title": "Delete Saved Template",
+        "icon": "$(trash)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.startEpic",
+        "title": "Start Epic",
+        "icon": "$(rocket)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.openEpicsList",
+        "title": "Open Epics List",
+        "icon": "$(checklist)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.insertDemoEpic",
+        "title": "Insert Demo Epic (EPIC-100)",
+        "icon": "$(beaker)",
+        "category": "AIDLC"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "cfPipeline.openClaudeTerminal",
-          "when": "view == cfPipelineView",
+          "command": "aidlc.openBuilder",
+          "when": "view == aidlcSidebar",
           "group": "navigation@0"
         },
         {
-          "command": "cfPipeline.refresh",
-          "when": "view == cfPipelineView",
+          "command": "aidlc.openEpicsList",
+          "when": "view == aidlcSidebar",
           "group": "navigation@1"
         },
         {
-          "command": "cfPipeline.openDashboard",
-          "when": "view == cfPipelineView",
+          "command": "aidlc.openClaudeTerminal",
+          "when": "view == aidlcSidebar",
           "group": "navigation@2"
-        },
-        {
-          "command": "cfPipeline.openSettings",
-          "when": "view == cfPipelineView",
-          "group": "navigation@3"
         }
       ]
     }
@@ -262,9 +152,11 @@
     "package": "vsce package --no-dependencies"
   },
   "dependencies": {
-    "@aidlc/core": "workspace:*"
+    "@aidlc/core": "workspace:*",
+    "js-yaml": "^4.1.1"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "typescript": "^5.3.0"

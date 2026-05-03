@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.8.0 — v2 pivot, breaking
+
+The extension is now a generic agent-workflow runner driven by a per-project `.aidlc/workspace.yaml` instead of an SDLC-pipeline tool. Existing 0.7.x users on the marketplace will see all SDLC features removed; their `docs/sdlc/epics/` content is left untouched on disk but no longer surfaced by the extension.
+
+**Removed (cleanly, no longer available):**
+
+- SDLC pipeline tree view (`docs/sdlc/epics/<KEY>/...` scanner)
+- Pipeline Dashboard webview, Settings panel, Review Gate panel
+- All `cfPipeline.*` commands (Refresh, Open Dashboard, Run Step, Re-run, Review, Feedback, Advance Epic, Load Example Project, Select Epics Folder, …)
+- All `cfPipeline.*` configuration keys (`epicsPath`, `platform`, `mcpPackage`, `mcpServerName`, `mcpCommand`, `mcpArgs`, `mcpEnv`, `autoConfigureMcp`, `templateSourcePath`)
+- Auto-configure of `.claude/settings.json` `mcpServers.<name>` (the MCP configurator is gone)
+- Bundled epic templates (`templates/generic/PRD-TEMPLATE.md`, `TECH-DESIGN-TEMPLATE.md`, …)
+- `cfPipeline.openClaudeTerminal` — **renamed** to `aidlc.openClaudeTerminal` (same behavior, new namespace)
+
+**Activity bar:**
+
+- View container id `sdlc-pipeline` → `aidlc` ("AIDLC")
+- View id `cfPipelineView` → `aidlcSidebar` ("Workspace")
+- The sidebar is now a v2 launcher: **Open Builder** / **Open Claude CLI** / **Open workspace.yaml** / **Switch Project** + a quick stats panel (agents · skills · workflows) and the list of slash commands defined in workspace.yaml
+
+**New (v2 surface):**
+
+- `@aidlc/core` engine — Zod-validated `workspace.yaml` schema, `WorkspaceLoader`, `EnvResolver`, `SkillLoader`, `RunnerRegistry`, `DefaultRunner` (claude CLI shell-out), `CustomRunnerLoader`. 24 unit tests.
+- `aidlc.openBuilder` — main-area visual builder panel with agent / skill / workflow cards, ↑↓ step reorder, on-failure toggle, delete actions
+- `aidlc.initWorkspace` — scaffold `.aidlc/workspace.yaml` + `.aidlc/skills/hello-skill.md`, opens the folder if not already a workspace
+- `aidlc.addSkill` — wizard with 4 sources: load template (5 starters: hello-world, code-reviewer, test-converter, doc-writer, release-notes), paste markdown, upload `.md` file, or open blank file
+- `aidlc.addAgent` — wizard: id + display name + skill picker + Claude model picker (sonnet-4-6 / opus-4-7 / haiku-4-5)
+- `aidlc.addPipeline` — wizard: id + multi-pick agents (in execution order) + on_failure (stop / continue)
+- `aidlc.showWorkspaceConfig` — dump parsed workspace.yaml to the AIDLC output channel (validated, env-resolved)
+
+**Migration:**
+
+- Old `hueanmy.aidlc` listing (last published 0.7.0) is unaffected. Users who want SDLC-style epics should stay on it. The legacy listing will not receive further updates.
+- New 0.8.0 onwards are published as `aidlc-io.aidlc-flow`.
+- Repo home moved to [aidlc-io/aidlc](https://github.com/aidlc-io/aidlc) with monorepo layout (`packages/core` + `packages/extension`).
+
 ## 0.7.2
 
 - feat(ui): redesigned sidebar as a webview — header with logo gradient, "▶ Open Claude CLI" button, per-epic phase strip dots colored by status, action pills (Run / Review / Re-run / Feedback) on each phase row, click row to expand inline details (Input / Output / Command / Artifact + Open Session / Feedback / Review buttons). Replaces the native TreeView.
