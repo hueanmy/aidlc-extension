@@ -102,7 +102,7 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       enableScripts: true,
       localResourceRoots: [this.extensionUri],
     };
-    view.webview.html = this.getHtml();
+    view.webview.html = this.getHtml(view.webview);
     view.webview.onDidReceiveMessage((msg) => this.handleMessage(msg));
     view.onDidChangeVisibility(() => {
       if (view.visible) { this.refresh(); }
@@ -168,19 +168,25 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private getHtml(): string {
+  private getHtml(webview: vscode.Webview): string {
     const nonce = makeNonce();
+    const iconUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'icon.svg'),
+    ).toString();
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy"
-  content="default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  content="default-src 'none'; img-src ${webview.cspSource} https: data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <title>AIDLC</title>
 <style>${SIDEBAR_CSS}</style>
 </head>
 <body><div id="app"></div>
-<script nonce="${nonce}">${SIDEBAR_JS}</script>
+<script nonce="${nonce}">
+window.BRAND_ICON_URI = ${JSON.stringify(iconUri)};
+${SIDEBAR_JS}
+</script>
 </body></html>`;
   }
 }
@@ -226,11 +232,10 @@ body {
 .header { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
 .brand-mark {
   width: 28px; height: 28px; border-radius: 8px;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-3) 100%);
-  display: grid; place-items: center;
-  color: #062423; font-weight: 800; font-size: 13px;
-  box-shadow: 0 4px 14px rgba(94,234,212,0.30);
+  display: block;
+  object-fit: cover;
   flex-shrink: 0;
+  box-shadow: 0 4px 14px rgba(94,234,212,0.20);
 }
 .brand-title { font-size: 11px; letter-spacing: 1.4px; text-transform: uppercase; font-weight: 700; }
 .brand-sub {
@@ -495,7 +500,7 @@ function render() {
 
 function renderHeader() {
   let html = '<div class="header">';
-  html += '<div class="brand-mark">A</div>';
+  html += '<img class="brand-mark" src="' + escapeHtml(window.BRAND_ICON_URI || '') + '" alt="AIDLC" />';
   html += '<div>';
   html += '<div class="brand-title">AIDLC</div>';
   html += '<div class="brand-sub">Agent workflow runner</div>';

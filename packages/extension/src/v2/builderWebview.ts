@@ -155,11 +155,15 @@ export class BuilderPanel {
         localResourceRoots: [extensionUri],
       },
     );
+    panel.iconPath = vscode.Uri.joinPath(extensionUri, 'media', 'icon.svg');
 
-    BuilderPanel.current = new BuilderPanel(panel);
+    BuilderPanel.current = new BuilderPanel(panel, extensionUri);
   }
 
-  private constructor(private readonly panel: vscode.WebviewPanel) {
+  private constructor(
+    private readonly panel: vscode.WebviewPanel,
+    private readonly extensionUri: vscode.Uri,
+  ) {
     this.panel.webview.html = this.getHtml();
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
     this.panel.webview.onDidReceiveMessage(
@@ -410,18 +414,25 @@ export class BuilderPanel {
 
   private getHtml(): string {
     const nonce = makeNonce();
+    const iconUri = this.panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'icon.svg'),
+    ).toString();
+    const cspSource = this.panel.webview.cspSource;
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy"
-  content="default-src 'none'; img-src https: data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+  content="default-src 'none'; img-src ${cspSource} https: data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <title>AIDLC Builder</title>
 <style>${BUILDER_CSS}</style>
 </head>
 <body>
 <div id="app"></div>
-<script nonce="${nonce}">${BUILDER_JS}</script>
+<script nonce="${nonce}">
+window.BRAND_ICON_URI = ${JSON.stringify(iconUri)};
+${BUILDER_JS}
+</script>
 </body>
 </html>`;
   }
@@ -473,9 +484,10 @@ body {
 .brand { display: flex; align-items: center; gap: 10px; }
 .brand-mark {
   width: 36px; height: 36px; border-radius: 10px;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-3) 100%);
-  display: grid; place-items: center; color: #062423; font-weight: 800; font-size: 16px;
-  box-shadow: 0 6px 18px rgba(94,234,212,0.30);
+  display: block;
+  object-fit: cover;
+  flex-shrink: 0;
+  box-shadow: 0 6px 18px rgba(94,234,212,0.20);
 }
 .brand-meta { display: flex; flex-direction: column; }
 .brand-title { font-size: 15px; font-weight: 700; letter-spacing: 0.2px; }
@@ -800,7 +812,7 @@ function render() {
 function renderHeader() {
   let html = '<div class="header">';
   html += '<div class="brand">';
-  html += '<div class="brand-mark">A</div>';
+  html += '<img class="brand-mark" src="' + escapeHtml(window.BRAND_ICON_URI || '') + '" alt="AIDLC" />';
   html += '<div class="brand-meta">';
   html += '<div class="brand-title">AIDLC Builder</div>';
   html += '<div class="brand-sub">Workspace · Agents · Skills · Pipelines</div>';
