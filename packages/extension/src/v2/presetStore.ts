@@ -8,11 +8,19 @@
  * presets stay self-contained — moving across machines / project layouts
  * doesn't break references.
  *
- * Storage: `<context.globalStorageUri>/presets/<id>.json`. Per-extension,
- * persists across VS Code restarts, not synced (unless the user opts into
- * VS Code Settings Sync — which we don't enable here).
+ * Storage layout (since 0.8.x):
+ *   - User-saved templates live **inside the project** at
+ *     `<workspaceRoot>/.aidlc/templates/<id>.json` so they travel with
+ *     the repo and the team can share via git.
+ *   - Built-in templates ship with the extension (e.g. SDLC Pipeline) and
+ *     are loaded via the `builtinLoader` callback at list time.
  *
- * The format is intentionally NOT versioned beyond a `formatVersion: 1`
+ * Earlier versions wrote user presets into VS Code globalStorage. Anyone
+ * upgrading will simply not see those legacy machine-scoped presets in
+ * the picker — they can re-save from a project once. We don't auto-
+ * migrate to keep the flow predictable.
+ *
+ * Format is intentionally NOT versioned beyond a `formatVersion: 1`
  * marker. v0.8 only writes/reads format 1. Future schema changes will
  * either be additive (forward-compat) or shipped under format 2 with a
  * one-shot migration in this file.
@@ -39,13 +47,7 @@ export interface WorkspacePreset {
 }
 
 export class PresetStore {
-  private readonly dir: string;
   private builtinLoader: (() => WorkspacePreset[]) | null = null;
-
-  constructor(globalStorageDir: string) {
-    this.dir = path.join(globalStorageDir, 'presets');
-    fs.mkdirSync(this.dir, { recursive: true });
-  }
 
   /**
    * Wire built-in preset loading. Called once at activation by the host so
@@ -57,48 +59,59 @@ export class PresetStore {
     this.builtinLoader = loader;
   }
 
-  list(): WorkspacePreset[] {
+  /** Resolve the project's user-template directory. */
+  private projectDir(workspaceRoot: string): string {
+    return path.join(workspaceRoot, '.aidlc', 'templates');
+  }
+
+  /**
+   * List all available templates (built-in + project-scoped user
+   * templates). Built-ins come first; user templates sorted by savedAt desc.
+   */
+  list(workspaceRoot: string | null): WorkspacePreset[] {
     const builtins: WorkspacePreset[] = (() => {
       if (!this.builtinLoader) { return []; }
       try { return this.builtinLoader(); } catch { return []; }
     })();
 
     const userPresets: WorkspacePreset[] = [];
-    if (fs.existsSync(this.dir)) {
-      const files = fs.readdirSync(this.dir).filter((f) => f.endsWith('.json'));
-      for (const file of files) {
-        try {
-          const raw = fs.readFileSync(path.join(this.dir, file), 'utf8');
-          const parsed = JSON.parse(raw);
-          if (parsed && parsed.formatVersion === 1 && typeof parsed.id === 'string') {
-            userPresets.push(parsed as WorkspacePreset);
-          }
-        } catch { /* skip corrupt presets — surface as warning when user clicks */ }
+    if (workspaceRoot) {
+      const dir = this.projectDir(workspaceRoot);
+      if (fs.existsSync(dir)) {
+        const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+        for (const file of files) {
+          try {
+            const raw = fs.readFileSync(path.join(dir, file), 'utf8');
+            const parsed = JSON.parse(raw);
+            if (parsed && parsed.formatVersion === 1 && typeof parsed.id === 'string') {
+              userPresets.push(parsed as WorkspacePreset);
+            }
+          } catch { /* skip corrupt presets — surface as warning when user clicks */ }
+        }
       }
     }
 
-    // Built-ins first (user expects shipping defaults at the top), user
-    // presets sorted by savedAt desc (newest first).
     userPresets.sort((a, b) => b.savedAt.localeCompare(a.savedAt));
     return [...builtins, ...userPresets];
   }
 
-  get(id: string): WorkspacePreset | null {
-    const p = path.join(this.dir, `${this.sanitize(id)}.json`);
+  get(workspaceRoot: string, id: string): WorkspacePreset | null {
+    const p = path.join(this.projectDir(workspaceRoot), `${this.sanitize(id)}.json`);
     if (!fs.existsSync(p)) { return null; }
     try {
       return JSON.parse(fs.readFileSync(p, 'utf8')) as WorkspacePreset;
     } catch { return null; }
   }
 
-  save(preset: WorkspacePreset): void {
-    const p = path.join(this.dir, `${this.sanitize(preset.id)}.json`);
-    fs.mkdirSync(this.dir, { recursive: true });
+  save(workspaceRoot: string, preset: WorkspacePreset): void {
+    const dir = this.projectDir(workspaceRoot);
+    fs.mkdirSync(dir, { recursive: true });
+    const p = path.join(dir, `${this.sanitize(preset.id)}.json`);
     fs.writeFileSync(p, JSON.stringify(preset, null, 2), 'utf8');
   }
 
-  delete(id: string): void {
-    const p = path.join(this.dir, `${this.sanitize(id)}.json`);
+  delete(workspaceRoot: string, id: string): void {
+    const p = path.join(this.projectDir(workspaceRoot), `${this.sanitize(id)}.json`);
     if (fs.existsSync(p)) { fs.unlinkSync(p); }
   }
 

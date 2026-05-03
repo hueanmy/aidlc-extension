@@ -484,7 +484,10 @@ function escapeHtml(s) {
 
 function render() {
   const root = document.getElementById('app');
-  if (!state) { root.innerHTML = ''; return; }
+  if (!state) {
+    root.innerHTML = '<div style="padding:32px 12px; text-align:center; color:rgba(255,255,255,0.45); font-size:11px;">Loading…</div>';
+    return;
+  }
 
   let html = renderHeader();
 

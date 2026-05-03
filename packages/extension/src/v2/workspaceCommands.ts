@@ -118,9 +118,9 @@ export function registerV2WorkspaceCommands(
   );
 
   // Preset library — single store instance shared across all preset commands
-  // and the Builder panel (which lists presets in the empty state). Wire the
-  // built-in SDLC preset loader so it shows up alongside user-saved presets.
-  const presetStore = new PresetStore(context.globalStorageUri.fsPath);
+  // and the Builder panel. User templates live in `<project>/.aidlc/templates/`
+  // (project-scoped, committable). Built-ins are loaded from the extension.
+  const presetStore = new PresetStore();
   presetStore.setBuiltinLoader(() => [loadSdlcPreset(context.extensionPath)]);
 
   const savePresetCmd = vscode.commands.registerCommand(

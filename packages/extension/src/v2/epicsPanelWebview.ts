@@ -731,7 +731,10 @@ const PILL_CLASS = {
 
 function render() {
   const root = document.getElementById('app');
-  if (!state) { root.innerHTML = ''; return; }
+  if (!state) {
+    root.innerHTML = '<div style="padding:60px 24px; text-align:center; color:rgba(255,255,255,0.45); font-size:13px;">Loading epics…</div>';
+    return;
+  }
 
   let html = '';
   html += renderHeader();

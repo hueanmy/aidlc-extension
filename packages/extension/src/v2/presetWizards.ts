@@ -57,7 +57,7 @@ export async function savePresetCommand(store: PresetStore): Promise<void> {
     if (cont !== 'Save') { return; }
   }
 
-  const existing = store.list();
+  const existing = store.list(root);
   const existingIds = new Set(existing.map((p) => p.id));
 
   const id = await vscode.window.showInputBox({
@@ -110,7 +110,7 @@ export async function savePresetCommand(store: PresetStore): Promise<void> {
     name: name.trim(),
     description: description.trim(),
   });
-  store.save(preset);
+  store.save(root, preset);
 
   const skillCount = Object.keys(preset.skillContents).length;
   void vscode.window.showInformationMessage(
@@ -124,10 +124,10 @@ export async function applyPresetCommand(store: PresetStore): Promise<void> {
   const root = requireRoot('Apply Preset');
   if (!root) { return; }
 
-  const presets = store.list();
+  const presets = store.list(root);
   if (presets.length === 0) {
     const choice = await vscode.window.showInformationMessage(
-      'No presets saved yet. Build a workspace first, then use "Save Preset" to capture it.',
+      'No templates saved yet. Build a workspace first, then use "Save Template" to capture it.',
       'Init Sample Workspace',
     );
     if (choice === 'Init Sample Workspace') {
@@ -139,11 +139,11 @@ export async function applyPresetCommand(store: PresetStore): Promise<void> {
   const picked = await vscode.window.showQuickPick(
     presets.map((p) => ({
       label: p.builtin ? `$(verified) ${p.name}` : p.name,
-      description: p.builtin ? `${p.id} · built-in` : p.id,
+      description: p.builtin ? `${p.id} · built-in` : `${p.id} · project`,
       detail: presetDetailLine(p),
       preset: p,
     })),
-    { placeHolder: 'Pick a preset to apply', ignoreFocusOut: true, matchOnDetail: true },
+    { placeHolder: 'Pick a template to apply', ignoreFocusOut: true, matchOnDetail: true },
   );
   if (!picked) { return; }
 
@@ -184,35 +184,38 @@ export async function applyPresetCommand(store: PresetStore): Promise<void> {
 // ── deletePreset ─────────────────────────────────────────────────────────
 
 export async function deletePresetCommand(store: PresetStore): Promise<void> {
-  // Only user presets are deletable. Built-ins ship with the extension and
-  // stay read-only — re-installing the extension would just bring them back.
-  const userPresets = store.list().filter((p) => !p.builtin);
+  const root = requireRoot('Delete Template');
+  if (!root) { return; }
+
+  // Only user (project) templates are deletable. Built-ins ship with the
+  // extension and stay read-only — re-installing brings them back.
+  const userPresets = store.list(root).filter((p) => !p.builtin);
   if (userPresets.length === 0) {
     void vscode.window.showInformationMessage(
-      'No user presets to delete (built-in presets are read-only).',
+      'No project templates to delete (built-in templates are read-only).',
     );
     return;
   }
   const picked = await vscode.window.showQuickPick(
     userPresets.map((p) => ({
       label: p.name,
-      description: p.id,
+      description: p.id + ' · project',
       detail: presetDetailLine(p),
       preset: p,
     })),
-    { placeHolder: 'Pick a preset to delete', ignoreFocusOut: true },
+    { placeHolder: 'Pick a project template to delete', ignoreFocusOut: true },
   );
   if (!picked) { return; }
 
   const confirm = await vscode.window.showWarningMessage(
-    `Delete preset \`${picked.preset.id}\`? This cannot be undone.`,
+    `Delete template \`${picked.preset.id}\` from this project? This cannot be undone.`,
     { modal: false },
     'Delete', 'Cancel',
   );
   if (confirm !== 'Delete') { return; }
 
-  store.delete(picked.preset.id);
-  void vscode.window.showInformationMessage(`Deleted preset \`${picked.preset.id}\`.`);
+  store.delete(root, picked.preset.id);
+  void vscode.window.showInformationMessage(`Deleted template \`${picked.preset.id}\`.`);
 }
 
 function presetDetailLine(p: WorkspacePreset): string {

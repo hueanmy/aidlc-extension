@@ -312,6 +312,10 @@ export class BuilderPanel {
         );
         return;
 
+      case 'addStepToPipeline':
+        await this.addStepToPipeline(String(msg.pipelineId ?? ''));
+        return;
+
       case 'deleteStep':
         await this.deleteStep(
           String(msg.pipelineId ?? ''),
@@ -381,6 +385,60 @@ export class BuilderPanel {
       const p = doc.pipelines.find((x) => x.id === pipelineId);
       if (!p || !Array.isArray(p.steps)) { return false; }
       (p.steps as string[]).splice(idx, 1);
+    });
+  }
+
+  /**
+   * Append a step to an existing pipeline. QuickPick from declared agents
+   * (already-in-pipeline ones are flagged in the detail line, but still
+   * pickable so the user can intentionally add a duplicate).
+   */
+  private async addStepToPipeline(pipelineId: string): Promise<void> {
+    if (!pipelineId) { return; }
+    const root = this.getRootOrWarn();
+    if (!root) { return; }
+    const doc = readYaml(root);
+    if (!doc) { return; }
+
+    if (doc.agents.length === 0) {
+      const choice = await vscode.window.showWarningMessage(
+        'No agents declared yet — add one before chaining steps.',
+        'Add Agent',
+      );
+      if (choice === 'Add Agent') {
+        await vscode.commands.executeCommand('aidlc.addAgent');
+      }
+      return;
+    }
+
+    const pipeline = doc.pipelines.find((x) => x.id === pipelineId);
+    if (!pipeline) { return; }
+    const currentSteps = Array.isArray(pipeline.steps)
+      ? (pipeline.steps as string[]).map(String)
+      : [];
+
+    const picked = await vscode.window.showQuickPick(
+      doc.agents.map((a) => {
+        const id = String(a.id);
+        const name = typeof a.name === 'string' ? a.name : id;
+        const inPipeline = currentSteps.includes(id);
+        return {
+          label: id,
+          description: name,
+          detail: inPipeline ? '· already in pipeline (will duplicate)' : '',
+          id,
+        };
+      }),
+      { placeHolder: `Append a step to \`${pipelineId}\``, ignoreFocusOut: true, matchOnDetail: true },
+    );
+    if (!picked) { return; }
+
+    this.mutateYaml((d) => {
+      const p = d.pipelines.find((x) => x.id === pipelineId);
+      if (!p) { return false; }
+      const steps = Array.isArray(p.steps) ? (p.steps as string[]) : [];
+      steps.push(picked.id);
+      p.steps = steps;
     });
   }
 
@@ -530,6 +588,48 @@ body {
   padding: 0;
   border-radius: 6px;
   text-transform: none;
+}
+
+.tabs {
+  display: flex; gap: 2px;
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: 16px;
+}
+.tab {
+  display: flex; align-items: center; gap: 7px;
+  padding: 9px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all .12s ease;
+  margin-bottom: -1px;
+}
+.tab:hover { color: var(--accent); }
+.tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.tab-count {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--glass);
+  border: 1px solid var(--hairline);
+  color: var(--text-muted);
+  letter-spacing: 0;
+}
+.tab.active .tab-count {
+  background: rgba(94,234,212,0.16);
+  border-color: rgba(94,234,212,0.34);
+  color: var(--accent);
 }
 
 .section { margin-bottom: 20px; }
@@ -725,13 +825,110 @@ body {
 .failure-stop { color: var(--warn); border-color: rgba(251,191,36,0.30); background: rgba(251,191,36,0.10); }
 .failure-continue { color: var(--text-soft); border-color: rgba(255,255,255,0.10); background: rgba(255,255,255,0.04); }
 
-.steps { display: flex; flex-direction: column; gap: 4px; }
-.step {
+/* Mermaid-style flowchart — horizontal LR layout, scroll-x when wide.
+ * Horizontal saves vertical space for long pipelines (9+ steps fit
+ * without becoming a tall scroll-wall). */
+.flowchart {
+  display: flex; flex-direction: row; align-items: center;
+  padding: 14px 4px 6px;
+  overflow-x: auto;
+  gap: 0;
+}
+.flow-node {
   display: flex; align-items: center; gap: 8px;
-  padding: 5px 10px;
-  background: rgba(0,0,0,0.18);
-  border: 1px solid var(--hairline);
-  border-radius: 7px;
+  flex-shrink: 0;
+  min-width: 130px;
+  max-width: 200px;
+  padding: 9px 12px;
+  background: linear-gradient(135deg, rgba(94,234,212,0.06), rgba(255,255,255,0.02));
+  border: 1.5px solid rgba(94,234,212,0.22);
+  border-radius: 10px;
+  position: relative;
+  transition: all .15s ease;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+}
+.flow-node:hover {
+  border-color: rgba(94,234,212,0.45);
+  background: linear-gradient(135deg, rgba(94,234,212,0.10), rgba(255,255,255,0.04));
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(94,234,212,0.18);
+  z-index: 2;
+}
+.flow-num {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 9.5px;
+  color: var(--text-faint);
+  width: 14px;
+  flex-shrink: 0;
+}
+.flow-id {
+  flex: 1; min-width: 0;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.flow-actions {
+  display: flex; gap: 2px;
+  opacity: 0;
+  transition: opacity .12s ease;
+  flex-shrink: 0;
+}
+.flow-node:hover .flow-actions { opacity: 1; }
+.flow-actions .btn-icon {
+  width: 20px; height: 20px;
+  font-size: 9.5px;
+  border-radius: 4px;
+}
+
+/* Horizontal arrow connector between nodes. */
+.flow-edge {
+  width: 24px;
+  height: 2px;
+  background: linear-gradient(90deg, rgba(94,234,212,0.55) 0%, rgba(94,234,212,0.20) 100%);
+  position: relative;
+  flex-shrink: 0;
+  margin: 0 2px;
+  border-radius: 2px;
+}
+.flow-edge::after {
+  content: '';
+  position: absolute;
+  right: -1px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0; height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 7px solid rgba(94,234,212,0.45);
+}
+
+/* Trailing "+ add step" button. Sits at the end of the flow row;
+ * dashed circle so it reads as an action target rather than a node. */
+.flow-add-btn {
+  flex-shrink: 0;
+  display: grid; place-items: center;
+  width: 32px; height: 32px;
+  background: rgba(94,234,212,0.04);
+  border: 1.5px dashed rgba(94,234,212,0.32);
+  border-radius: 50%;
+  color: var(--accent);
+  font-size: 16px; font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all .15s ease;
+  margin-left: 4px;
+}
+.flow-add-btn:hover {
+  background: rgba(94,234,212,0.16);
+  border-color: rgba(94,234,212,0.55);
+  border-style: solid;
+  transform: scale(1.10);
+  box-shadow: 0 0 14px rgba(94,234,212,0.25);
 }
 .step-num {
   font-family: 'SF Mono', Menlo, Consolas, monospace;
@@ -768,12 +965,29 @@ body {
 const BUILDER_JS = `
 const vscode = acquireVsCodeApi();
 let state = null;
+/** Persisted across panel hide/show + soft reloads via vscode.setState. */
+const persisted = vscode.getState() || {};
+let activeTab = persisted.activeTab || 'workflows';
+
+function persistUiState() {
+  vscode.setState({ ...(vscode.getState() || {}), activeTab });
+}
 
 window.addEventListener('message', (e) => {
   const msg = e.data;
   if (msg && msg.type === 'state') {
-    state = msg.state;
-    render();
+    state = msg.state || {};
+    // Defensive backfill so .length on undefined never throws and keeps
+    // an old webview HTML alive when the extension adds new state fields.
+    if (!Array.isArray(state.agents)) state.agents = [];
+    if (!Array.isArray(state.skills)) state.skills = [];
+    if (!Array.isArray(state.pipelines)) state.pipelines = [];
+    if (!Array.isArray(state.epics)) state.epics = [];
+    try {
+      render();
+    } catch (err) {
+      console.error('[AIDLC Builder] render failed:', err);
+    }
   }
 });
 
@@ -789,7 +1003,10 @@ function escapeHtml(s) {
 
 function render() {
   const root = document.getElementById('app');
-  if (!state) { root.innerHTML = ''; return; }
+  if (!state) {
+    root.innerHTML = '<div style="padding:60px 24px; text-align:center; color:rgba(255,255,255,0.45); font-size:13px;">Loading workspace…<br><span style="font-size:11px; opacity:0.7;">(if this stays for &gt;15s, another VS Code extension may be blocking activation — try disabling unused extensions and reload)</span></div>';
+    return;
+  }
 
   let html = '';
   html += renderHeader();
@@ -799,10 +1016,12 @@ function render() {
   } else if (!state.configExists) {
     html += renderNoConfig();
   } else {
-    html += renderAgents();
-    html += renderSkills();
-    html += renderWorkflows();
-    html += renderEpics();
+    html += renderTabs();
+    if (activeTab === 'workflows') { html += renderWorkflows(); }
+    else if (activeTab === 'agents') { html += renderAgents(); }
+    else if (activeTab === 'skills') { html += renderSkills(); }
+    else if (activeTab === 'epics') { html += renderEpics(); }
+    else { activeTab = 'workflows'; html += renderWorkflows(); }
   }
 
   html += renderFooter();
@@ -851,6 +1070,25 @@ function renderNoConfig() {
     '<button class="btn btn-primary" data-action="init">Init Sample Workspace</button>' +
     '<button class="btn btn-ghost" data-action="applyPreset">Load Template</button>' +
     '</div></div>';
+}
+
+function renderTabs() {
+  const tabs = [
+    { id: 'workflows', label: 'Workflows', count: state.pipelines.length },
+    { id: 'agents',    label: 'Agents',    count: state.agents.length },
+    { id: 'skills',    label: 'Skills',    count: state.skills.length },
+    { id: 'epics',     label: 'Epics',     count: state.epics.length },
+  ];
+  let html = '<nav class="tabs">';
+  for (const t of tabs) {
+    const cls = activeTab === t.id ? 'tab active' : 'tab';
+    html += '<button class="' + cls + '" data-action="setTab" data-tab="' + escapeHtml(t.id) + '">';
+    html += '<span class="tab-label">' + escapeHtml(t.label) + '</span>';
+    html += '<span class="tab-count">' + t.count + '</span>';
+    html += '</button>';
+  }
+  html += '</nav>';
+  return html;
 }
 
 function renderAgents() {
@@ -981,27 +1219,23 @@ function renderWorkflow(p) {
   html += '<button class="btn btn-icon btn-ghost" data-action="deletePipeline" data-id="' + escapeHtml(p.id) + '" title="Delete workflow">×</button>';
   html += '</div>';
 
-  html += '<div class="steps">';
-  if (p.steps.length === 0) {
-    html += '<div class="empty">No steps. Add an agent.</div>';
-  } else {
-    for (let i = 0; i < p.steps.length; i++) {
-      html += renderStep(p.id, p.steps[i], i, p.steps.length);
-      if (i < p.steps.length - 1) {
-        html += '<div class="step-arrow" style="text-align:center">↓</div>';
-      }
-    }
+  html += '<div class="flowchart">';
+  for (let i = 0; i < p.steps.length; i++) {
+    html += renderFlowNode(p.id, p.steps[i], i, p.steps.length);
+    html += '<div class="flow-edge"></div>';
   }
+  // Trailing "+ add step" button — sits at the end of the chain.
+  html += '<button class="flow-add-btn" data-action="addStepToPipeline" data-pipeline-id="' + escapeHtml(p.id) + '" title="Append a step to this workflow">+</button>';
   html += '</div>';
   html += '</div>';
   return html;
 }
 
-function renderStep(pipelineId, agentId, idx, total) {
-  let html = '<div class="step">';
-  html += '<span class="step-num">' + (idx + 1) + '.</span>';
-  html += '<span class="step-id">' + escapeHtml(agentId) + '</span>';
-  html += '<div class="step-actions">';
+function renderFlowNode(pipelineId, agentId, idx, total) {
+  let html = '<div class="flow-node">';
+  html += '<span class="flow-num">' + (idx + 1) + '</span>';
+  html += '<span class="flow-id">' + escapeHtml(agentId) + '</span>';
+  html += '<div class="flow-actions">';
   if (idx > 0) {
     html += '<button class="btn btn-icon btn-ghost" data-action="reorderStep" data-pipeline-id="' + escapeHtml(pipelineId) + '" data-from="' + idx + '" data-to="' + (idx - 1) + '" title="Move up">↑</button>';
   }
@@ -1107,6 +1341,15 @@ document.addEventListener('click', (e) => {
   }
 
   switch (action) {
+    case 'setTab': {
+      const t = target.dataset.tab;
+      if (t && t !== activeTab) {
+        activeTab = t;
+        persistUiState();
+        render();
+      }
+      return;
+    }
     case 'init':                    post('init'); return;
     case 'applyPreset':             post('applyPreset'); return;
     case 'savePreset':              post('savePreset'); return;
@@ -1124,6 +1367,9 @@ document.addEventListener('click', (e) => {
     case 'deleteSkill':             post('deleteSkill', { id: target.dataset.id }); return;
     case 'deletePipeline':          post('deletePipeline', { id: target.dataset.id }); return;
     case 'togglePipelineFailure':   post('togglePipelineFailure', { pipelineId: target.dataset.pipelineId }); return;
+    case 'addStepToPipeline':
+      post('addStepToPipeline', { pipelineId: target.dataset.pipelineId });
+      return;
     case 'reorderStep':
       post('reorderStep', {
         pipelineId: target.dataset.pipelineId,
