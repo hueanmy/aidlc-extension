@@ -28,5 +28,8 @@
       "@vscode/vsce-sign",
       "keytar"
     ]
+  },
+  "dependencies": {
+    "aidlc": "link:../../../Library/pnpm/global/5/node_modules/aidlc"
   }
 }

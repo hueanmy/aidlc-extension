@@ -4,9 +4,16 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  aidlc: link:../../../Library/pnpm/global/5/node_modules/aidlc
+
 importers:
 
   .:
+    dependencies:
+      aidlc:
+        specifier: link:../../../Library/pnpm/global/5/node_modules/aidlc
+        version: link:../../../Library/pnpm/global/5/node_modules/aidlc
     devDependencies:
       typescript:
         specifier: ^5.3.0
@@ -17,6 +24,9 @@ importers:
       '@aidlc/core':
         specifier: workspace:*
         version: link:../core
+      chalk:
+        specifier: ^4.1.2
+        version: 4.1.2
       commander:
         specifier: ^11.1.0
         version: 11.1.0

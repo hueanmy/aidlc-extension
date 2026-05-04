@@ -15,6 +15,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { exec } from 'child_process';
 
 import { registerV2WorkspaceCommands } from './v2/workspaceCommands';
 import { SidebarWebviewProvider } from './v2/sidebarWebview';
@@ -84,6 +85,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
+  // Check for aidlc CLI — prompt once per install if missing.
+  checkCliInstalled(context, output);
+
   // Status bar quick-launcher into the Builder.
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
   status.text = '$(rocket) AIDLC';
@@ -96,6 +100,45 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {}
+
+/**
+ * Check if the `aidlc` CLI is on PATH. Runs asynchronously so activation is
+ * never blocked. Prompts once per VS Code install (globalState flag). The flag
+ * is set only after the user dismisses/acts on the prompt, so a crashed session
+ * doesn't permanently suppress the prompt.
+ */
+function checkCliInstalled(
+  context: vscode.ExtensionContext,
+  output: vscode.OutputChannel,
+): void {
+  const SEEN_KEY = 'aidlc.cliInstallPromptSeen';
+  const cmd = process.platform === 'win32' ? 'where aidlc' : 'which aidlc';
+
+  // Run the check off the activation hot path — no blocking.
+  exec(cmd, { timeout: 5000 }, (err, stdout) => {
+    if (!err && stdout.trim()) {
+      output.appendLine(`aidlc CLI found: ${stdout.trim()}`);
+      return;
+    }
+
+    output.appendLine('aidlc CLI not found on PATH.');
+    if (context.globalState.get<boolean>(SEEN_KEY)) { return; }
+
+    void vscode.window.showInformationMessage(
+      'The AIDLC CLI (`aidlc`) is not installed. Install it to run agents, manage workspace config, and watch pipeline runs from the terminal.',
+      'Install via npm',
+      'Not now',
+    ).then((pick) => {
+      // Mark seen only after the user responds, so a crashed session re-prompts.
+      void context.globalState.update(SEEN_KEY, true);
+      if (pick !== 'Install via npm') { return; }
+      const terminal = vscode.window.createTerminal({ name: 'AIDLC CLI Setup' });
+      terminal.sendText('npm install -g aidlc');
+      terminal.show();
+      output.appendLine('Opened terminal to run: npm install -g aidlc');
+    });
+  });
+}
 
 /**
  * Watcher for `<workspace>/.aidlc/workspace.yaml`. Returns null when no
