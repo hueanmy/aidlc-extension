@@ -1,13 +1,16 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { PhaseReview } from './epicScanner';
+import { PhaseReview, PhaseStatusValue } from './epicScanner';
 import { PHASE_ORDER, PHASE_ID_SET } from './phases';
+import { atomicWrite } from './atomicWrite';
+import { appendEvent, EventActor } from './eventLog';
 
 export interface ApproveOptions {
   phaseId: string;
   epicFolderPath: string;
   reviewer: string;
   comment?: string;
+  actor?: EventActor;
 }
 
 export interface RejectOptions {
@@ -16,16 +19,19 @@ export interface RejectOptions {
   epicFolderPath: string;
   reviewer: string;
   reason: string;
+  actor?: EventActor;
 }
 
 /**
  * Flip an awaiting_human_review phase to passed.
- * Returns the written status object.
+ * Writes atomically and appends an event to the epic's event log.
  */
 export function approvePhase(opts: ApproveOptions): Record<string, unknown> {
-  const { phaseId, epicFolderPath, reviewer, comment } = opts;
+  const { phaseId, epicFolderPath, reviewer, comment, actor = 'cli' } = opts;
   const statusPath = phaseStatusPath(epicFolderPath, phaseId);
   const current = readPhaseStatus(statusPath) ?? {};
+  const from = (current.status as string | undefined) ?? 'unknown';
+
   const verdict: PhaseReview = {
     decision: 'pass',
     reviewer,
@@ -38,7 +44,19 @@ export function approvePhase(opts: ApproveOptions): Record<string, unknown> {
     updated_at: new Date().toISOString(),
     last_review: verdict,
   };
-  fs.writeFileSync(statusPath, JSON.stringify(next, null, 2) + '\n', 'utf8');
+
+  atomicWrite(statusPath, JSON.stringify(next, null, 2) + '\n');
+
+  appendEvent(epicFolderPath, {
+    ts: new Date().toISOString(),
+    actor,
+    phase: phaseId,
+    from,
+    to: 'passed',
+    by: reviewer,
+    reason: verdict.reason,
+  });
+
   return next;
 }
 
@@ -49,9 +67,11 @@ export function approvePhase(opts: ApproveOptions): Record<string, unknown> {
  *  - target phase (rejectTo): archive current artifacts, bump revision, write rejected.
  *  - intermediate phases (strictly between target and current): passed/done → stale.
  *  - current phase (fromPhaseId): untouched.
+ *
+ * All writes are atomic. One event is appended per affected phase.
  */
 export function rejectPhase(opts: RejectOptions): void {
-  const { fromPhaseId, rejectTo, epicFolderPath, reviewer, reason } = opts;
+  const { fromPhaseId, rejectTo, epicFolderPath, reviewer, reason, actor = 'cli' } = opts;
 
   if (!PHASE_ID_SET.has(fromPhaseId)) {
     throw new Error(`Unknown phase: ${fromPhaseId}`);
@@ -82,13 +102,13 @@ export function rejectPhase(opts: RejectOptions): void {
   const targetPath = phaseStatusPath(epicFolderPath, rejectTo);
   const targetCurrent = readPhaseStatus(targetPath);
   const targetRevision = (targetCurrent?.revision as number | undefined) ?? 0;
+  const targetFrom = (targetCurrent?.status as string | undefined) ?? 'unknown';
 
   if (targetRevision > 0) {
     archivePhaseDir(epicFolderPath, rejectTo, targetRevision);
   }
 
-  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  fs.writeFileSync(
+  atomicWrite(
     targetPath,
     JSON.stringify({
       phase: rejectTo,
@@ -97,8 +117,17 @@ export function rejectPhase(opts: RejectOptions): void {
       updated_at: new Date().toISOString(),
       last_review: verdict,
     }, null, 2) + '\n',
-    'utf8',
   );
+
+  appendEvent(epicFolderPath, {
+    ts: new Date().toISOString(),
+    actor,
+    phase: rejectTo,
+    from: targetFrom,
+    to: 'rejected',
+    by: reviewer,
+    reason: reason.trim(),
+  });
 
   // Intermediate phases: passed/done → stale
   for (let i = toIdx + 1; i < fromIdx; i++) {
@@ -106,17 +135,72 @@ export function rejectPhase(opts: RejectOptions): void {
     const midPath = phaseStatusPath(epicFolderPath, mid);
     const midState = readPhaseStatus(midPath);
     if (midState?.status === 'passed' || midState?.status === 'done') {
-      fs.writeFileSync(
+      atomicWrite(
         midPath,
         JSON.stringify({
           ...midState,
           status: 'stale',
           updated_at: new Date().toISOString(),
         }, null, 2) + '\n',
-        'utf8',
       );
+
+      appendEvent(epicFolderPath, {
+        ts: new Date().toISOString(),
+        actor,
+        phase: mid,
+        from: midState.status as string,
+        to: 'stale',
+        by: reviewer,
+        reason: `cascade from ${fromPhaseId} → ${rejectTo}`,
+      });
     }
   }
+}
+
+export interface SetPhaseStatusOptions {
+  epicFolderPath: string;
+  phaseId: string;
+  status: PhaseStatusValue;
+  by: string;
+  actor?: EventActor;
+  reason?: string;
+}
+
+/**
+ * Directly set any phase to any valid status.
+ * No cascade — only the named phase is touched.
+ * Writes atomically and appends an event to the log.
+ */
+export function setPhaseStatus(opts: SetPhaseStatusOptions): void {
+  const { epicFolderPath, phaseId, status, by, actor = 'cli', reason } = opts;
+
+  if (!PHASE_ID_SET.has(phaseId)) {
+    throw new Error(`Unknown phase: ${phaseId}`);
+  }
+
+  const statusPath = phaseStatusPath(epicFolderPath, phaseId);
+  const current = readPhaseStatus(statusPath) ?? {};
+  const from = (current.status as string | undefined) ?? 'none';
+
+  const next = {
+    ...current,
+    phase: phaseId,
+    status,
+    updated_at: new Date().toISOString(),
+    revision: typeof current.revision === 'number' ? current.revision : 1,
+  };
+
+  atomicWrite(statusPath, JSON.stringify(next, null, 2) + '\n');
+
+  appendEvent(epicFolderPath, {
+    ts: new Date().toISOString(),
+    actor,
+    phase: phaseId,
+    from,
+    to: status,
+    by,
+    reason,
+  });
 }
 
 export function phaseStatusPath(epicFolderPath: string, phaseId: string): string {

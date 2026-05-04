@@ -442,6 +442,7 @@ export function activate(context: vscode.ExtensionContext) {
     let mdWatcher: vscode.FileSystemWatcher | undefined;
     let statusWatcher: vscode.FileSystemWatcher | undefined;
     let pipelineWatcher: vscode.FileSystemWatcher | undefined;
+    let eventsWatcher: vscode.FileSystemWatcher | undefined;
     function recreateWatcher() {
       if (!pipelineProvider) {
         return;
@@ -450,6 +451,7 @@ export function activate(context: vscode.ExtensionContext) {
         mdWatcher?.dispose();
         statusWatcher?.dispose();
         pipelineWatcher?.dispose();
+        eventsWatcher?.dispose();
         const isAbsolute = path.isAbsolute(epicsRelativePath);
         const mdPattern = isAbsolute
           ? new vscode.RelativePattern(vscode.Uri.file(epicsRelativePath), '**/*.md')
@@ -460,13 +462,23 @@ export function activate(context: vscode.ExtensionContext) {
         const pipelinePattern = isAbsolute
           ? new vscode.RelativePattern(vscode.Uri.file(epicsRelativePath), '**/pipeline.json')
           : `**/${epicsRelativePath}/**/pipeline.json`;
-        mdWatcher = vscode.workspace.createFileSystemWatcher(mdPattern);
-        statusWatcher = vscode.workspace.createFileSystemWatcher(statusPattern);
+        // events.jsonl written by the CLI — watch so the extension stays live
+        // when the user approves/rejects from the terminal.
+        const eventsPattern = isAbsolute
+          ? new vscode.RelativePattern(vscode.Uri.file(epicsRelativePath), '**/.aidlc/events.jsonl')
+          : `**/${epicsRelativePath}/**/.aidlc/events.jsonl`;
+        mdWatcher       = vscode.workspace.createFileSystemWatcher(mdPattern);
+        statusWatcher   = vscode.workspace.createFileSystemWatcher(statusPattern);
         pipelineWatcher = vscode.workspace.createFileSystemWatcher(pipelinePattern);
-        for (const w of [mdWatcher, statusWatcher, pipelineWatcher]) {
-          w.onDidChange(() => pipelineProvider.refresh());
-          w.onDidCreate(() => pipelineProvider.refresh());
-          w.onDidDelete(() => pipelineProvider.refresh());
+        eventsWatcher   = vscode.workspace.createFileSystemWatcher(eventsPattern);
+        const onFsChange = () => {
+          pipelineProvider.refresh();
+          DashboardPanel.currentPanel?.update(pipelineProvider.getEpics());
+        };
+        for (const w of [mdWatcher, statusWatcher, pipelineWatcher, eventsWatcher]) {
+          w.onDidChange(onFsChange);
+          w.onDidCreate(onFsChange);
+          w.onDidDelete(onFsChange);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -506,6 +518,7 @@ export function activate(context: vscode.ExtensionContext) {
         mdWatcher?.dispose();
         statusWatcher?.dispose();
         pipelineWatcher?.dispose();
+        eventsWatcher?.dispose();
       },
     };
 

@@ -34,9 +34,11 @@ export async function cmdReview(
   const reviewer = opts.reviewer ?? os.userInfo().username;
 
   if (opts.approve !== undefined) {
+    // Commander sets opts.approve = true (boolean) when --approve is used with no value.
+    const comment = typeof opts.approve === 'string' ? opts.approve : '';
     const spinner = ora(`Approving ${epicKey} / ${phaseId}…`).start();
     try {
-      approvePhase({ phaseId, epicFolderPath: epic.folderPath, reviewer, comment: opts.approve });
+      approvePhase({ phaseId, epicFolderPath: epic.folderPath, reviewer, comment });
       spinner.succeed(chalk.green(`Approved ${epicKey} / ${phaseId}`));
     } catch (err) {
       spinner.fail(err instanceof Error ? err.message : String(err));

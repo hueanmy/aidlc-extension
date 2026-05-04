@@ -29,11 +29,32 @@ export function readConfig(workspaceRoot: string): CliConfig {
   const p = configPath(workspaceRoot);
   if (!fs.existsSync(p)) { return { ...DEFAULTS }; }
   try {
-    const raw = JSON.parse(fs.readFileSync(p, 'utf8')) as Partial<CliConfig>;
-    return { ...DEFAULTS, ...raw };
+    const raw = JSON.parse(fs.readFileSync(p, 'utf8')) as Record<string, unknown>;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { return { ...DEFAULTS }; }
+    return sanitizeConfig(raw);
   } catch {
     return { ...DEFAULTS };
   }
+}
+
+function sanitizeConfig(raw: Record<string, unknown>): CliConfig {
+  const def = DEFAULTS as unknown as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...DEFAULTS };
+  for (const key of Object.keys(DEFAULTS)) {
+    const incoming = raw[key];
+    const expected = def[key];
+    if (incoming === undefined) { continue; }
+    // Accept only values whose JS type matches the default
+    if (Array.isArray(expected)) {
+      if (Array.isArray(incoming) && incoming.every(v => typeof v === 'string')) {
+        out[key] = incoming;
+      }
+    } else if (typeof incoming === typeof expected) {
+      out[key] = incoming;
+    }
+    // Mismatched type → silently keep the default
+  }
+  return out as unknown as CliConfig;
 }
 
 export function writeConfig(workspaceRoot: string, config: CliConfig): void {

@@ -18,6 +18,7 @@
   "dependencies": {
     "@aidlc/core": "*",
     "chalk": "^4.1.2",
+    "chokidar": "^3.6.0",
     "cli-table3": "^0.6.3",
     "commander": "^11.1.0",
     "ora": "^5.4.1"

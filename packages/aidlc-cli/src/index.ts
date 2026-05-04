@@ -8,6 +8,11 @@ import { cmdEpicNew } from './commands/epic';
 import { cmdMigrate } from './commands/migrate';
 import { cmdReview } from './commands/review';
 import { cmdConfigShow, cmdConfigSet } from './commands/config';
+import { cmdWatch } from './commands/watch';
+import { cmdTail } from './commands/tail';
+import {
+  cmdPhaseSet, cmdPhaseStart, cmdPhaseDone, cmdPhaseReset, cmdPhaseSkip,
+} from './commands/phase';
 
 const program = new Command();
 
@@ -106,6 +111,75 @@ configCmd
   .action((key: string, value: string, _opts, cmd) => {
     const ws = resolveWorkspace(cmd.parent?.parent?.opts().workspace);
     cmdConfigSet(ws, key, value);
+  });
+
+// ── phase ─────────────────────────────────────────────────────────────────────
+const phaseCmd = program
+  .command('phase')
+  .description('Directly control a phase status (bypass the review gate)');
+
+phaseCmd
+  .command('set <epic> <phase> <status>')
+  .description('Set any phase to any valid status')
+  .option('--reviewer <name>', 'Actor name (defaults to OS username)')
+  .option('--reason <text>',   'Reason recorded in the event log')
+  .action((epic: string, phase: string, status: string, opts, cmd) => {
+    const ws = resolveWorkspace(cmd.parent?.parent?.opts().workspace);
+    cmdPhaseSet(ws, epic.toUpperCase(), phase, status, opts);
+  });
+
+phaseCmd
+  .command('start <epic> <phase>')
+  .description('Mark a phase as in_progress')
+  .option('--reviewer <name>')
+  .action((epic: string, phase: string, opts, cmd) => {
+    const ws = resolveWorkspace(cmd.parent?.parent?.opts().workspace);
+    cmdPhaseStart(ws, epic.toUpperCase(), phase, opts);
+  });
+
+phaseCmd
+  .command('done <epic> <phase>')
+  .description('Mark a phase as passed (bypass approve gate)')
+  .option('--reviewer <name>')
+  .action((epic: string, phase: string, opts, cmd) => {
+    const ws = resolveWorkspace(cmd.parent?.parent?.opts().workspace);
+    cmdPhaseDone(ws, epic.toUpperCase(), phase, opts);
+  });
+
+phaseCmd
+  .command('reset <epic> <phase>')
+  .description('Reset a phase to pending (no cascade)')
+  .option('--reviewer <name>')
+  .action((epic: string, phase: string, opts, cmd) => {
+    const ws = resolveWorkspace(cmd.parent?.parent?.opts().workspace);
+    cmdPhaseReset(ws, epic.toUpperCase(), phase, opts);
+  });
+
+phaseCmd
+  .command('skip <epic> <phase>')
+  .description('Mark a phase as passed without running it (jump forward)')
+  .option('--reviewer <name>')
+  .action((epic: string, phase: string, opts, cmd) => {
+    const ws = resolveWorkspace(cmd.parent?.parent?.opts().workspace);
+    cmdPhaseSkip(ws, epic.toUpperCase(), phase, opts);
+  });
+
+// ── watch ─────────────────────────────────────────────────────────────────────
+program
+  .command('watch [epic]')
+  .description('Re-render status on every status.json / pipeline.json change')
+  .action((epic: string | undefined, _opts, cmd) => {
+    const ws = resolveWorkspace(cmd.parent?.opts().workspace);
+    cmdWatch(ws, epic);
+  });
+
+// ── tail ──────────────────────────────────────────────────────────────────────
+program
+  .command('tail [epic]')
+  .description('Stream the event log in real time (approve / reject history)')
+  .action((epic: string | undefined, _opts, cmd) => {
+    const ws = resolveWorkspace(cmd.parent?.opts().workspace);
+    cmdTail(ws, epic);
   });
 
 program.parse(process.argv);
