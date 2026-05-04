@@ -1,0 +1,22 @@
+{
+  "name": "@aidlc/core",
+  "version": "0.1.0",
+  "description": "Pure-Node AIDLC workflow logic shared by the VSCode extension and the CLI.",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.6.0"
+  }
+}

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { EpicStatus, PhaseStatus, PhaseReview } from './epicScanner';
+import { EpicStatus, PhaseStatus, PhaseReview } from '@aidlc/core';
 
 /**
  * Review panel for `awaiting_human_review` phases.

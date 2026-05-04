@@ -302,13 +302,20 @@
     }
   },
   "scripts": {
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "package": "vsce package"
+    "compile": "tsc -b ./",
+    "watch": "tsc -b -w ./",
+    "package": "npm run compile && vsce package",
+    "test": "npm run -w @aidlc/core test"
+  },
+  "dependencies": {
+    "@aidlc/core": "*"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "typescript": "^5.3.0"
-  }
+  },
+  "workspaces": [
+    "packages/*"
+  ]
 }

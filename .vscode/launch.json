@@ -10,7 +10,8 @@
         "${workspaceFolder}"
       ],
       "outFiles": [
-        "${workspaceFolder}/out/**/*.js"
+        "${workspaceFolder}/out/**/*.js",
+        "${workspaceFolder}/packages/*/dist/**/*.js"
       ],
       "preLaunchTask": "npm: compile"
     }

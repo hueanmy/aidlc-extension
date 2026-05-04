@@ -2,5 +2,6 @@
 node_modules/
 scripts/demo/out-agents/
 out/
+packages/*/dist/
 *.vsix
 .claude/settings.local.json

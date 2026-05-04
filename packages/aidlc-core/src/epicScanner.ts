@@ -136,6 +136,9 @@ export class EpicScanner {
   }
 
   scanEpic(key: string): EpicStatus {
+    if (!/^[A-Z][A-Z0-9]*-\d+$/.test(key)) {
+      throw new Error(`Invalid epic key: ${key}`);
+    }
     const epicDir = path.join(this.epicsDir, key);
     const title = this.extractTitle(epicDir, key);
 
@@ -389,14 +392,12 @@ export class EpicScanner {
   private hasReleaseTag(key: string): boolean {
     try {
       const { execSync } = require('child_process');
-      // Check if any release tag exists that includes commits from this epic
-      const result = execSync(`git log --all --oneline --grep="${key}" --format="%D" | grep -o "tag: v[0-9]*\\.[0-9]*\\.[0-9]*" | head -1`, {
+      const log = execSync(`git log --all --oneline --grep="${key}" --format="%D"`, {
         cwd: this.epicsDir,
         encoding: 'utf8',
         timeout: 5000,
-        shell: '/bin/zsh',
       });
-      return result.trim().length > 0;
+      return /tag: v\d+\.\d+\.\d+/.test(log);
     } catch {
       return false;
     }

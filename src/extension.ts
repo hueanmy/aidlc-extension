@@ -4,10 +4,8 @@ import * as fs from 'fs';
 import { PipelineProvider } from './pipelineProvider';
 import { DashboardPanel } from './dashboardPanel';
 import { SettingsPanel } from './settingsPanel';
-import { EpicStatus, PhaseStatus } from './epicScanner';
+import { EpicStatus, PhaseStatus, migrateEpics, getArtifactTemplate } from '@aidlc/core';
 import { ensureMcpConfig } from './mcpConfigurator';
-import { migrateEpics } from './epicMigrator';
-import { getArtifactTemplate } from './epicBootstrapper';
 import { ReviewPanel } from './reviewPanel';
 import { loadExampleProject, clearExampleProject } from './exampleProject';
 

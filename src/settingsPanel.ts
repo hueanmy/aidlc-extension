@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { EpicStatus } from './epicScanner';
+import { EpicStatus } from '@aidlc/core';
 
 export interface PipelineConfig {
   enabledPhases: string[];
