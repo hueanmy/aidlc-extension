@@ -36,3 +36,5 @@ The legacy `hueanmy.aidlc` listing remains published but is no longer updated.
 - [ ] Phase 5 — bundled templates + onboarding wizard
 
 See [docs/sdlc/epics/](docs/) (when present) for the full v2 product spec.
+
+> The `aidlc` terminal CLI from the v1 line (M2–M4) is being re-targeted onto the v2 `workspace.yaml` runtime in a follow-up PR. Until then, drive pipelines through the VS Code sidebar.
