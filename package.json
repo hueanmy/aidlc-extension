@@ -1,5 +1,5 @@
 {
-  "name": "aidlc",
+  "name": "aidlc-monorepo",
   "private": true,
   "description": "AIDLC monorepo — VS Code extension + core engine",
   "license": "MIT",
@@ -15,11 +15,18 @@
     "compile": "pnpm -r compile",
     "build": "pnpm -r build",
     "clean": "pnpm -r clean && rm -rf node_modules",
-    "package:extension": "pnpm --filter aidlc-flow package",
+    "package:extension": "pnpm --filter aidlc package",
     "test": "pnpm --filter @aidlc/core test",
     "aidlc": "node packages/cli/dist/index.js"
   },
   "devDependencies": {
     "typescript": "^5.3.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "@vscode/vsce-sign",
+      "keytar"
+    ]
   }
 }

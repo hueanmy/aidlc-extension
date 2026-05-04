@@ -1,9 +1,9 @@
 {
-  "name": "aidlc-flow",
-  "displayName": "AIDLC Flow",
+  "name": "aidlc",
+  "displayName": "aidlc",
   "description": "Agent workflow runner for VS Code — define agents, skills, and pipelines in workspace.yaml. Build, edit, and run AI workflows visually without leaving the editor.",
   "version": "0.8.0",
-  "publisher": "aidlc-io",
+  "publisher": "hueanmy",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -149,7 +149,10 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package --no-dependencies"
+    "typecheck": "tsc -p ./ --noEmit",
+    "bundle": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --format=cjs --outfile=out/extension.js",
+    "bundle:prod": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --format=cjs --minify --outfile=out/extension.js",
+    "package": "pnpm typecheck && pnpm bundle:prod && vsce package --no-dependencies"
   },
   "dependencies": {
     "@aidlc/core": "workspace:*",
@@ -159,6 +162,8 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.24.0",
     "typescript": "^5.3.0"
   }
 }
