@@ -8,7 +8,7 @@ This is a **monorepo** managed with [pnpm workspaces](https://pnpm.io/workspaces
 
 | Package | Path | Purpose |
 |---|---|---|
-| [`aidlc-flow`](packages/extension/) | `packages/extension/` | VS Code extension. Published to Marketplace + Open VSX as `aidlc-io.aidlc-flow` ("AIDLC Flow"). |
+| [`aidlc`](packages/extension/) | `packages/extension/` | VS Code extension. Published to Marketplace + Open VSX as `hueanmy.aidlc`. |
 | [`@aidlc/core`](packages/core/) | `packages/core/` | Pure-TypeScript engine: workspace loader, runner registry, pipeline executor. **No `import 'vscode'`** — runs standalone in CLI / tests / future cloud. |
 | [`@aidlc/cli`](packages/cli/) | `packages/cli/` | Terminal CLI (`aidlc`) — read-only commands today (`validate`, `list`, `status`); `run` / `approve` / `tail` land in a follow-up. |
 
@@ -22,10 +22,8 @@ pnpm package:extension   # build .vsix
 
 ## Marketplace
 
-- **VS Code Marketplace**: [aidlc-io.aidlc-flow](https://marketplace.visualstudio.com/items?itemName=aidlc-io.aidlc-flow)
-- **Open VSX**: [aidlc-io.aidlc-flow](https://open-vsx.org/extension/aidlc-io/aidlc-flow)
-
-The legacy `hueanmy.aidlc` listing remains published but is no longer updated.
+- **VS Code Marketplace**: [hueanmy.aidlc](https://marketplace.visualstudio.com/items?itemName=hueanmy.aidlc)
+- **Open VSX**: [hueanmy.aidlc](https://open-vsx.org/extension/hueanmy/aidlc)
 
 ## Status
 
