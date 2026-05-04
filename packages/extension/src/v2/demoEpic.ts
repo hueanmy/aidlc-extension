@@ -14,6 +14,8 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { stepAgentId } from '@aidlc/core';
+
 import { readYaml, type YamlDocument } from './yamlIO';
 
 const DEMO_INPUTS_BY_CAPABILITY: Record<string, string> = {
@@ -147,7 +149,7 @@ function pickDemoTarget(doc: YamlDocument): DemoTarget | null {
     return {
       kind: 'pipeline',
       id: String(p.id),
-      agents: Array.isArray(p.steps) ? (p.steps as unknown[]).map(String) : [],
+      agents: Array.isArray(p.steps) ? (p.steps as unknown[]).map(stepAgentId) : [],
     };
   }
   if (doc.agents.length > 0) {

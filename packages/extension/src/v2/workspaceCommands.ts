@@ -15,6 +15,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import { setTimeout } from 'timers';
 
 import {
   WorkspaceLoader,
@@ -23,6 +24,7 @@ import {
   WorkspaceValidationError,
   WORKSPACE_DIR,
   WORKSPACE_FILENAME,
+  stepAgentId,
 } from '@aidlc/core';
 
 import {
@@ -41,6 +43,15 @@ import { loadSdlcPreset } from './builtinPresets';
 import { startEpicCommand } from './epicWizard';
 import { EpicsPanel } from './epicsPanelWebview';
 import { insertDemoEpicCommand } from './demoEpic';
+import {
+  startPipelineRunCommand,
+  markStepDoneCommand,
+  approveStepCommand,
+  rejectStepCommand,
+  rerunStepCommand,
+  openRunStateCommand,
+  deleteRunCommand,
+} from './runCommands';
 
 /**
  * Build the starter workspace.yaml. `name:` is set to the user's folder
@@ -159,6 +170,14 @@ export function registerV2WorkspaceCommands(
 
   // Reuses an existing terminal if one is open so the user doesn't end up
   // with a stack of Claude REPLs after multiple clicks.
+  //
+  // Why we wait for shell integration instead of an immediate sendText:
+  // some users have heavy `.zshrc` setups (oh-my-zsh update prompt,
+  // direnv, nvm, asdf) that read stdin during init. A naked sendText
+  // races those — `claude` lands in the wrong input buffer and never
+  // actually runs, leaving the user staring at the rc-script prompt
+  // wondering what happened. Shell integration's onDidChange fires
+  // exactly when the prompt is ready, so executeCommand lands cleanly.
   const openClaudeTerminalCmd = vscode.commands.registerCommand(
     'aidlc.openClaudeTerminal',
     () => {
@@ -170,13 +189,75 @@ export function registerV2WorkspaceCommands(
       const terminal = vscode.window.createTerminal({
         name: TERMINAL_NAME,
         cwd,
-        shellPath: '/bin/zsh',
+        // Inherit user's default shell + their full rc init. Forcing
+        // /bin/zsh skipped some users' login shell config (chsh) so we
+        // let VS Code pick.
         iconPath: new vscode.ThemeIcon('rocket'),
         location: vscode.TerminalLocation.Panel,
+        env: {
+          // oh-my-zsh's weekly update check is an INTERACTIVE Y/n
+          // prompt. It blocks .zshrc from finishing, which means shell
+          // integration never installs, and our sendText fallback
+          // ends up answering the prompt instead of running `claude`.
+          // Disable update auto-check for this terminal only so init
+          // completes cleanly. Users still see updates in their other
+          // terminals.
+          DISABLE_AUTO_UPDATE: 'true',
+          DISABLE_UPDATE_PROMPT: 'true',
+        },
       });
       terminal.show(false);
-      terminal.sendText('claude', true);
+
+      let sent = false;
+      const integ = vscode.window.onDidChangeTerminalShellIntegration((e) => {
+        if (e.terminal === terminal && e.shellIntegration && !sent) {
+          sent = true;
+          e.shellIntegration.executeCommand('claude');
+          integ.dispose();
+        }
+      });
+      // Fallback for shells without integration (custom shells, or
+      // VS Code shellIntegration disabled in settings). 2s is enough
+      // for typical .zshrc init; more than that and the user can run
+      // `claude` themselves.
+      setTimeout(() => {
+        if (!sent) {
+          sent = true;
+          terminal.sendText('claude', true);
+          integ.dispose();
+        }
+      }, 2000);
     },
+  );
+
+  // Pipeline run commands (phase 1 orchestrator).
+  const startRunCmd = vscode.commands.registerCommand(
+    'aidlc.startPipelineRun',
+    () => startPipelineRunCommand(),
+  );
+  const markStepDoneCmd = vscode.commands.registerCommand(
+    'aidlc.markStepDone',
+    (runId?: unknown) => markStepDoneCommand(typeof runId === 'string' ? runId : undefined),
+  );
+  const approveStepCmd = vscode.commands.registerCommand(
+    'aidlc.approveStep',
+    (runId?: unknown) => approveStepCommand(typeof runId === 'string' ? runId : undefined),
+  );
+  const rejectStepCmd = vscode.commands.registerCommand(
+    'aidlc.rejectStep',
+    (runId?: unknown) => rejectStepCommand(typeof runId === 'string' ? runId : undefined),
+  );
+  const rerunStepCmd = vscode.commands.registerCommand(
+    'aidlc.rerunStep',
+    (runId?: unknown) => rerunStepCommand(typeof runId === 'string' ? runId : undefined),
+  );
+  const openRunStateCmd = vscode.commands.registerCommand(
+    'aidlc.openRunState',
+    (runId?: unknown) => openRunStateCommand(typeof runId === 'string' ? runId : undefined),
+  );
+  const deleteRunCmd = vscode.commands.registerCommand(
+    'aidlc.deleteRun',
+    (runId?: unknown) => deleteRunCommand(typeof runId === 'string' ? runId : undefined),
   );
 
   return {
@@ -194,6 +275,13 @@ export function registerV2WorkspaceCommands(
       startEpicCmd,
       openEpicsListCmd,
       insertDemoEpicCmd,
+      startRunCmd,
+      markStepDoneCmd,
+      approveStepCmd,
+      rejectStepCmd,
+      rerunStepCmd,
+      openRunStateCmd,
+      deleteRunCmd,
     ],
     presetStore,
   };
@@ -258,7 +346,8 @@ async function showWorkspaceConfig(output: vscode.OutputChannel): Promise<void> 
 
     output.appendLine(`pipelines (${loaded.config.pipelines.length}):`);
     for (const p of loaded.config.pipelines) {
-      output.appendLine(`  ${p.id}: ${p.steps.join(' → ')}  (on_failure: ${p.on_failure})`);
+      const stepLabels = p.steps.map(stepAgentId).join(' → ');
+      output.appendLine(`  ${p.id}: ${stepLabels}  (on_failure: ${p.on_failure})`);
     }
     output.appendLine('');
 

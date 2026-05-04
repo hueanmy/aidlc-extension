@@ -87,11 +87,68 @@ const SlashCommandSchema = z.union([
 
 // ── Pipelines ──────────────────────────────────────────────────────
 
+/**
+ * A pipeline step is either a bare agent id (legacy form) or an object
+ * with gating metadata. The object form lets the pipeline runner enforce
+ * artifact preconditions (`requires`), validate produced artifacts
+ * (`produces`), and pause for human approval (`human_review`).
+ *
+ * Artifact paths support `{<context-key>}` placeholders that get resolved
+ * from the run's context map at execution time — e.g.
+ * `docs/sdlc/epics/{epic}/PRD.md` becomes
+ * `docs/sdlc/epics/DRM-2100/PRD.md` for a run with `context.epic == "DRM-2100"`.
+ */
+const PipelineStepObjectSchema = z.object({
+  agent: z.string().min(1),
+  /** Artifact paths the step is expected to produce. Checked after work. */
+  produces: z.array(z.string().min(1)).default([]),
+  /** Artifact paths required from upstream. Gate-checked before work. */
+  requires: z.array(z.string().min(1)).default([]),
+  /** When true, the runner pauses for human approval before advancing. */
+  human_review: z.boolean().default(false),
+});
+
+const PipelineStepSchema = z.union([
+  z.string().min(1),
+  PipelineStepObjectSchema,
+]);
+
 const PipelineSchema = z.object({
   id: z.string().min(1),
-  steps: z.array(z.string().min(1)).min(1),
+  steps: z.array(PipelineStepSchema).min(1),
   on_failure: z.enum(['stop', 'continue']).default('stop'),
 });
+
+export type PipelineStepConfig = z.infer<typeof PipelineStepSchema>;
+
+/** Step in normalized form (object with all defaults applied). */
+export interface NormalizedStep {
+  agent: string;
+  produces: string[];
+  requires: string[];
+  human_review: boolean;
+}
+
+/** Convert either form of a pipeline step into the normalized object. */
+export function normalizeStep(step: PipelineStepConfig): NormalizedStep {
+  if (typeof step === 'string') {
+    return { agent: step, produces: [], requires: [], human_review: false };
+  }
+  return step;
+}
+
+/**
+ * Extract the agent id from a pipeline step, accepting both legacy
+ * string form and object form. Returns empty string for malformed input
+ * so callers don't have to null-check before passing into UI strings.
+ */
+export function stepAgentId(step: unknown): string {
+  if (typeof step === 'string') { return step; }
+  if (step && typeof step === 'object' && typeof (step as { agent?: unknown }).agent === 'string') {
+    return (step as { agent: string }).agent;
+  }
+  return '';
+}
 
 // ── Domain state (optional) ────────────────────────────────────────
 

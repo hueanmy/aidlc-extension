@@ -24,7 +24,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 import { readYaml, writeYaml, type YamlDocument } from './yamlIO';
-import { WORKSPACE_DIR, WORKSPACE_FILENAME } from '@aidlc/core';
+import { WORKSPACE_DIR, WORKSPACE_FILENAME, stepAgentId } from '@aidlc/core';
 import { listEpics, type EpicSummary } from './epicsList';
 
 // ── State shape sent to webview ────────────────────────────────────────
@@ -123,7 +123,7 @@ function buildState(): BuilderState {
     }),
     pipelines: doc.pipelines.map((p) => ({
       id: String(p.id),
-      steps: Array.isArray(p.steps) ? p.steps.map(String) : [],
+      steps: Array.isArray(p.steps) ? p.steps.map(stepAgentId) : [],
       on_failure: p.on_failure === 'continue' ? 'continue' : 'stop',
     })),
     epics,
@@ -414,7 +414,7 @@ export class BuilderPanel {
     const pipeline = doc.pipelines.find((x) => x.id === pipelineId);
     if (!pipeline) { return; }
     const currentSteps = Array.isArray(pipeline.steps)
-      ? (pipeline.steps as string[]).map(String)
+      ? pipeline.steps.map(stepAgentId)
       : [];
 
     const picked = await vscode.window.showQuickPick(

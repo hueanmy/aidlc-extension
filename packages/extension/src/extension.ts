@@ -64,6 +64,18 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(templatesWatcher);
   }
 
+  // Watch pipeline run state so the sidebar's "Pipeline runs" section
+  // updates whenever a step transitions (markStepDone / approve / reject /
+  // rerun all rewrite the run JSON).
+  const runsWatcher = createRunsWatcher();
+  if (runsWatcher) {
+    const refresh = () => sidebar.refresh();
+    runsWatcher.onDidChange(refresh, null, context.subscriptions);
+    runsWatcher.onDidCreate(refresh, null, context.subscriptions);
+    runsWatcher.onDidDelete(refresh, null, context.subscriptions);
+    context.subscriptions.push(runsWatcher);
+  }
+
   // Re-build watcher when the user opens/closes a folder so a freshly opened
   // project is reflected in the sidebar without a window reload.
   context.subscriptions.push(
@@ -111,6 +123,21 @@ function createTemplatesWatcher(): vscode.FileSystemWatcher | null {
   const pattern = new vscode.RelativePattern(
     folder,
     path.join(WORKSPACE_DIR, 'templates', '*.json'),
+  );
+  return vscode.workspace.createFileSystemWatcher(pattern);
+}
+
+/**
+ * Watcher for `<workspace>/.aidlc/runs/*.json` — pipeline run state.
+ * Triggers a sidebar refresh whenever a step transitions so the
+ * Pipeline runs section reflects the new status / step / revision.
+ */
+function createRunsWatcher(): vscode.FileSystemWatcher | null {
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  if (!folder) { return null; }
+  const pattern = new vscode.RelativePattern(
+    folder,
+    path.join(WORKSPACE_DIR, 'runs', '*.json'),
   );
   return vscode.workspace.createFileSystemWatcher(pattern);
 }

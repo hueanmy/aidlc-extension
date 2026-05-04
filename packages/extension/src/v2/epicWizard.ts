@@ -26,6 +26,8 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 
+import { stepAgentId } from '@aidlc/core';
+
 import { readYaml, type YamlDocument } from './yamlIO';
 
 // ── Types ───────────────────────────────────────────────────────────────
@@ -185,7 +187,7 @@ async function pickTarget(doc: YamlDocument): Promise<RunTarget | undefined> {
 
   for (const p of doc.pipelines) {
     const id = String(p.id);
-    const steps = Array.isArray(p.steps) ? (p.steps as unknown[]).map(String) : [];
+    const steps = Array.isArray(p.steps) ? (p.steps as unknown[]).map(stepAgentId) : [];
     items.push({
       label: `$(list-ordered) ${id}`,
       description: `${steps.length} agents`,

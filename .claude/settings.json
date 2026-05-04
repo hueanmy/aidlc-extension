@@ -1,19 +1,20 @@
 {
-  "mcpServers": {
-    "sdlc": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "aidlc-pipeline"
-      ],
-      "env": {
-        "SDLC_PLATFORM": "mobile"
-      }
-    }
-  },
   "permissions": {
     "allow": [
-      "Edit(/.claude/skills/publish/**)"
+      "Edit(/.claude/skills/publish/**)",
+      "Bash(git -C /Users/meii/Documents/aidlc-extension log -5 --oneline)",
+      "Bash(git -C /Users/meii/Documents/aidlc-extension add packages/extension/src/extension.ts packages/extension/src/v2/presetWizards.ts packages/extension/src/v2/sidebarWebview.ts packages/extension/src/v2/workspaceCommands.ts)",
+      "Bash(git -C /Users/meii/Documents/aidlc-extension commit -m ' *)",
+      "Bash(git -C /Users/meii/Documents/aidlc-extension push)",
+      "Bash(git -C /Users/meii/Documents/aidlc-extension add packages/extension/src/v2/sidebarWebview.ts)",
+      "Bash(node -e ' *)",
+      "Bash(grep -n \"^const SIDEBAR_JS\\\\|^const SIDEBAR_CSS\\\\|^\\\\`;\" /Users/meii/Documents/aidlc-extension/packages/extension/src/v2/sidebarWebview.ts)",
+      "Bash(node /Users/meii/Documents/dreem-catcher/.aidlc/scripts/backfill-epic-state.js)",
+      "Bash(node /Users/meii/Documents/dreem-catcher/.aidlc/scripts/cleanup-legacy-epic-files.js --dry-run)",
+      "Bash(node /Users/meii/Documents/dreem-catcher/.aidlc/scripts/cleanup-legacy-epic-files.js)"
+    ],
+    "additionalDirectories": [
+      "/Users/meii/Documents/dreem-catcher/.aidlc"
     ]
   }
 }

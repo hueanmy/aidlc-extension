@@ -9,6 +9,8 @@ export {
   WorkspaceSchema,
   validateWorkspace,
   WorkspaceValidationError,
+  normalizeStep,
+  stepAgentId,
 } from './schema/WorkspaceSchema';
 export type {
   WorkspaceConfig,
@@ -16,6 +18,8 @@ export type {
   SkillConfig,
   SlashCommandConfig,
   PipelineConfig,
+  PipelineStepConfig,
+  NormalizedStep,
   StateConfig,
   SidebarConfig,
   SidebarView,
@@ -61,5 +65,18 @@ export type {
   RunnerResult,
   ClaudeCliWrapper,
 } from './runner/types';
+
+// ── Pipeline runs (phase 1) ────────────────────────────────────────
+export { RunStateStore, RUN_ID_PATTERN } from './runs/RunStateStore';
+export {
+  startRun,
+  markStepDone,
+  approveStep,
+  rejectStep,
+  rerunStep,
+  PipelineRunError,
+} from './runs/PipelineRunner';
+export { resolvePath } from './runs/RunState';
+export type { RunState, StepRecord, StepStatus, RunStatus } from './runs/RunState';
 
 export const AIDLC_CORE_VERSION = '0.1.0';
