@@ -13,18 +13,90 @@ This repo is an npm-workspaces monorepo:
 
 ```
 aidlc/
-├── src/                       # VS Code extension (current entry point)
+├── src/                       # VS Code extension
 ├── packages/
-│   └── aidlc-core/            # pure-Node workflow logic, no VS Code deps
-│       ├── src/               # EpicScanner, ensureEpicsBootstrap, migrateEpics
-│       └── test/              # vitest suite
+│   ├── aidlc-core/            # pure-Node workflow logic, no VS Code deps
+│   │   ├── src/               # EpicScanner, ReviewEngine, EventLog, atomicWrite …
+│   │   └── test/              # vitest suite
+│   └── aidlc-cli/             # standalone terminal CLI
+│       └── src/commands/      # init, list, status, epic, review, phase, watch, tail …
 ├── templates/                 # epic / artifact templates
-└── PLAN.md                    # CLI roadmap (M1–M5)
+└── PLAN.md                    # roadmap (M1–M5)
 ```
 
 `@aidlc/core` is the single source of truth for epic discovery, status I/O,
-and template rendering. Both the VS Code extension and (forthcoming) `aidlc`
-CLI consume it via TypeScript project references — no logic is duplicated.
+cascade rules, atomic writes, and event logging. Both the VS Code extension and
+the `aidlc` CLI import it — no logic is duplicated.
+
+## CLI — quick start
+
+### Install (Node.js ≥ 18)
+
+```bash
+# Use directly without installing
+npx aidlc --help
+
+# Or link globally from source
+npm install && npm link -w aidlc
+```
+
+### Commands
+
+```
+aidlc init [--mcp]                          # scaffold workspace + optional MCP config
+aidlc list [--json]                         # all epics + progress
+aidlc status <EPIC> [--json]               # phase-by-phase view
+aidlc epic new <KEY> "<Title>"             # bootstrap a new epic
+aidlc migrate                              # rename legacy phase folders
+
+aidlc review <phase> <EPIC> --approve [comment]
+aidlc review <phase> <EPIC> --reject <reason> [--reject-to <phase>]
+
+aidlc phase start <EPIC> <phase>           # → in_progress
+aidlc phase done  <EPIC> <phase>           # → passed (bypass gate)
+aidlc phase skip  <EPIC> <phase>           # → passed (jump over)
+aidlc phase reset <EPIC> <phase>           # → pending (no cascade)
+aidlc phase set   <EPIC> <phase> <status>  # raw control
+
+aidlc watch [<EPIC>]                       # live re-render on file changes
+aidlc tail  [<EPIC>]                       # stream the event log in real time
+
+aidlc dashboard [--port 8787]              # browser dashboard (no VS Code needed)
+aidlc doctor                               # workspace health check
+
+aidlc config show
+aidlc config set <key> <value>
+```
+
+### Global workspace flag
+
+Every command accepts `-w <path>` (or `--workspace <path>`) or reads from
+`AIDLC_WORKSPACE` env. Without either, the CLI walks up from `cwd` looking for
+`docs/sdlc/`.
+
+### Binary distribution (macOS / Linux)
+
+Pre-built binaries are attached to each GitHub Release. Download and run:
+
+```bash
+# macOS (Apple Silicon)
+curl -L https://github.com/aidlc-io/aidlc/releases/latest/download/aidlc-macos-arm64 \
+  -o /usr/local/bin/aidlc && chmod +x /usr/local/bin/aidlc
+
+# macOS (Intel)
+curl -L https://github.com/aidlc-io/aidlc/releases/latest/download/aidlc-macos-x64 \
+  -o /usr/local/bin/aidlc && chmod +x /usr/local/bin/aidlc
+
+# Linux x64
+curl -L https://github.com/aidlc-io/aidlc/releases/latest/download/aidlc-linux-x64 \
+  -o /usr/local/bin/aidlc && chmod +x /usr/local/bin/aidlc
+```
+
+To build binaries yourself (requires [Bun](https://bun.sh)):
+
+```bash
+npm run -w aidlc build:binary:mac-arm64
+```
 
 ## Features
 

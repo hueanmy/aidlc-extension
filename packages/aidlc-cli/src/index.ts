@@ -10,6 +10,8 @@ import { cmdReview } from './commands/review';
 import { cmdConfigShow, cmdConfigSet } from './commands/config';
 import { cmdWatch } from './commands/watch';
 import { cmdTail } from './commands/tail';
+import { cmdDashboard } from './commands/dashboard';
+import { cmdDoctor } from './commands/doctor';
 import {
   cmdPhaseSet, cmdPhaseStart, cmdPhaseDone, cmdPhaseReset, cmdPhaseSkip,
 } from './commands/phase';
@@ -180,6 +182,26 @@ program
   .action((epic: string | undefined, _opts, cmd) => {
     const ws = resolveWorkspace(cmd.parent?.opts().workspace);
     cmdTail(ws, epic);
+  });
+
+// ── dashboard ─────────────────────────────────────────────────────────────────
+program
+  .command('dashboard')
+  .description('Serve the pipeline dashboard in a browser (no VS Code required)')
+  .option('-p, --port <number>', 'Port to listen on', '8787')
+  .option('--host <host>', 'Host to bind (use 0.0.0.0 to expose on network)', '127.0.0.1')
+  .action((opts, cmd) => {
+    const ws = resolveWorkspace(cmd.parent?.opts().workspace);
+    cmdDashboard(ws, opts);
+  });
+
+// ── doctor ────────────────────────────────────────────────────────────────────
+program
+  .command('doctor')
+  .description('Validate workspace structure, MCP config, and event log integrity')
+  .action((_opts, cmd) => {
+    const ws = resolveWorkspace(cmd.parent?.opts().workspace);
+    cmdDoctor(ws);
   });
 
 program.parse(process.argv);

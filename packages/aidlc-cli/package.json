@@ -13,7 +13,11 @@
   "scripts": {
     "build": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "dev": "node dist/index.js"
+    "dev": "node dist/index.js",
+    "bundle": "esbuild src/index.ts --bundle --platform=node --target=node18 --outfile=dist/bundle.js --external:fsevents",
+    "build:binary:mac-arm64": "bun build src/index.ts --compile --target=bun-darwin-arm64 --outfile=bin/aidlc-macos-arm64",
+    "build:binary:mac-x64":   "bun build src/index.ts --compile --target=bun-darwin-x64   --outfile=bin/aidlc-macos-x64",
+    "build:binary:linux-x64": "bun build src/index.ts --compile --target=bun-linux-x64    --outfile=bin/aidlc-linux-x64"
   },
   "dependencies": {
     "@aidlc/core": "*",
@@ -25,6 +29,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "esbuild": "^0.21.0",
     "typescript": "^5.3.0"
   }
 }
