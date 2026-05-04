@@ -1,0 +1,26 @@
+{
+  "name": "@aidlc/cli",
+  "version": "0.0.1",
+  "description": "AIDLC terminal CLI — drive workspace.yaml pipelines from any terminal.",
+  "private": true,
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "bin": {
+    "aidlc": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "compile": "tsc -p ./",
+    "build": "tsc -p ./",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@aidlc/core": "workspace:*",
+    "commander": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  }
+}

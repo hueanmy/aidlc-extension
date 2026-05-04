@@ -10,6 +10,7 @@ This is a **monorepo** managed with [pnpm workspaces](https://pnpm.io/workspaces
 |---|---|---|
 | [`aidlc-flow`](packages/extension/) | `packages/extension/` | VS Code extension. Published to Marketplace + Open VSX as `aidlc-io.aidlc-flow` ("AIDLC Flow"). |
 | [`@aidlc/core`](packages/core/) | `packages/core/` | Pure-TypeScript engine: workspace loader, runner registry, pipeline executor. **No `import 'vscode'`** — runs standalone in CLI / tests / future cloud. |
+| [`@aidlc/cli`](packages/cli/) | `packages/cli/` | Terminal CLI (`aidlc`) — read-only commands today (`validate`, `list`, `status`); `run` / `approve` / `tail` land in a follow-up. |
 
 ## Getting started
 
@@ -37,4 +38,14 @@ The legacy `hueanmy.aidlc` listing remains published but is no longer updated.
 
 See [docs/sdlc/epics/](docs/) (when present) for the full v2 product spec.
 
-> The `aidlc` terminal CLI from the v1 line (M2–M4) is being re-targeted onto the v2 `workspace.yaml` runtime in a follow-up PR. Until then, drive pipelines through the VS Code sidebar.
+## CLI
+
+A minimal `@aidlc/cli` package ships read-only inspection commands today:
+
+```sh
+pnpm aidlc validate                       # check .aidlc/workspace.yaml
+pnpm aidlc list                           # agents, skills, pipelines
+pnpm aidlc status [runId] [--json]        # list runs or show one
+```
+
+Pass `-w <path>` (or `AIDLC_WORKSPACE=<path>`) to point at a workspace other than `cwd`. Run-orchestration commands (`run`, `approve`, `reject`, `rerun`, `tail`) are tracked under Phase 4 and will land alongside the slash command router.
