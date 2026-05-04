@@ -2,7 +2,7 @@
 
 Track SDLC pipeline progress for software epics directly in VS Code. Visualize every phase — from planning to release — with agent ownership and real-time status.
 
-![aidlc demo](https://raw.githubusercontent.com/hueanmy/aidlc-pipeline/main/demo.gif)
+![aidlc demo](media/demo.gif)
 
 ## Features
 
