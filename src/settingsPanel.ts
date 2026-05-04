@@ -175,7 +175,7 @@ export class SettingsPanel {
 
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (workspaceRoot) {
-      const { ensureMcpConfig } = await import('./mcpConfigurator');
+      const { ensureMcpConfigFromVscode: ensureMcpConfig } = await import('./mcpConfigurator');
       const result = ensureMcpConfig(workspaceRoot, () => { /* silent from UI */ });
       if (result.status === 'written') {
         vscode.window.showInformationMessage(

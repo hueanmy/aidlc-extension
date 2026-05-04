@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { PHASE_ID_SET } from './phases';
 
 /**
  * Phase status values.
@@ -410,7 +411,10 @@ export class EpicScanner {
         const raw = fs.readFileSync(configPath, 'utf8');
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed.enabledPhases) && parsed.enabledPhases.length > 0) {
-          return parsed.enabledPhases;
+          const safe = parsed.enabledPhases.filter(
+            (p: unknown): p is string => typeof p === 'string' && PHASE_ID_SET.has(p),
+          );
+          if (safe.length > 0) { return safe; }
         }
       } catch { /* ignore */ }
     }

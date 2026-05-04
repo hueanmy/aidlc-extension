@@ -3,5 +3,6 @@ node_modules/
 scripts/demo/out-agents/
 out/
 packages/*/dist/
+*.tsbuildinfo
 *.vsix
 .claude/settings.local.json

@@ -310,6 +310,9 @@
   "dependencies": {
     "@aidlc/core": "*"
   },
+  "bundledDependencies": [
+    "@aidlc/core"
+  ],
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
