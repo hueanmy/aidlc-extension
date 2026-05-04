@@ -1,0 +1,14 @@
+<svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    AIDLC brand mark — stylized "A" letterform.
+    VS Code activity-bar icons must be monochrome (use currentColor) so the
+    theme system can recolor them. The gradient teal/pink "A" used in the
+    sidebar / Builder header is a webview surface and lives in CSS there.
+  -->
+  <path d="M 5 23 L 14 4 L 23 23"
+        stroke="currentColor" stroke-width="2.4"
+        stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <path d="M 9 16 L 19 16"
+        stroke="currentColor" stroke-width="2.4"
+        stroke-linecap="round" fill="none"/>
+</svg>

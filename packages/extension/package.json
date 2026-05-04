@@ -1,0 +1,164 @@
+{
+  "name": "aidlc-flow",
+  "displayName": "AIDLC Flow",
+  "description": "Agent workflow runner for VS Code — define agents, skills, and pipelines in workspace.yaml. Build, edit, and run AI workflows visually without leaving the editor.",
+  "version": "0.8.0",
+  "publisher": "aidlc-io",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aidlc-io/aidlc"
+  },
+  "icon": "media/icon.png",
+  "keywords": [
+    "ai",
+    "agents",
+    "claude",
+    "workflow",
+    "automation",
+    "pipeline",
+    "workspace"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aidlc",
+          "title": "AIDLC",
+          "icon": "media/pipeline-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "aidlc": [
+        {
+          "id": "aidlcSidebar",
+          "name": "Workspace",
+          "icon": "media/pipeline-icon.svg",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "aidlc.openBuilder",
+        "title": "Open Workspace Builder",
+        "icon": "$(layout-panel)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.showWorkspaceConfig",
+        "title": "Show Workspace Config",
+        "icon": "$(file-code)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.initWorkspace",
+        "title": "Init Sample Workspace",
+        "icon": "$(rocket)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.addSkill",
+        "title": "Add Skill (template / paste / upload / blank)",
+        "icon": "$(file-code)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.addAgent",
+        "title": "Add Agent",
+        "icon": "$(person)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.addPipeline",
+        "title": "Add Pipeline (chain agents)",
+        "icon": "$(list-ordered)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.openClaudeTerminal",
+        "title": "Open Claude CLI Terminal",
+        "icon": "$(terminal)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.savePreset",
+        "title": "Save Workspace as Template",
+        "icon": "$(save)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.applyPreset",
+        "title": "Load Template",
+        "icon": "$(symbol-snippet)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.deletePreset",
+        "title": "Delete Saved Template",
+        "icon": "$(trash)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.startEpic",
+        "title": "Start Epic",
+        "icon": "$(rocket)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.openEpicsList",
+        "title": "Open Epics List",
+        "icon": "$(checklist)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.insertDemoEpic",
+        "title": "Insert Demo Epic (EPIC-100)",
+        "icon": "$(beaker)",
+        "category": "AIDLC"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "aidlc.openBuilder",
+          "when": "view == aidlcSidebar",
+          "group": "navigation@0"
+        },
+        {
+          "command": "aidlc.openEpicsList",
+          "when": "view == aidlcSidebar",
+          "group": "navigation@1"
+        },
+        {
+          "command": "aidlc.openClaudeTerminal",
+          "when": "view == aidlcSidebar",
+          "group": "navigation@2"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "@aidlc/core": "workspace:*",
+    "js-yaml": "^4.1.1"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  }
+}

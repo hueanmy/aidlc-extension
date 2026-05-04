@@ -1,9 +1,25 @@
 .DS_Store
 node_modules/
-scripts/demo/out-agents/
 out/
+dist/
 packages/*/dist/
 packages/*/bin/
-*.tsbuildinfo
 *.vsix
 .claude/settings.local.json
+
+# pnpm
+.pnpm-store/
+
+# typescript composite build info
+*.tsbuildinfo
+
+# local test workspace (user's playground, not part of repo)
+/docs/
+
+# editor
+.idea/
+*.log
+
+# package-specific build artifacts already covered by out/ + dist/
+packages/extension/scripts/demo/out/
+packages/extension/scripts/demo/out-agents/
