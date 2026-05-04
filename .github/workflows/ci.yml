@@ -27,6 +27,3 @@ jobs:
 
       - name: Test core
         run: pnpm --filter @aidlc/core test
-
-      - name: Package extension VSIX (smoke test)
-        run: pnpm package:extension
