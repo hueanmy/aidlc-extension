@@ -3,8 +3,11 @@
     "module": "commonjs",
     "target": "ES2022",
     "lib": ["ES2022"],
-    "outDir": "out",
+    "outDir": "dist",
     "rootDir": "src",
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
     "sourceMap": true,
     "strict": true,
     "esModuleInterop": true,
@@ -13,9 +16,5 @@
     "resolveJsonModule": true
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "out"],
-  "references": [
-    { "path": "./packages/aidlc-core" },
-    { "path": "./packages/aidlc-cli" }
-  ]
+  "exclude": ["node_modules", "dist", "test"]
 }

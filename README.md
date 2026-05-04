@@ -1,8 +1,102 @@
-# SDLC Pipeline
+# AIDLC
 
-Track SDLC pipeline progress for software epics directly in VS Code. Visualize every phase — from planning to release — with agent ownership and real-time status.
+AI-driven SDLC for software epics. Track every phase — from planning to
+release — with agent ownership and real-time status. Today AIDLC ships as a
+VS Code extension; a terminal CLI and a model-agnostic ("dynamic") workflow
+runner are in active development. See [PLAN.md](PLAN.md) for the roadmap.
 
 ![aidlc demo](https://raw.githubusercontent.com/hueanmy/aidlc-pipeline/main/demo.gif)
+
+## Project structure
+
+This repo is an npm-workspaces monorepo:
+
+```
+aidlc/
+├── src/                       # VS Code extension
+├── packages/
+│   ├── aidlc-core/            # pure-Node workflow logic, no VS Code deps
+│   │   ├── src/               # EpicScanner, ReviewEngine, EventLog, atomicWrite …
+│   │   └── test/              # vitest suite
+│   └── aidlc-cli/             # standalone terminal CLI
+│       └── src/commands/      # init, list, status, epic, review, phase, watch, tail …
+├── templates/                 # epic / artifact templates
+└── PLAN.md                    # roadmap (M1–M5)
+```
+
+`@aidlc/core` is the single source of truth for epic discovery, status I/O,
+cascade rules, atomic writes, and event logging. Both the VS Code extension and
+the `aidlc` CLI import it — no logic is duplicated.
+
+## CLI — quick start
+
+### Install (Node.js ≥ 18)
+
+```bash
+# Use directly without installing
+npx aidlc --help
+
+# Or link globally from source
+npm install && npm link -w aidlc
+```
+
+### Commands
+
+```
+aidlc init [--mcp]                          # scaffold workspace + optional MCP config
+aidlc list [--json]                         # all epics + progress
+aidlc status <EPIC> [--json]               # phase-by-phase view
+aidlc epic new <KEY> "<Title>"             # bootstrap a new epic
+aidlc migrate                              # rename legacy phase folders
+
+aidlc review <phase> <EPIC> --approve [comment]
+aidlc review <phase> <EPIC> --reject <reason> [--reject-to <phase>]
+
+aidlc phase start <EPIC> <phase>           # → in_progress
+aidlc phase done  <EPIC> <phase>           # → passed (bypass gate)
+aidlc phase skip  <EPIC> <phase>           # → passed (jump over)
+aidlc phase reset <EPIC> <phase>           # → pending (no cascade)
+aidlc phase set   <EPIC> <phase> <status>  # raw control
+
+aidlc watch [<EPIC>]                       # live re-render on file changes
+aidlc tail  [<EPIC>]                       # stream the event log in real time
+
+aidlc dashboard [--port 8787]              # browser dashboard (no VS Code needed)
+aidlc doctor                               # workspace health check
+
+aidlc config show
+aidlc config set <key> <value>
+```
+
+### Global workspace flag
+
+Every command accepts `-w <path>` (or `--workspace <path>`) or reads from
+`AIDLC_WORKSPACE` env. Without either, the CLI walks up from `cwd` looking for
+`docs/sdlc/`.
+
+### Binary distribution (macOS / Linux)
+
+Pre-built binaries are attached to each GitHub Release. Download and run:
+
+```bash
+# macOS (Apple Silicon)
+curl -L https://github.com/aidlc-io/aidlc/releases/latest/download/aidlc-macos-arm64 \
+  -o /usr/local/bin/aidlc && chmod +x /usr/local/bin/aidlc
+
+# macOS (Intel)
+curl -L https://github.com/aidlc-io/aidlc/releases/latest/download/aidlc-macos-x64 \
+  -o /usr/local/bin/aidlc && chmod +x /usr/local/bin/aidlc
+
+# Linux x64
+curl -L https://github.com/aidlc-io/aidlc/releases/latest/download/aidlc-linux-x64 \
+  -o /usr/local/bin/aidlc && chmod +x /usr/local/bin/aidlc
+```
+
+To build binaries yourself (requires [Bun](https://bun.sh)):
+
+```bash
+npm run -w aidlc build:binary:mac-arm64
+```
 
 ## Features
 
@@ -316,6 +410,40 @@ Click **Load Example Project** in the welcome card or the rocket icon in the tre
 
 - **Extension side**: View → Output → "SDLC Pipeline" channel
 - **Claude Code / MCP side**: Claude Code output panel, or run the MCP manually with `npx -y github:hueanmy/aidlc-pipeline` in a terminal — all server logs go to stderr.
+
+## Development
+
+Prerequisites: Node 20+, npm 10+.
+
+```bash
+npm install              # installs root + all workspaces
+npm run compile          # tsc -b — builds @aidlc/core, then the extension
+npm run watch            # tsc -b -w — incremental rebuild on save
+npm test                 # runs the @aidlc/core vitest suite
+npm run package          # produces the .vsix for the marketplace
+```
+
+`compile` uses TypeScript project references (`tsc -b`) so that editing
+`packages/aidlc-core/src/*.ts` triggers a rebuild before the extension
+re-typechecks. Both packages emit source maps and declaration maps, so
+"Go to Definition" from extension code lands inside `aidlc-core`'s `.ts`
+source rather than its compiled `.d.ts`.
+
+### Debugging the extension
+
+Press **F5** (the **Run AIDLC Extension** launch config). The preLaunchTask
+runs `npm: compile`; breakpoints bind in both the extension (`src/`) and
+`@aidlc/core` (`packages/aidlc-core/src/`) thanks to the `outFiles` glob
+covering `out/` and `packages/*/dist/`.
+
+### Adding to `@aidlc/core`
+
+Anything that does not depend on the VS Code API belongs in `@aidlc/core`.
+Re-export the public surface from
+[packages/aidlc-core/src/index.ts](packages/aidlc-core/src/index.ts), then
+import it from extension code as `@aidlc/core`. Keep the package free of
+`vscode`, `child_process` IDE shims, and webview HTML — those stay in the
+extension layer until the CLI lands and we can split them properly.
 
 ## Requirements
 

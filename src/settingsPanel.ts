@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { EpicStatus } from './epicScanner';
+import { EpicStatus } from '@aidlc/core';
 
 export interface PipelineConfig {
   enabledPhases: string[];
@@ -175,7 +175,7 @@ export class SettingsPanel {
 
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (workspaceRoot) {
-      const { ensureMcpConfig } = await import('./mcpConfigurator');
+      const { ensureMcpConfigFromVscode: ensureMcpConfig } = await import('./mcpConfigurator');
       const result = ensureMcpConfig(workspaceRoot, () => { /* silent from UI */ });
       if (result.status === 'written') {
         vscode.window.showInformationMessage(

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { EpicStatus, PhaseStatus } from './epicScanner';
+import { EpicStatus, PhaseStatus } from '@aidlc/core';
 
 export class DashboardPanel {
   public static currentPanel: DashboardPanel | undefined;

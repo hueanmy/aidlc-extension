@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawn } from 'child_process';
-import { ensureEpicsBootstrap } from './epicBootstrapper';
+import { ensureEpicsBootstrap } from '@aidlc/core';
 
 const DEFAULT_MCP_PACKAGE = 'github:hueanmy/aidlc-pipeline';
 const DEFAULT_FOLDER_NAME = 'aidlc-example';

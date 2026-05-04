@@ -1,43 +1,12 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { EpicStatus, PhaseStatus, PhaseReview } from './epicScanner';
+import { EpicStatus, PhaseStatus, approvePhase, rejectPhase, REJECT_TO } from '@aidlc/core';
 
-/**
- * Review panel for `awaiting_human_review` phases.
- *
- * Both Approve and Reject execute directly in the extension:
- *  - Approve: status.json flips awaiting_human_review → passed.
- *  - Reject: archives target phase (revision-N/), bumps revision, writes
- *    rejected status, marks intermediate passed phases stale.
- *
- * Cascade logic mirrors cf-sdlc-pipeline/server/src/orchestrator.ts
- * cascadeReject + archivePhase. Keep the two in sync when rules change.
- * Design decision: accept this duplication so reject feels instant in UI
- * without spawning the MCP server; MCP validates on the next /advance-epic.
- */
-
-const PHASE_ORDER = [
-  'plan', 'design', 'test-plan', 'implement', 'review', 'execute-test', 'release', 'monitor', 'doc-sync',
-] as const;
 export class ReviewPanel {
   private static currentPanel: ReviewPanel | undefined;
   private readonly _panel: vscode.WebviewPanel;
   private _disposables: vscode.Disposable[] = [];
-
-  // Rules mirror content/generic/config/review-matrix.json in cf-sdlc-pipeline.
-  // Duplicated intentionally — the MCP tool will re-validate; this is just
-  // for populating the UI dropdown.
-  private static readonly REJECT_TO: Record<string, string[]> = {
-    'design': ['plan'],
-    'test-plan': ['plan', 'design'],
-    'implement': ['plan', 'design', 'test-plan'],
-    'review': ['plan', 'design', 'test-plan', 'implement'],
-    'execute-test': ['plan', 'design', 'test-plan', 'implement', 'review'],
-    'release': ['plan', 'design', 'test-plan', 'implement', 'review', 'execute-test'],
-    'monitor': ['plan', 'design', 'test-plan', 'implement', 'review', 'execute-test', 'release'],
-    'doc-sync': ['plan', 'design', 'test-plan', 'implement', 'review', 'execute-test', 'release', 'monitor'],
-  };
 
   static show(
     extensionUri: vscode.Uri,
@@ -108,27 +77,17 @@ export class ReviewPanel {
   }
 
   private approve(comment: string) {
-    const statusPath = this.statusJsonPath();
-    let current: Record<string, unknown> = {};
     try {
-      current = JSON.parse(fs.readFileSync(statusPath, 'utf8')) as Record<string, unknown>;
-    } catch {
-      void vscode.window.showErrorMessage(`status.json not found: ${statusPath}`);
+      approvePhase({
+        phaseId: this.phase.id,
+        epicFolderPath: this.epic.folderPath,
+        reviewer: this.reviewer,
+        comment,
+      });
+    } catch (err) {
+      void vscode.window.showErrorMessage(`Approve failed: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
-    const verdict: PhaseReview = {
-      decision: 'pass',
-      reviewer: this.reviewer,
-      at: new Date().toISOString(),
-      reason: comment.trim().length > 0 ? comment.trim() : 'Approved via aidlc review panel.',
-    };
-    const next = {
-      ...current,
-      status: 'passed',
-      updated_at: new Date().toISOString(),
-      last_review: verdict,
-    };
-    fs.writeFileSync(statusPath, JSON.stringify(next, null, 2) + '\n', 'utf8');
     void this.showAdvancePrompt(`✅ Approved ${this.epic.key} / ${this.phase.name}.`);
     this.onAfterAction();
     this.dispose();
@@ -147,10 +106,15 @@ export class ReviewPanel {
 
   private async reject(rejectTo: string, reason: string): Promise<void> {
     try {
-      this.performCascadeReject(rejectTo, reason.trim());
+      rejectPhase({
+        fromPhaseId: this.phase.id,
+        rejectTo,
+        epicFolderPath: this.epic.folderPath,
+        reviewer: this.reviewer,
+        reason,
+      });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      void vscode.window.showErrorMessage(`Reject cascade failed: ${msg}`);
+      void vscode.window.showErrorMessage(`Reject cascade failed: ${err instanceof Error ? err.message : String(err)}`);
       return;
     }
     void this.showAdvancePrompt(`❌ Rejected ${this.epic.key} / ${this.phase.name} → ${rejectTo}.`);
@@ -158,111 +122,10 @@ export class ReviewPanel {
     this.dispose();
   }
 
-  /**
-   * Mirror of orchestrator.ts cascadeReject + archivePhase.
-   *
-   * Rules:
-   *  - target phase: archive current artifacts to archive/revision-N/, bump
-   *    revision, write status=rejected with verdict.
-   *  - intermediate phases (strictly between target and current, exclusive):
-   *    if previously passed, mark stale; otherwise leave as-is.
-   *  - current phase (the one rejecting): untouched — the orchestrator
-   *    re-touches it naturally when the loop reaches it again.
-   */
-  private performCascadeReject(rejectTo: string, reason: string): void {
-    const fromIdx = PHASE_ORDER.indexOf(this.phase.id as typeof PHASE_ORDER[number]);
-    const toIdx = PHASE_ORDER.indexOf(rejectTo as typeof PHASE_ORDER[number]);
-    if (fromIdx < 0 || toIdx < 0 || toIdx >= fromIdx) {
-      throw new Error(`Invalid cascade: ${this.phase.id} → ${rejectTo}`);
-    }
-
-    const verdict: PhaseReview = {
-      decision: 'reject',
-      reviewer: this.reviewer,
-      at: new Date().toISOString(),
-      reject_to: rejectTo,
-      reason,
-    };
-
-    // Target phase: archive + revision bump + rejected
-    const targetPath = this.phaseStatusPath(rejectTo);
-    const targetCurrent = this.readPhaseStatus(targetPath);
-    const targetRevision = targetCurrent?.revision ?? 0;
-
-    if (targetRevision > 0) {
-      this.archivePhaseDir(rejectTo, targetRevision);
-    }
-
-    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-    fs.writeFileSync(
-      targetPath,
-      JSON.stringify({
-        phase: rejectTo,
-        status: 'rejected',
-        revision: targetRevision + 1,
-        updated_at: new Date().toISOString(),
-        last_review: verdict,
-      }, null, 2) + '\n',
-      'utf8'
-    );
-
-    // Intermediate phases: passed → stale
-    for (let i = toIdx + 1; i < fromIdx; i++) {
-      const mid = PHASE_ORDER[i];
-      const midPath = this.phaseStatusPath(mid);
-      const midState = this.readPhaseStatus(midPath);
-      if (midState?.status === 'passed' || midState?.status === 'done') {
-        fs.writeFileSync(
-          midPath,
-          JSON.stringify({
-            ...midState,
-            status: 'stale',
-            updated_at: new Date().toISOString(),
-          }, null, 2) + '\n',
-          'utf8'
-        );
-      }
-    }
-  }
-
-  private archivePhaseDir(phaseId: string, revision: number): void {
-    const dir = path.join(this.epic.folderPath, 'phases', phaseId);
-    if (!fs.existsSync(dir)) { return; }
-    const archiveDir = path.join(dir, 'archive', `revision-${revision}`);
-    fs.mkdirSync(archiveDir, { recursive: true });
-    for (const entry of fs.readdirSync(dir)) {
-      if (entry === 'archive') { continue; }
-      const src = path.join(dir, entry);
-      const dst = path.join(archiveDir, entry);
-      try {
-        fs.renameSync(src, dst);
-      } catch {
-        /* leave behind files that can't move — don't fail the whole cascade */
-      }
-    }
-  }
-
-  private phaseStatusPath(phaseId: string): string {
-    return path.join(this.epic.folderPath, 'phases', phaseId, 'status.json');
-  }
-
-  private readPhaseStatus(statusPath: string): { status?: string; revision?: number } | null {
-    if (!fs.existsSync(statusPath)) { return null; }
-    try {
-      return JSON.parse(fs.readFileSync(statusPath, 'utf8'));
-    } catch {
-      return null;
-    }
-  }
-
-  private statusJsonPath(): string {
-    return path.join(this.epic.folderPath, 'phases', this.phase.id, 'status.json');
-  }
-
   private getHtml(): string {
     const artifacts = collectArtifactPaths(this.epic.folderPath, this.phase);
     const checklist = this.phase.lastReview?.checklist_results ?? {};
-    const rejectOptions = ReviewPanel.REJECT_TO[this.phase.id] ?? [];
+    const rejectOptions = REJECT_TO[this.phase.id] ?? [];
     const nonce = Math.random().toString(36).slice(2, 12);
 
     return /* html */ `<!DOCTYPE html>
@@ -332,7 +195,7 @@ export class ReviewPanel {
       <label for="rejectTo">Target phase</label>
       <select id="rejectTo">
         <option value="">— pick one —</option>
-        ${rejectOptions.map(o => `<option value="${escapeAttr(o)}">${escapeHtml(o)}</option>`).join('')}
+        ${rejectOptions.map((o: string) => `<option value="${escapeAttr(o)}">${escapeHtml(o)}</option>`).join('')}
       </select>
       <label for="rejectReason">Reason (required)</label>
       <textarea id="rejectReason" placeholder="What needs to change upstream?"></textarea>

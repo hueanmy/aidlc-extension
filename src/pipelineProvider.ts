@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { EpicScanner, EpicStatus, PhaseStatus } from './epicScanner';
+import { EpicScanner, EpicStatus, PhaseStatus } from '@aidlc/core';
 
 type TreeItem = EpicItem | PhaseItem | InfoItem;
 
