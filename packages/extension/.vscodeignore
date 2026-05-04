@@ -9,4 +9,6 @@ install.sh
 .claude/settings.local.json
 scripts/**
 docs/**
+media/demo.mp4
+media/demo.gif
 aidlc-*.vsix
