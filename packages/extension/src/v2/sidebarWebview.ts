@@ -28,6 +28,10 @@ import type { PipelineConfig } from '@aidlc/core';
 import { listEpics } from './epicsList';
 import type { PresetStore } from './presetStore';
 
+// VS Code reuses output channels by name, so this resolves to the same
+// channel created in extension.ts activate().
+const output = vscode.window.createOutputChannel('AIDLC');
+
 interface TemplateRef {
   id: string;
   name: string;
@@ -267,9 +271,16 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
           openLabel: 'Open project',
         });
         if (picked && picked.length > 0) {
-          await vscode.commands.executeCommand(
-            'vscode.openFolder', picked[0], { forceNewWindow: false },
-          );
+          output.appendLine(`[openProject] Opening folder: ${picked[0].fsPath}`);
+          try {
+            await vscode.commands.executeCommand(
+              'vscode.openFolder', picked[0], { forceNewWindow: false },
+            );
+            output.appendLine('[openProject] openFolder command returned');
+          } catch (err) {
+            output.appendLine(`[openProject] Error: ${err}`);
+            await vscode.window.showErrorMessage(`Failed to open folder: ${err}`);
+          }
         }
         return;
       }
