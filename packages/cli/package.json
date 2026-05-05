@@ -40,9 +40,11 @@
   "dependencies": {
     "@aidlc/core": "workspace:*",
     "chalk": "^4.1.2",
-    "commander": "^11.1.0"
+    "commander": "^11.1.0",
+    "js-yaml": "^4.1.1"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0"
   }
 }
