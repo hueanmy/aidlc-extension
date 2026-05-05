@@ -1,26 +1,50 @@
 {
-  "name": "@aidlc/cli",
-  "version": "0.0.1",
-  "description": "AIDLC terminal CLI — drive workspace.yaml pipelines from any terminal.",
-  "private": true,
+  "name": "aidlc",
+  "version": "0.1.0",
+  "description": "AIDLC terminal CLI — drive workspace.yaml pipelines with Claude from any terminal.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aidlc-io/aidlc"
+  },
+  "homepage": "https://github.com/aidlc-io/aidlc#readme",
+  "bugs": {
+    "url": "https://github.com/aidlc-io/aidlc/issues"
+  },
+  "keywords": [
+    "aidlc",
+    "claude",
+    "ai",
+    "workflow",
+    "sdlc",
+    "agents",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "main": "./dist/index.js",
   "bin": {
     "aidlc": "./dist/index.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "scripts": {
     "compile": "tsc -p ./",
     "build": "tsc -p ./",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm build"
   },
   "dependencies": {
     "@aidlc/core": "workspace:*",
-    "commander": "^11.1.0"
+    "chalk": "^4.1.2",
+    "commander": "^11.1.0",
+    "js-yaml": "^4.1.1"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0"
   }
 }
