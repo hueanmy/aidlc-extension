@@ -21,6 +21,8 @@ import * as path from 'path';
 
 import { readYaml } from './yamlIO';
 import { listEpics, type EpicSummary } from './epicsList';
+import { RunStateStore, startRun } from '@aidlc/core';
+import type { PipelineConfig } from '@aidlc/core';
 
 interface AgentMetadata {
   name: string;
@@ -133,6 +135,16 @@ export class EpicsPanel {
       watcher.onDidCreate(refresh, null, this.disposables);
       watcher.onDidDelete(refresh, null, this.disposables);
       this.disposables.push(watcher);
+
+      // Pipeline run state lives in `.aidlc/runs/<runId>.json` and is what
+      // drives the awaiting_review / awaiting_work gates. Without this
+      // watcher the panel would not refresh after Approve/Reject/Mark done.
+      const runsPattern = new vscode.RelativePattern(vscode.Uri.file(root), '.aidlc/runs/*.json');
+      const runsWatcher = vscode.workspace.createFileSystemWatcher(runsPattern);
+      runsWatcher.onDidChange(refresh, null, this.disposables);
+      runsWatcher.onDidCreate(refresh, null, this.disposables);
+      runsWatcher.onDidDelete(refresh, null, this.disposables);
+      this.disposables.push(runsWatcher);
     }
 
     this.refresh();
@@ -208,6 +220,127 @@ export class EpicsPanel {
         await vscode.window.showTextDocument(docOpen, { preview: false });
         return;
       }
+
+      case 'markStepDone':
+      case 'runAutoReview':
+      case 'approveStep':
+      case 'rejectStep':
+      case 'rerunStep': {
+        const runId = String(msg.runId ?? '');
+        const cmd = `aidlc.${msg.type}`;
+        await vscode.commands.executeCommand(cmd, runId || undefined);
+        return;
+      }
+
+      case 'startPipelineRunForEpic': {
+        // Legacy epic without RunState — scaffold one with runId === epicId
+        // and the pipeline already chosen on the epic. Avoids the generic
+        // pipeline-picker prompt that startPipelineRunCommand shows.
+        const epicId = String(msg.epicId ?? '').trim();
+        const pipelineId = String(msg.pipelineId ?? '').trim();
+        if (!epicId || !pipelineId) { return; }
+        await this.startPipelineRunForEpic(epicId, pipelineId);
+        return;
+      }
+    }
+  }
+
+  private async startPipelineRunForEpic(epicId: string, pipelineId: string): Promise<void> {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!root) { return; }
+    const doc = readYaml(root);
+    if (!doc) {
+      void vscode.window.showWarningMessage('AIDLC: no workspace.yaml found.');
+      return;
+    }
+    const pipeline = (doc.pipelines as PipelineConfig[] | undefined)?.find((p) => p.id === pipelineId);
+    if (!pipeline) {
+      void vscode.window.showWarningMessage(`Pipeline "${pipelineId}" not found in workspace.yaml.`);
+      return;
+    }
+    const existing = RunStateStore.load(root, epicId);
+    if (existing) {
+      void vscode.window.showInformationMessage(`Run "${epicId}" already exists (status: ${existing.status}).`);
+      return;
+    }
+
+    // Look up the epic's epicDir to layer inputs.json values into the run
+    // context (so artifact paths like `{jira}` resolve at gate-check time).
+    const epic = listEpics(root, doc).find((x) => x.id === epicId);
+    const context: Record<string, string> = { epic: epicId };
+    if (epic) {
+      try {
+        const inputsPath = path.join(epic.epicDir, 'inputs.json');
+        if (fs.existsSync(inputsPath)) {
+          const parsed = JSON.parse(fs.readFileSync(inputsPath, 'utf8'));
+          if (parsed && typeof parsed === 'object') {
+            for (const [k, v] of Object.entries(parsed)) {
+              if (typeof v === 'string') { context[k] = v; }
+            }
+          }
+        }
+      } catch { /* ignore — context just gets {epic} */ }
+    }
+
+    try {
+      const runState = startRun({ runId: epicId, pipeline, context });
+
+      // Skip-ahead: state.json's stepStates may already report some steps as
+      // `done` from prior manual work. Without this sync the user sees a
+      // freshly created RunState parked at step 0 awaiting_work — which
+      // contradicts the green checkmarks the timeline already shows. We
+      // mark those steps as approved in the RunState and park
+      // currentStepIdx on the first non-done step.
+      if (epic && Array.isArray(epic.stepDetails) && epic.stepDetails.length > 0) {
+        let firstPending = -1;
+        const max = Math.min(runState.steps.length, epic.stepDetails.length);
+        for (let i = 0; i < max; i++) {
+          const detail = epic.stepDetails[i];
+          if (detail.status === 'done') {
+            runState.steps[i] = {
+              ...runState.steps[i],
+              status: 'approved',
+              finishedAt: detail.finishedAt ?? new Date().toISOString(),
+              startedAt: detail.startedAt ?? runState.steps[i].startedAt,
+            };
+          } else {
+            firstPending = i;
+            break;
+          }
+        }
+        if (firstPending === -1 && max < runState.steps.length) {
+          firstPending = max;
+        }
+        if (firstPending === -1) {
+          // Every step in state.json is done.
+          runState.currentStepIdx = runState.steps.length - 1;
+          runState.status = 'completed';
+        } else {
+          runState.currentStepIdx = firstPending;
+          // Step 0 was already initialized as awaiting_work by startRun;
+          // for any later index we need to flip it on and clear pending.
+          if (firstPending > 0) {
+            runState.steps[firstPending] = {
+              ...runState.steps[firstPending],
+              status: 'awaiting_work',
+              startedAt: new Date().toISOString(),
+            };
+          }
+          runState.status = 'running';
+        }
+      }
+
+      RunStateStore.save(root, runState);
+      const cur = runState.steps[runState.currentStepIdx];
+      const msg = runState.status === 'completed'
+        ? `Pipeline run "${epicId}" started — all ${runState.steps.length} step(s) already marked done in state.json.`
+        : `Pipeline run "${epicId}" started — current step: ${cur.agent} (${runState.currentStepIdx + 1}/${runState.steps.length}).`;
+      void vscode.window.showInformationMessage(msg);
+      this.refresh();
+    } catch (err) {
+      void vscode.window.showErrorMessage(
+        `Failed to start pipeline run: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -670,6 +803,98 @@ button.step-detail-val.is-link:active {
   border-top: 1px solid var(--hairline);
 }
 .epic-actions .btn { font-size: 10px; padding: 6px 10px; }
+
+/* Run gate banner in step-detail — surfaces awaiting_review / awaiting_work
+ * so the user can act on the current run-state without leaving the panel. */
+.run-gate {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid;
+  display: flex; flex-direction: column; gap: 8px;
+  font-size: 11.5px;
+}
+.run-gate-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.run-gate-label {
+  font-size: 9.5px; font-weight: 700; letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.run-gate-msg { color: var(--text-soft); flex: 1; }
+.run-gate.awaiting_work     { background: rgba(94,234,212,0.06); border-color: rgba(94,234,212,0.30); }
+.run-gate.awaiting_work     .run-gate-label { color: var(--accent); }
+.run-gate.awaiting_auto_review { background: rgba(251,191,36,0.06); border-color: rgba(251,191,36,0.30); }
+.run-gate.awaiting_auto_review .run-gate-label { color: var(--warn); }
+.run-gate.awaiting_review   { background: rgba(251,191,36,0.10); border-color: rgba(251,191,36,0.45); }
+.run-gate.awaiting_review   .run-gate-label { color: var(--warn); }
+.run-gate.rejected          { background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.35); }
+.run-gate.rejected          .run-gate-label { color: var(--rejected); }
+
+.btn-run {
+  font-size: 10.5px; font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all .12s ease;
+}
+.btn-run-primary {
+  background: rgba(94,234,212,0.14);
+  border-color: rgba(94,234,212,0.40);
+  color: var(--accent);
+}
+.btn-run-primary:hover { background: rgba(94,234,212,0.22); border-color: rgba(94,234,212,0.60); }
+.btn-run-approve {
+  background: rgba(74,222,128,0.14);
+  border-color: rgba(74,222,128,0.40);
+  color: var(--done);
+}
+.btn-run-approve:hover { background: rgba(74,222,128,0.22); border-color: rgba(74,222,128,0.60); }
+.btn-run-reject {
+  background: rgba(248,113,113,0.10);
+  border-color: rgba(248,113,113,0.35);
+  color: var(--rejected);
+}
+.btn-run-reject:hover { background: rgba(248,113,113,0.18); border-color: rgba(248,113,113,0.55); }
+.run-gate-verdict {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+}
+.run-gate-verdict.auto-pass {
+  border-color: rgba(94,234,212,0.30);
+  background: rgba(94,234,212,0.06);
+}
+.run-gate-verdict.auto-pass .run-gate-verdict-label { color: var(--accent); font-weight: 600; }
+.run-gate-verdict.auto-reject {
+  border-color: rgba(248,113,113,0.40);
+  background: rgba(248,113,113,0.08);
+}
+.run-gate-verdict.auto-reject .run-gate-verdict-label { color: var(--rejected); font-weight: 600; }
+.run-gate-verdict-reason { color: var(--text-soft); }
+.run-gate-config {
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: var(--text-soft);
+  font-style: italic;
+}
+.run-gate-config-empty {
+  color: var(--text-faint);
+}
+.run-gate-reason {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10.5px;
+  color: var(--rejected);
+  background: rgba(248,113,113,0.06);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(248,113,113,0.18);
+}
 `;
 
 const EPICS_JS = `
@@ -920,6 +1145,7 @@ function renderEpic(e) {
         html += '<div class="step-detail-val mono is-empty">—</div>';
       }
       html += '</div>';
+      html += renderRunGate(e, focused);
       html += '</div>';
     }
     html += '</div>';
@@ -940,6 +1166,12 @@ function renderEpic(e) {
 
   // Actions
   html += '<div class="epic-actions">';
+  // Legacy epics (created before pipeline-run scaffolding) have no runId.
+  // Surface a one-click "Start pipeline run" so the user can opt in without
+  // recreating the epic from scratch.
+  if (!e.runId && e.pipeline) {
+    html += '<button class="btn btn-primary" data-action="startPipelineRunForEpic" data-epic-id="' + escapeHtml(e.id) + '" data-pipeline-id="' + escapeHtml(e.pipeline) + '">▶ Start pipeline run</button>';
+  }
   html += '<button class="btn" data-action="openStateJson" data-path="' + escapeHtml(e.statePath) + '">Open state.json</button>';
   if (inputKeys.length > 0) {
     html += '<button class="btn" data-action="openInputsJson" data-epic-dir="' + escapeHtml(e.epicDir) + '">Open inputs.json</button>';
@@ -947,6 +1179,84 @@ function renderEpic(e) {
   html += '<button class="btn" data-action="revealArtifacts" data-epic-dir="' + escapeHtml(e.epicDir) + '">Reveal artifacts</button>';
   html += '</div>';
 
+  html += '</div>';
+  return html;
+}
+
+/**
+ * Render the run-state action gate inside the step-detail card. Surfaces:
+ *   awaiting_work          → [Mark step done]
+ *   awaiting_auto_review   → [Run auto-review]
+ *   awaiting_review        → [Approve] [Reject]
+ *   rejected               → [Rerun]
+ * Empty string for steps that aren't the active run step or runs that don't
+ * exist yet — keeps the card unchanged for steps you can't act on.
+ */
+function renderRunGate(epic, focused) {
+  if (!epic.runId || !focused.isCurrentRunStep) { return ''; }
+  const status = focused.runStatus;
+  if (!status || status === 'pending' || status === 'approved') { return ''; }
+
+  const labelMap = {
+    awaiting_work: 'Awaiting work',
+    awaiting_auto_review: 'Awaiting auto-review',
+    awaiting_review: 'Awaiting human review',
+    rejected: 'Rejected',
+  };
+  const msgMap = {
+    awaiting_work: 'Run the agent externally, then mark this step done to advance.',
+    awaiting_auto_review: 'Auto-reviewer pending. Run it to validate this step.',
+    awaiting_review: 'Step is paused for your approval. Approve to advance, reject to send back.',
+    rejected: 'This step was rejected. Rerun to bump revision and try again.',
+  };
+
+  const runId = escapeHtml(epic.runId);
+  let html = '<div class="run-gate ' + status + '">';
+  html += '<div class="run-gate-row">';
+  html += '<span class="run-gate-label">' + escapeHtml(labelMap[status] || status) + '</span>';
+  html += '<span class="run-gate-msg">' + escapeHtml(msgMap[status] || '') + '</span>';
+  html += '</div>';
+
+  if (status === 'rejected' && focused.rejectReason) {
+    html += '<div class="run-gate-reason">↳ ' + escapeHtml(focused.rejectReason) + '</div>';
+  }
+
+  // Show the verdict from the most recent auto-reviewer run, if any. Persists
+  // into awaiting_review so the human reviewer sees what the validator said.
+  if (focused.autoReviewVerdict) {
+    const v = focused.autoReviewVerdict;
+    const cls = v.decision === 'pass' ? 'auto-pass' : 'auto-reject';
+    html += '<div class="run-gate-verdict ' + cls + '">';
+    html += '<span class="run-gate-verdict-label">Auto-review: ' + (v.decision === 'pass' ? '✓ pass' : '✕ reject') + '</span>';
+    html += '<span class="run-gate-verdict-reason">' + escapeHtml(v.reason || '') + '</span>';
+    html += '</div>';
+  }
+
+  // Tell the user which gates this step has configured. Without this hint, a
+  // pipeline of bare-string steps (no human_review / auto_review) silently
+  // auto-advances past Mark step done, and the user wonders where the
+  // approve/reject buttons went.
+  const gates = [];
+  if (focused.stepHasAutoReview) { gates.push('🤖 auto-review'); }
+  if (focused.stepHasHumanReview) { gates.push('👤 human review'); }
+  if (gates.length > 0) {
+    html += '<div class="run-gate-config">Gates after Mark done: ' + gates.join(' → ') + '</div>';
+  } else if (status === 'awaiting_work') {
+    html += '<div class="run-gate-config run-gate-config-empty">No review gates configured for this step — Mark done will auto-approve and advance. Open Builder → ⚙ on the step to add human / auto review.</div>';
+  }
+
+  html += '<div class="run-gate-row">';
+  if (status === 'awaiting_work') {
+    html += '<button class="btn-run btn-run-primary" data-action="markStepDone" data-run-id="' + runId + '">Mark step done</button>';
+  } else if (status === 'awaiting_auto_review') {
+    html += '<button class="btn-run btn-run-primary" data-action="runAutoReview" data-run-id="' + runId + '">Run auto-review</button>';
+  } else if (status === 'awaiting_review') {
+    html += '<button class="btn-run btn-run-approve" data-action="approveStep" data-run-id="' + runId + '">Approve</button>';
+    html += '<button class="btn-run btn-run-reject" data-action="rejectStep" data-run-id="' + runId + '">Reject</button>';
+  } else if (status === 'rejected') {
+    html += '<button class="btn-run btn-run-primary" data-action="rerunStep" data-run-id="' + runId + '">Rerun</button>';
+  }
+  html += '</div>';
   html += '</div>';
   return html;
 }
@@ -991,6 +1301,27 @@ document.addEventListener('click', (e) => {
     post('openArtifactFile', {
       epicDir: target.dataset.epicDir,
       filename: target.dataset.filename,
+    });
+    return;
+  }
+  if (
+    action === 'markStepDone' ||
+    action === 'runAutoReview' ||
+    action === 'approveStep' ||
+    action === 'rejectStep' ||
+    action === 'rerunStep'
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    post(action, { runId: target.dataset.runId });
+    return;
+  }
+  if (action === 'startPipelineRunForEpic') {
+    e.preventDefault();
+    e.stopPropagation();
+    post('startPipelineRunForEpic', {
+      epicId: target.dataset.epicId,
+      pipelineId: target.dataset.pipelineId,
     });
     return;
   }

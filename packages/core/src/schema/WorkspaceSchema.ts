@@ -91,22 +91,40 @@ const SlashCommandSchema = z.union([
  * A pipeline step is either a bare agent id (legacy form) or an object
  * with gating metadata. The object form lets the pipeline runner enforce
  * artifact preconditions (`requires`), validate produced artifacts
- * (`produces`), and pause for human approval (`human_review`).
+ * (`produces`), pause for an automated validator (`auto_review` +
+ * `auto_review_runner`), and pause for human approval (`human_review`).
  *
  * Artifact paths support `{<context-key>}` placeholders that get resolved
  * from the run's context map at execution time — e.g.
  * `docs/sdlc/epics/{epic}/PRD.md` becomes
  * `docs/sdlc/epics/DRM-2100/PRD.md` for a run with `context.epic == "DRM-2100"`.
  */
-const PipelineStepObjectSchema = z.object({
-  agent: z.string().min(1),
-  /** Artifact paths the step is expected to produce. Checked after work. */
-  produces: z.array(z.string().min(1)).default([]),
-  /** Artifact paths required from upstream. Gate-checked before work. */
-  requires: z.array(z.string().min(1)).default([]),
-  /** When true, the runner pauses for human approval before advancing. */
-  human_review: z.boolean().default(false),
-});
+const PipelineStepObjectSchema = z
+  .object({
+    agent: z.string().min(1),
+    /** Display name for the step. Falls back to the agent id when omitted. */
+    name: z.string().optional(),
+    /** Step is part of the pipeline but skipped at run time when false. Defaults to true. */
+    enabled: z.boolean().default(true),
+    /** Artifact paths the step is expected to produce. Checked after work. */
+    produces: z.array(z.string().min(1)).default([]),
+    /** Artifact paths required from upstream. Gate-checked before work AND on Mark step done. */
+    requires: z.array(z.string().min(1)).default([]),
+    /** When true, the runner runs `auto_review_runner` after produces validate, before any human gate. */
+    auto_review: z.boolean().default(false),
+    /**
+     * Path (relative to workspace root, or absolute) to a JS/TS module that
+     * exports a default async function `(ctx) => { decision: 'pass'|'reject',
+     * reason: string }`. Required when `auto_review: true`.
+     */
+    auto_review_runner: z.string().optional(),
+    /** When true, the runner pauses for human approval before advancing. */
+    human_review: z.boolean().default(false),
+  })
+  .refine((s) => !s.auto_review || !!s.auto_review_runner, {
+    message: 'Step with `auto_review: true` must set `auto_review_runner` (path to a JS/TS validator module).',
+    path: ['auto_review_runner'],
+  });
 
 const PipelineStepSchema = z.union([
   z.string().min(1),
@@ -124,17 +142,48 @@ export type PipelineStepConfig = z.infer<typeof PipelineStepSchema>;
 /** Step in normalized form (object with all defaults applied). */
 export interface NormalizedStep {
   agent: string;
+  name?: string;
+  enabled: boolean;
   produces: string[];
   requires: string[];
+  auto_review: boolean;
+  auto_review_runner?: string;
   human_review: boolean;
 }
 
-/** Convert either form of a pipeline step into the normalized object. */
-export function normalizeStep(step: PipelineStepConfig): NormalizedStep {
+/**
+ * Convert either form of a pipeline step into the normalized object.
+ *
+ * Defaults are applied defensively here because `normalizeStep` is called on
+ * raw YAML loads (e.g. by the Builder webview) that have NOT been routed
+ * through `validateWorkspace`, so Zod defaults haven't kicked in. The
+ * runtime would otherwise crash on `step.requires.length` when the YAML
+ * omitted optional fields.
+ */
+export function normalizeStep(step: PipelineStepConfig | { agent?: string; [k: string]: unknown }): NormalizedStep {
   if (typeof step === 'string') {
-    return { agent: step, produces: [], requires: [], human_review: false };
+    return {
+      agent: step,
+      enabled: true,
+      produces: [],
+      requires: [],
+      auto_review: false,
+      human_review: false,
+    };
   }
-  return step;
+  const obj = step as Record<string, unknown>;
+  const requires = Array.isArray(obj.requires) ? (obj.requires as string[]) : [];
+  const produces = Array.isArray(obj.produces) ? (obj.produces as string[]) : [];
+  return {
+    agent: typeof obj.agent === 'string' ? obj.agent : '',
+    name: typeof obj.name === 'string' ? obj.name : undefined,
+    enabled: typeof obj.enabled === 'boolean' ? obj.enabled : true,
+    produces,
+    requires,
+    auto_review: obj.auto_review === true,
+    auto_review_runner: typeof obj.auto_review_runner === 'string' ? obj.auto_review_runner : undefined,
+    human_review: obj.human_review === true,
+  };
 }
 
 /**

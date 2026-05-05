@@ -396,6 +396,107 @@ async function collectCapabilities(): Promise<string[] | undefined> {
   return capabilities;
 }
 
+// ── per-step config prompts ─────────────────────────────────────────────
+
+export interface PipelineStepConfigDraft {
+  agent: string;
+  enabled: boolean;
+  requires: string[];
+  produces: string[];
+  human_review: boolean;
+  auto_review: boolean;
+  auto_review_runner?: string;
+}
+
+/**
+ * Walk the user through configuring one pipeline step's gates and artifacts.
+ * Used both by `addPipelineCommand` (Advanced mode) and `editStepConfig`
+ * triggered from the Builder webview.
+ *
+ * `defaults` pre-fills each prompt — pass the existing step's normalized
+ * config when editing, omit when creating. Returns undefined if the user
+ * cancels at any prompt; callers should abort the whole flow on undefined
+ * rather than write a half-configured step.
+ */
+export async function promptStepConfig(
+  agentId: string,
+  defaults?: Partial<PipelineStepConfigDraft>,
+): Promise<PipelineStepConfigDraft | undefined> {
+  const enabled = await vscode.window.showQuickPick(
+    [
+      { label: 'Yes', description: 'Step runs as part of the pipeline', value: true },
+      { label: 'No',  description: 'Step stays in pipeline.yaml but the runner skips it', value: false },
+    ],
+    { placeHolder: `[${agentId}] enabled?`, ignoreFocusOut: true },
+  );
+  if (!enabled) { return undefined; }
+
+  const requires = await vscode.window.showInputBox({
+    prompt: `[${agentId}] requires — comma-separated upstream artifact paths (use {epic} for run context)`,
+    placeHolder: 'e.g. docs/sdlc/epics/{epic}/PRD.md',
+    ignoreFocusOut: true,
+    value: defaults?.requires ? defaults.requires.join(', ') : '',
+  });
+  if (requires === undefined) { return undefined; }
+
+  const produces = await vscode.window.showInputBox({
+    prompt: `[${agentId}] produces — comma-separated output artifact paths`,
+    placeHolder: 'e.g. docs/sdlc/epics/{epic}/TECH-DESIGN.md',
+    ignoreFocusOut: true,
+    value: defaults?.produces ? defaults.produces.join(', ') : '',
+  });
+  if (produces === undefined) { return undefined; }
+
+  const humanReview = await vscode.window.showQuickPick(
+    [
+      { label: 'Yes', description: 'Pause for manual approval after the step is marked done', value: true },
+      { label: 'No',  description: 'Auto-advance after produces validate (and after auto-review, if enabled)', value: false },
+    ],
+    {
+      placeHolder: `[${agentId}] human review?` + (defaults?.human_review !== undefined ? ` (currently: ${defaults.human_review ? 'Yes' : 'No'})` : ''),
+      ignoreFocusOut: true,
+    },
+  );
+  if (!humanReview) { return undefined; }
+
+  const autoReview = await vscode.window.showQuickPick(
+    [
+      { label: 'No',  description: 'No automated validator', value: false },
+      { label: 'Yes', description: 'Run a JS/TS validator script after produces validate, before any human gate', value: true },
+    ],
+    {
+      placeHolder: `[${agentId}] auto review?` + (defaults?.auto_review !== undefined ? ` (currently: ${defaults.auto_review ? 'Yes' : 'No'})` : ''),
+      ignoreFocusOut: true,
+    },
+  );
+  if (!autoReview) { return undefined; }
+
+  let autoReviewRunner: string | undefined;
+  if (autoReview.value) {
+    autoReviewRunner = await vscode.window.showInputBox({
+      prompt: `[${agentId}] auto_review_runner — path to validator script (relative to workspace root)`,
+      placeHolder: '.aidlc/scripts/validate-' + agentId + '.mjs',
+      value: defaults?.auto_review_runner ?? '',
+      ignoreFocusOut: true,
+      validateInput: (v) => (v.trim().length === 0 ? 'Required when auto_review is enabled' : null),
+    });
+    if (autoReviewRunner === undefined) { return undefined; }
+  }
+
+  const splitCsv = (s: string): string[] =>
+    s.split(',').map((x) => x.trim()).filter((x) => x.length > 0);
+
+  return {
+    agent: agentId,
+    enabled: enabled.value,
+    requires: splitCsv(requires),
+    produces: splitCsv(produces),
+    human_review: humanReview.value,
+    auto_review: autoReview.value,
+    auto_review_runner: autoReviewRunner?.trim() || undefined,
+  };
+}
+
 // ── addPipeline ─────────────────────────────────────────────────────────
 
 export async function addPipelineCommand(): Promise<void> {
@@ -445,9 +546,33 @@ export async function addPipelineCommand(): Promise<void> {
   );
   if (!onFailure) { return; }
 
+  // Per-step config: ask once whether to configure gates per step, or use
+  // bare-string steps (default — quick path). Configured steps let the user
+  // toggle human_review / auto_review / requires / produces.
+  const wantConfig = await vscode.window.showQuickPick(
+    [
+      { label: 'Quick — bare steps', description: 'Steps run sequentially with no gates. You can edit YAML later to add review gates.', value: false },
+      { label: 'Advanced — configure each step', description: 'Toggle human review, auto review, requires/produces paths per step.', value: true },
+    ],
+    { placeHolder: 'Pipeline configuration mode', ignoreFocusOut: true },
+  );
+  if (wantConfig === undefined) { return; }
+
+  let steps: unknown[];
+  if (!wantConfig.value) {
+    steps = picked.map((p) => p.label);
+  } else {
+    steps = [];
+    for (const p of picked) {
+      const stepCfg = await promptStepConfig(p.label);
+      if (!stepCfg) { return; } // user cancelled mid-flow — abort whole wizard
+      steps.push(stepCfg);
+    }
+  }
+
   doc.pipelines.push({
     id: pipelineId,
-    steps: picked.map((p) => p.label),
+    steps,
     on_failure: onFailure.value,
   });
   writeYaml(root, doc);

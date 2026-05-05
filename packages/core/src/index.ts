@@ -70,13 +70,23 @@ export type {
 export { RunStateStore, RUN_ID_PATTERN } from './runs/RunStateStore';
 export {
   startRun,
+  canStartStep,
   markStepDone,
   approveStep,
   rejectStep,
   rerunStep,
+  submitAutoReviewVerdict,
   PipelineRunError,
 } from './runs/PipelineRunner';
+export { runAutoReview, AutoReviewerError } from './runs/AutoReviewer';
+export type { AutoReviewerContext, AutoReviewerFn } from './runs/AutoReviewer';
 export { resolvePath } from './runs/RunState';
-export type { RunState, StepRecord, StepStatus, RunStatus } from './runs/RunState';
+export type {
+  RunState,
+  StepRecord,
+  StepStatus,
+  RunStatus,
+  AutoReviewVerdict,
+} from './runs/RunState';
 
 export const AIDLC_CORE_VERSION = '0.1.0';
