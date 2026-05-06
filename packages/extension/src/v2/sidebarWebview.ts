@@ -61,6 +61,12 @@ interface ActiveRun {
   produces: ArtifactPath[];
   /** Files this step needs from upstream (already-produced gate inputs). */
   requires: ArtifactPath[];
+  /**
+   * Slash command (including the leading `/`) that invokes the current
+   * step's agent, when one is wired up in `slash_commands`. Empty when no
+   * command targets this agent — the user just sees the agent id then.
+   */
+  currentSlashCommand?: string;
 }
 
 interface SidebarState {
@@ -175,9 +181,20 @@ function listActiveRuns(root: string): ActiveRun[] {
     // re-parsing workspace.yaml per run.
     const doc = readYaml(root);
     const pipelinesById = new Map<string, PipelineConfig>();
+    // agent id → slash command name (including leading `/`). First wins
+    // when multiple commands point at the same agent — the workspace
+    // schema doesn't forbid that, but it's a config smell so we don't
+    // bother surfacing duplicates.
+    const slashByAgent = new Map<string, string>();
     if (doc) {
       for (const p of doc.pipelines as PipelineConfig[]) {
         if (typeof p.id === 'string') { pipelinesById.set(p.id, p); }
+      }
+      for (const c of doc.slash_commands) {
+        const agent = (c as { agent?: unknown }).agent;
+        if (typeof c.name === 'string' && typeof agent === 'string' && !slashByAgent.has(agent)) {
+          slashByAgent.set(agent, c.name);
+        }
       }
     }
 
@@ -188,13 +205,14 @@ function listActiveRuns(root: string): ActiveRun[] {
         const pipeline = pipelinesById.get(r.pipelineId);
         const stepConfig = pipeline?.steps?.[r.currentStepIdx];
         const norm = stepConfig ? normalizeStep(stepConfig) : null;
+        const agent = step?.agent ?? '';
 
         return {
           runId: r.runId,
           pipelineId: r.pipelineId,
           currentStepIdx: r.currentStepIdx,
           totalSteps: r.steps.length,
-          currentAgent: step?.agent ?? '',
+          currentAgent: agent,
           currentStepStatus: step?.status ?? '',
           revision: step?.revision ?? 1,
           rejectReason: step?.rejectReason,
@@ -204,6 +222,7 @@ function listActiveRuns(root: string): ActiveRun[] {
           requires: norm
             ? norm.requires.map((p) => resolveArtifact(root, p, r.context))
             : [],
+          currentSlashCommand: agent ? slashByAgent.get(agent) : undefined,
         };
       });
   } catch {
@@ -362,6 +381,13 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
         }
         return;
       }
+      case 'copyCommand': {
+        const cmd = String(msg.command ?? '');
+        if (!cmd) { return; }
+        await vscode.env.clipboard.writeText(cmd);
+        void vscode.window.setStatusBarMessage(`Copied ${cmd} to clipboard`, 2000);
+        return;
+      }
       case 'refresh':
         this.refresh();
         return;
@@ -373,6 +399,7 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
     const iconUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'media', 'icon.svg'),
     ).toString();
+    const version = readExtensionVersion(this.extensionUri.fsPath);
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -385,6 +412,7 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
 <body><div id="app"></div>
 <script nonce="${nonce}">
 window.BRAND_ICON_URI = ${JSON.stringify(iconUri)};
+window.EXTENSION_VERSION = ${JSON.stringify(version)};
 ${SIDEBAR_JS}
 </script>
 </body></html>`;
@@ -396,6 +424,15 @@ function makeNonce(): string {
   let out = '';
   for (let i = 0; i < 32; i++) { out += chars[Math.floor(Math.random() * chars.length)]; }
   return out;
+}
+
+function readExtensionVersion(extensionRoot: string): string {
+  try {
+    const raw = fs.readFileSync(path.join(extensionRoot, 'package.json'), 'utf8');
+    const pkg = JSON.parse(raw) as { version?: unknown };
+    if (typeof pkg.version === 'string' && pkg.version.length > 0) { return pkg.version; }
+  } catch { /* fall through */ }
+  return '';
 }
 
 const SIDEBAR_CSS = `
@@ -640,6 +677,23 @@ body {
   margin-bottom: 6px;
 }
 .run-step-label { color: var(--text-soft); }
+.run-step-cmd {
+  display: flex; align-items: center; gap: 6px;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 10px;
+  color: var(--accent);
+  background: rgba(94,234,212,0.08);
+  border-radius: 4px;
+  padding: 3px 6px;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+.run-step-cmd:hover { background: rgba(94,234,212,0.16); }
+.run-step-cmd-icon {
+  flex-shrink: 0; width: 12px; text-align: center;
+  font-size: 10px; color: var(--text-faint);
+}
+.run-step-cmd-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .run-rev {
   font-size: 9px; color: var(--accent-3);
   background: rgba(236,164,184,0.10);
@@ -1101,6 +1155,13 @@ function renderActiveRuns() {
     html += '<span class="' + statusClass + '">' + escapeHtml(r.currentStepStatus.replace(/_/g, ' ')) + '</span>';
     html += '</div>';
 
+    if (r.currentSlashCommand) {
+      html += '<div class="run-step-cmd" data-action="copyCommand" data-command="' + escapeHtml(r.currentSlashCommand) + '" title="Click to copy — paste into Claude to run this step">';
+      html += '<span class="run-step-cmd-name">' + escapeHtml(r.currentSlashCommand) + '</span>';
+      html += '<span class="run-step-cmd-icon">⧉</span>';
+      html += '</div>';
+    }
+
     if (r.currentStepStatus === 'rejected' && r.rejectReason) {
       html += '<div class="run-reject-reason" title="Reason for rejection">↳ ' + escapeHtml(r.rejectReason) + '</div>';
     }
@@ -1154,8 +1215,9 @@ function renderArtifactList(label, paths, highlightMissing) {
 }
 
 function renderFooter() {
-  if (!state.hasFolder) { return '<div class="footer">v0.8.0 · <a data-action="openProject">Open Project</a></div>'; }
-  return '<div class="footer">v0.8.0 · <a data-action="openBuilder">Builder</a> · <a data-action="refresh">Refresh</a></div>';
+  const v = window.EXTENSION_VERSION ? 'v' + window.EXTENSION_VERSION + ' · ' : '';
+  if (!state.hasFolder) { return '<div class="footer">' + v + '<a data-action="openProject">Open Project</a></div>'; }
+  return '<div class="footer">' + v + '<a data-action="openBuilder">Builder</a> · <a data-action="refresh">Refresh</a></div>';
 }
 
 document.addEventListener('click', (e) => {
@@ -1198,6 +1260,11 @@ document.addEventListener('click', (e) => {
 
   if (action === 'openArtifact') {
     vscode.postMessage({ type: action, path: target.dataset.path });
+    return;
+  }
+
+  if (action === 'copyCommand') {
+    vscode.postMessage({ type: action, command: target.dataset.command });
     return;
   }
 

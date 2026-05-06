@@ -48,17 +48,25 @@ interface PanelState {
    * each pipeline circle.
    */
   agents: Record<string, AgentMetadata>;
+  /**
+   * Lookup of agent.id → slash command name (including leading `/`) for any
+   * `slash_commands` entry that targets the agent. First wins when multiple
+   * commands point at the same agent. Used to render a copy-to-clipboard
+   * badge in the step-detail card.
+   */
+  slashCommands: Record<string, string>;
 }
 
 function buildState(): PanelState {
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (!folder) {
-    return { workspaceRoot: null, workspaceName: '(no folder open)', epics: [], agents: {} };
+    return { workspaceRoot: null, workspaceName: '(no folder open)', epics: [], agents: {}, slashCommands: {} };
   }
   const root = folder.uri.fsPath;
   const doc = readYaml(root);
 
   const agents: Record<string, AgentMetadata> = {};
+  const slashCommands: Record<string, string> = {};
   if (doc) {
     for (const a of doc.agents) {
       const id = String(a.id);
@@ -69,6 +77,16 @@ function buildState(): PanelState {
         outputs: typeof a.outputs === 'string' ? a.outputs : '',
         artifact: typeof a.artifact === 'string' ? a.artifact : '',
       };
+    }
+    // SlashCommandSchema is `{name, agent}` OR `{name, pipeline}` — only the
+    // agent-bound entries are useful for the per-step badge. First wins on
+    // duplicates; the workspace schema doesn't forbid multiple commands per
+    // agent but it's a config smell so we don't bother surfacing all of them.
+    for (const c of doc.slash_commands) {
+      const agent = (c as { agent?: unknown }).agent;
+      if (typeof c.name === 'string' && typeof agent === 'string' && !slashCommands[agent]) {
+        slashCommands[agent] = c.name;
+      }
     }
   }
 
@@ -86,6 +104,7 @@ function buildState(): PanelState {
     workspaceName: folder.name,
     epics,
     agents,
+    slashCommands,
   };
 }
 
@@ -218,6 +237,14 @@ export class EpicsPanel {
         // pinned tab in the editor group hosting the panel.
         const docOpen = await vscode.workspace.openTextDocument(filePath);
         await vscode.window.showTextDocument(docOpen, { preview: false });
+        return;
+      }
+
+      case 'copyCommand': {
+        const cmd = String(msg.command ?? '');
+        if (!cmd) { return; }
+        await vscode.env.clipboard.writeText(cmd);
+        void vscode.window.setStatusBarMessage(`Copied ${cmd} to clipboard`, 2000);
         return;
       }
 
@@ -776,6 +803,33 @@ button.step-detail-val.is-link:active {
   opacity: 0.55;
   user-select: none;
 }
+button.step-detail-val.is-cmd {
+  cursor: pointer;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--accent);
+  background: rgba(94,234,212,0.10);
+  border: 1px solid rgba(94,234,212,0.28);
+  padding: 2px 8px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all .12s ease;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+}
+button.step-detail-val.is-cmd:hover {
+  background: rgba(94,234,212,0.20);
+  border-color: rgba(94,234,212,0.45);
+  box-shadow: 0 0 12px rgba(94,234,212,0.20);
+}
+button.step-detail-val.is-cmd:active { transform: scale(0.97); }
+.step-detail-val.is-cmd .copy-icon {
+  font-size: 10px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
 
 /* Inputs */
 .inputs-grid {
@@ -1144,6 +1198,16 @@ function renderEpic(e) {
       } else {
         html += '<div class="step-detail-val mono is-empty">—</div>';
       }
+      // Slash command row — only when workspace.yaml has a slash_commands
+      // entry pointing at this step agent. Click to copy.
+      const slashCmd = state.slashCommands[focused.agent];
+      if (slashCmd) {
+        html += '<div class="step-detail-label">🚀 Command</div>';
+        html += '<button class="step-detail-val is-cmd" data-action="copyCommand" data-command="' + escapeHtml(slashCmd) + '" title="Click to copy — paste into Claude to run this step">';
+        html += '<span>' + escapeHtml(slashCmd) + '</span>';
+        html += '<span class="copy-icon">⧉</span>';
+        html += '</button>';
+      }
       html += '</div>';
       html += renderRunGate(e, focused);
       html += '</div>';
@@ -1302,6 +1366,12 @@ document.addEventListener('click', (e) => {
       epicDir: target.dataset.epicDir,
       filename: target.dataset.filename,
     });
+    return;
+  }
+  if (action === 'copyCommand') {
+    e.preventDefault();
+    e.stopPropagation();
+    post('copyCommand', { command: target.dataset.command });
     return;
   }
   if (
