@@ -2,7 +2,7 @@
 
 Drive Claude through any pipeline you declare in a single `workspace.yaml` — visually from VS Code, or from the terminal. Agents, skills, pipelines, and epics share one source of truth; both surfaces stay in sync within ~200ms.
 
-![aidlc demo](https://raw.githubusercontent.com/aidlc-io/aidlc/v0.8.0/packages/extension/media/demo.gif)
+![aidlc demo](https://raw.githubusercontent.com/aidlc-io/aidlc/v0.8.5/packages/extension/media/demo.gif)
 
 ## Features
 

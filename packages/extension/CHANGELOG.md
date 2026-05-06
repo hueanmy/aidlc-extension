@@ -1,10 +1,10 @@
 # Changelog
 
-## 0.8.6
+## 0.8.5
 
 - feat: add Get Started walkthrough (6 steps with command buttons)
 - feat: ✕ button on sidebar project bar to close the open folder
-- README: restore demo gif, refresh content (epics/runs, Load Demo Project, walkthrough)
+- README: refresh demo gif (full pipeline run @ 2x speed) and refresh content (epics/runs, Load Demo Project, walkthrough)
 - fix: AutoReviewer dynamic import (route through `new Function` so CJS transpile keeps `import()`)
 - feat: Load Demo Project command, reject-to-upstream cascade, debug fixes
 - feat: surface slash commands in sidebar runs and Epics panel step detail
