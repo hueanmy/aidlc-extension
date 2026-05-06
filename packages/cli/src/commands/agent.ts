@@ -2,9 +2,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { validateWorkspace } from '@aidlc/core';
+import { validateWorkspace, WorkspaceLoader } from '@aidlc/core';
 import { requireYaml, writeYaml, existingIds } from '../yamlIO';
 import { resolveWorkspaceRoot } from '../workspaceRoot';
+import { parseContext } from '../runHelpers';
 
 export function registerAgent(program: Command): void {
   const cmd = program.command('agent').description('Manage agents in workspace.yaml');
@@ -128,5 +129,78 @@ export function registerAgent(program: Command): void {
       }
       writeYaml(root, doc);
       console.log(chalk.green('✔') + ` Removed agent ${chalk.bold(id)}`);
+    });
+
+  // ── run ────────────────────────────────────────────────────────────────────
+  cmd
+    .command('run <id>')
+    .description('One-shot: run an agent directly without creating a run state file')
+    .option('--message <text>', 'User message sent to claude (what to do)')
+    .option('--context <pairs>', 'Context key=value pairs, comma-separated (e.g. epic=ABC-123)')
+    .option('--dry-run', 'Print the assembled prompt without spawning claude')
+    .action(async (id: string, opts: {
+      message?: string; context?: string; dryRun?: boolean;
+    }, actionCmd: Command) => {
+      const root = resolveWorkspaceRoot(actionCmd);
+
+      let ws;
+      try {
+        ws = WorkspaceLoader.load(root);
+      } catch (err) {
+        console.error(chalk.red(`Failed to load workspace: ${err instanceof Error ? err.message : String(err)}`));
+        process.exit(1);
+      }
+
+      const agent = ws.config.agents.find(a => a.id === id);
+      if (!agent) {
+        const ids = ws.config.agents.map(a => a.id);
+        console.error(chalk.red(`Agent "${id}" not found.`));
+        if (ids.length > 0) { console.error(chalk.dim(`Available: ${ids.join(', ')}`)); }
+        process.exit(1);
+      }
+
+      let skillText: string;
+      try {
+        skillText = ws.skills.load(agent.skill);
+      } catch (err) {
+        console.error(chalk.red(`Failed to load skill "${agent.skill}": ${err instanceof Error ? err.message : String(err)}`));
+        process.exit(1);
+      }
+
+      const env = ws.envResolver.resolveLayered(ws.config.environment ?? {}, agent.env ?? {});
+      const context = opts.context ? parseContext(opts.context) : {};
+      const contextStr = Object.entries(context).map(([k, v]) => `${k}=${v}`).join(' ');
+      const userMessage = opts.message ?? (contextStr || `Run agent: ${id}`);
+
+      if (opts.dryRun) {
+        console.log(chalk.bold('\n── System prompt (skill) ──────────────────────────────'));
+        console.log(chalk.dim(skillText));
+        console.log(chalk.bold('\n── User message ───────────────────────────────────────'));
+        console.log(userMessage || chalk.dim('(empty)'));
+        console.log();
+        return;
+      }
+
+      console.log(chalk.bold(`\n▶  ${id}`) + chalk.dim(`  skill: ${agent.skill}`));
+      if (userMessage) { console.log(chalk.dim(`   ${userMessage}`)); }
+      console.log(chalk.dim('─'.repeat(60)));
+
+      const runner = ws.runners.resolve(agent);
+      const result = await runner.run({
+        skill: skillText,
+        env,
+        args: userMessage ? [userMessage] : [],
+        workspaceRoot: root,
+        onOutput: (chunk) => process.stdout.write(chunk),
+        onError:  (chunk) => process.stderr.write(chalk.dim(chunk)),
+        claude: null,
+      });
+
+      console.log(chalk.dim('─'.repeat(60)));
+      if (!result.success) {
+        console.error(chalk.red(`\n✘  Agent "${id}" exited with an error.`));
+        process.exit(1);
+      }
+      console.log(chalk.green(`\n✔  Done.`));
     });
 }
