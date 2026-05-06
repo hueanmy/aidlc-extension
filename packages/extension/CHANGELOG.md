@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.2
+
+- Drop the legacy SDLC-pipeline branding from README and CHANGELOG.
+- Fix a dangling command call in the workspace builder webview ("Open Claude Terminal" was no-op after the v2 namespace migration).
+
 ## 0.8.1
 
 - Marketplace metadata + demo asset fixes.
