@@ -313,15 +313,72 @@ export async function rejectStepCommand(runIdArg?: string): Promise<void> {
   });
   if (reason === undefined) { return; }
 
+  // Ask which step to send work back to. The default is "stay on this step"
+  // (in-place rerun); upstream choices cascade-reset intermediate steps to
+  // pending so the user redoes the chain after fixing the upstream cause.
+  const idx = state.currentStepIdx;
+  const currentStep = state.steps[idx];
+  const targetIdx = await pickRejectTarget(state);
+  if (targetIdx === undefined) { return; }
+
   try {
-    const next = rejectStep({ state, reason: reason.trim() || undefined });
+    const next = rejectStep({
+      state,
+      reason: reason.trim() || undefined,
+      targetIdx: targetIdx === idx ? undefined : targetIdx,
+    });
     RunStateStore.save(root, next);
-    void vscode.window.showInformationMessage(
-      `Rejected step "${state.steps[state.currentStepIdx].agent}". Click "Rerun" in the sidebar when ready.`,
-    );
+    if (targetIdx === idx) {
+      void vscode.window.showInformationMessage(
+        `Rejected step "${currentStep.agent}". Click "Rerun" in the sidebar when ready.`,
+      );
+    } else {
+      const target = state.steps[targetIdx];
+      void vscode.window.showInformationMessage(
+        `Rejected step "${currentStep.agent}" → sent back to step ${targetIdx + 1} "${target.agent}". Intermediate steps reset to pending.`,
+      );
+    }
   } catch (err) {
     surfaceRunError(err);
   }
+}
+
+/**
+ * Quickpick for "send the rejected work back to which step?".
+ * Returns the chosen step index, or undefined if the user dismissed the
+ * picker. The first item is the current step (in-place rerun) — that's the
+ * default behavior and stays prominent so the user doesn't have to navigate
+ * to keep the existing flow.
+ */
+async function pickRejectTarget(state: RunState): Promise<number | undefined> {
+  const idx = state.currentStepIdx;
+  const items: Array<vscode.QuickPickItem & { stepIdx: number }> = [
+    {
+      label: `$(refresh) Stay on step ${idx + 1} — ${state.steps[idx].agent}`,
+      description: 'Rerun in place',
+      detail: 'Mark current step rejected; user fixes and reruns same step. Default.',
+      stepIdx: idx,
+    },
+  ];
+  // Upstream candidates: any earlier step. Most recent first so step N-1 is
+  // the next item the user sees (most common cascade target).
+  for (let i = idx - 1; i >= 0; i--) {
+    items.push({
+      label: `$(arrow-up) Send back to step ${i + 1} — ${state.steps[i].agent}`,
+      description: 'Cascade reject',
+      detail: `Resets steps ${i + 2}–${idx + 1} to pending; revision++ on step ${i + 1}.`,
+      stepIdx: i,
+    });
+  }
+
+  // No upstream choices → don't bother asking.
+  if (items.length === 1) { return idx; }
+
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: 'Send rejected work back to which step?',
+    ignoreFocusOut: true,
+  });
+  return picked ? picked.stepIdx : undefined;
 }
 
 // ── rerunStep ────────────────────────────────────────────────────────────

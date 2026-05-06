@@ -6,7 +6,9 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/packages/extension"
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/extension",
+        "--disable-extension=hueanmy.aidlc",
+        "${workspaceFolder}"
       ],
       "outFiles": [
         "${workspaceFolder}/packages/extension/out/**/*.js",

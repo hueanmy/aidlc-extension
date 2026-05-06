@@ -12,10 +12,12 @@
  *     to awaiting_review (if human_review) or auto-approve + advance
  *   - approve: human accepts current awaiting_review step → advance
  *   - reject: human rejects current awaiting_review step → step rejected
+ *     (in-place) OR cascade to an upstream step with intermediate steps
+ *     reset to pending
  *   - rerun: user retries a rejected step → revision++, back to awaiting_work
  *
  * Phase 2 will layer in: requires gate-check on advance, hooks (before/after
- * step), reject-to-upstream cascade, automatic worker dispatch.
+ * step), automatic worker dispatch.
  */
 
 import * as fs from 'fs';
@@ -262,12 +264,27 @@ export function approveStep(args: {
   return advance(clone(state), idx, pipeline);
 }
 
-/** Human rejected the awaiting_review step. Stays current; can rerun. */
+/**
+ * Human rejected the awaiting_review step.
+ *
+ * Two modes:
+ *   - In-place (default, `targetIdx` omitted or === currentStepIdx): the
+ *     current step transitions to `rejected`. The user clicks Rerun to bump
+ *     revision and try again on the same step.
+ *   - Cascade upstream (`targetIdx < currentStepIdx`): the work needs to go
+ *     back to an earlier step (e.g. PRD missing a requirement caught at
+ *     review time). The target step is reset to `awaiting_work` with
+ *     revision++, intermediate steps + the rejected current step are reset
+ *     to `pending` and lose their artifacts/verdicts. The reject reason is
+ *     copied into the target step's `feedback` so the user has context when
+ *     they redo upstream work. `currentStepIdx` rewinds to the target.
+ */
 export function rejectStep(args: {
   state: RunState;
   reason?: string;
+  targetIdx?: number;
 }): RunState {
-  const { state, reason } = args;
+  const { state, reason, targetIdx } = args;
   const idx = state.currentStepIdx;
   const step = state.steps[idx];
   if (!step) {
@@ -278,6 +295,43 @@ export function rejectStep(args: {
       `Cannot reject step "${step.agent}": status is "${step.status}", expected "awaiting_review"`,
     );
   }
+
+  const isCascade = typeof targetIdx === 'number' && targetIdx >= 0 && targetIdx < idx;
+  if (isCascade) {
+    const next = clone(state);
+    const blame = `Rejected at step ${idx + 1} (${step.agent})${reason ? `: ${reason}` : ''}`;
+    const now = new Date().toISOString();
+    for (let i = targetIdx as number; i <= idx; i++) {
+      const s = next.steps[i];
+      if (i === (targetIdx as number)) {
+        next.steps[i] = {
+          ...s,
+          status: 'awaiting_work',
+          revision: s.revision + 1,
+          feedback: blame,
+          rejectReason: undefined,
+          autoReviewVerdict: undefined,
+          artifactsProduced: [],
+          finishedAt: undefined,
+          startedAt: now,
+        };
+      } else {
+        next.steps[i] = {
+          ...s,
+          status: 'pending',
+          rejectReason: undefined,
+          autoReviewVerdict: undefined,
+          artifactsProduced: [],
+          startedAt: undefined,
+          finishedAt: undefined,
+        };
+      }
+    }
+    next.currentStepIdx = targetIdx as number;
+    next.status = 'running';
+    return next;
+  }
+
   const next = clone(state);
   next.steps[idx] = {
     ...step,

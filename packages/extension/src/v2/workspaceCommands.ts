@@ -37,6 +37,7 @@ import { loadSdlcPreset } from './builtinPresets';
 import { startEpicCommand } from './epicWizard';
 import { EpicsPanel } from './epicsPanelWebview';
 import { insertDemoEpicCommand } from './demoEpic';
+import { loadDemoProjectCommand } from './demoProject';
 import {
   startPipelineRunCommand,
   markStepDoneCommand,
@@ -163,6 +164,11 @@ export function registerV2WorkspaceCommands(
     () => insertDemoEpicCommand(),
   );
 
+  const loadDemoProjectCmd = vscode.commands.registerCommand(
+    'aidlc.loadDemoProject',
+    () => loadDemoProjectCommand(),
+  );
+
   // Reuses an existing terminal if one is open so the user doesn't end up
   // with a stack of Claude REPLs after multiple clicks.
   //
@@ -275,6 +281,7 @@ export function registerV2WorkspaceCommands(
       startEpicCmd,
       openEpicsListCmd,
       insertDemoEpicCmd,
+      loadDemoProjectCmd,
       startRunCmd,
       markStepDoneCmd,
       approveStepCmd,

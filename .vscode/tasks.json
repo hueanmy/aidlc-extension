@@ -18,7 +18,7 @@
     {
       "label": "pnpm: watch-extension",
       "type": "shell",
-      "command": "pnpm --filter aidlc-flow watch",
+      "command": "pnpm --filter ./packages/extension watch",
       "isBackground": true,
       "problemMatcher": ["$tsc-watch"],
       "presentation": {

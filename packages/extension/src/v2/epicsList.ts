@@ -150,12 +150,19 @@ export function listEpics(workspaceRoot: string, doc: YamlDocument | null): Epic
     const stepDetails = stepStatesRaw.map((s, i) => {
       const agent = typeof s.agent === 'string' ? s.agent : '';
       const gate = stepGateByIdx.get(i) ?? { auto: false, human: false };
+      const runStatus = runStepByAgent.get(agent) ?? null;
+      // The state.json's per-step status doesn't track rejection — it
+      // stays at `in_progress` until rerun + advance. When the run-state
+      // machine has rejected the step, surface that as `failed` for
+      // display so the badge / pipeline circle render red instead of
+      // the misleading yellow "in_progress".
+      const displayStatus = runStatus === 'rejected' ? 'failed' as const : asStatus(s.status);
       return {
         agent,
-        status: asStatus(s.status),
+        status: displayStatus,
         startedAt: typeof s.startedAt === 'string' ? s.startedAt : null,
         finishedAt: typeof s.finishedAt === 'string' ? s.finishedAt : null,
-        runStatus: runStepByAgent.get(agent) ?? null,
+        runStatus,
         isCurrentRunStep: !!runState && agent === runCurrentAgent,
         rejectReason: runRejectByAgent.get(agent),
         autoReviewVerdict: runVerdictByAgent.get(agent),

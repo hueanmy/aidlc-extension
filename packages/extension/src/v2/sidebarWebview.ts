@@ -320,6 +320,9 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       case 'init':
         await vscode.commands.executeCommand('aidlc.initWorkspace');
         return;
+      case 'loadDemoProject':
+        await vscode.commands.executeCommand('aidlc.loadDemoProject');
+        return;
       case 'startEpic':
         await vscode.commands.executeCommand('aidlc.startEpic');
         return;
@@ -1002,8 +1005,9 @@ function renderProjectBar() {
 function renderEmptyNoFolder() {
   return '<div class="empty">' +
     '<h3>No project open</h3>' +
-    '<p>Open a folder to start building agents and workflows.</p>' +
+    '<p>Open a folder to start building agents and workflows — or load the demo project to see all the gate states pre-populated.</p>' +
     '<button class="cta-primary" data-action="openProject"><span>📂</span><span>Open Project</span><span class="arrow">→</span></button>' +
+    '<button class="btn" data-action="loadDemoProject" style="margin-top:8px"><span>🧪</span><span>Load Demo Project</span></button>' +
     '</div>';
 }
 

@@ -124,6 +124,12 @@
         "title": "Insert Demo Epic (EPIC-100)",
         "icon": "$(beaker)",
         "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.loadDemoProject",
+        "title": "Load Demo Project (full pipeline + 6 epics)",
+        "icon": "$(beaker)",
+        "category": "AIDLC"
       }
     ],
     "menus": {
