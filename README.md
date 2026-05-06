@@ -1,6 +1,8 @@
 # AIDLC
 
-AI-driven SDLC + agent workflow runner for VS Code.
+AI-driven SDLC + agent workflow runner — drives Claude through any pipeline you
+declare in `.aidlc/workspace.yaml`. Use it through the VS Code Builder UI or
+straight from the terminal.
 
 This is a **monorepo** managed with [pnpm workspaces](https://pnpm.io/workspaces).
 
@@ -8,42 +10,157 @@ This is a **monorepo** managed with [pnpm workspaces](https://pnpm.io/workspaces
 
 | Package | Path | Purpose |
 |---|---|---|
-| [`aidlc`](packages/extension/) | `packages/extension/` | VS Code extension. Published to Marketplace + Open VSX as `hueanmy.aidlc`. |
-| [`@aidlc/core`](packages/core/) | `packages/core/` | Pure-TypeScript engine: workspace loader, runner registry, pipeline executor. **No `import 'vscode'`** — runs standalone in CLI / tests / future cloud. |
-| [`@aidlc/cli`](packages/cli/) | `packages/cli/` | Terminal CLI (`aidlc`) — read-only commands today (`validate`, `list`, `status`); `run` / `approve` / `tail` land in a follow-up. |
+| [`aidlc`](packages/extension/) (extension) | `packages/extension/` | VS Code extension. Builder UI for `workspace.yaml`, sidebar for active runs, run-state commands. Marketplace + Open VSX as `hueanmy.aidlc`. |
+| [`@aidlc/core`](packages/core/) | `packages/core/` | Pure-TypeScript engine: Zod schema, workspace loader, runner registry (`DefaultRunner` shells out to `claude`), pipeline state machine. **No `import 'vscode'`** — runs identically in CLI / tests / cloud. |
+| [`aidlc`](packages/cli/) (CLI) | `packages/cli/` | Standalone terminal CLI. Manages `workspace.yaml`, drives runs end-to-end via Claude, no VS Code required. See [packages/cli/README.md](packages/cli/README.md). |
 
-## Getting started
+## Quick start
+
+### 1. Install the CLI
 
 ```sh
-pnpm install        # at repo root, installs all packages + creates symlinks
-pnpm compile        # tsc -r in every package
-pnpm package:extension   # build .vsix
+# (when published to npm)
+npm install -g aidlc
+
+# (locally during development)
+pnpm install && cd packages/cli && npm link
 ```
+
+### 2. Bootstrap a workspace
+
+```sh
+aidlc init                              # scaffolds .aidlc/workspace.yaml
+aidlc preset apply code-review          # or: sdlc, release-notes
+aidlc validate                          # check schema
+aidlc doctor                            # verify claude binary + auth
+```
+
+### 3. Start a run, let Claude do the work
+
+```sh
+aidlc run start review-pipeline --context epic=ABC-123
+aidlc run exec <runId>                  # spawns claude, streams output, advances on success
+# or fully unattended:
+aidlc run exec <runId> --auto-approve
+```
+
+### 4. Watch from VS Code
+
+Install the extension. Edits made by either side update within ~200ms because
+both consume the same `.aidlc/workspace.yaml` and `.aidlc/runs/*.json`.
+
+## Repo dev
+
+```sh
+pnpm install                            # installs all packages + creates symlinks
+pnpm build                              # tsc -r in every package
+pnpm test                               # @aidlc/core unit tests
+pnpm package:extension                  # build .vsix for the extension
+```
+
+## CLI reference (summary)
+
+The `aidlc` CLI ships **30+ commands** across nine groups. Highlights below;
+the full reference lives in [packages/cli/README.md](packages/cli/README.md).
+
+### Workspace bootstrap
+```
+aidlc init                    # scaffold .aidlc/workspace.yaml + skills/ + runs/
+aidlc validate                # parse + Zod-validate workspace.yaml
+aidlc doctor                  # workspace + claude binary + auth + env health checks
+aidlc list [--json]           # print agents, skills, pipelines
+```
+
+### Dynamic config (mirrors the VS Code Builder)
+```
+aidlc skill    add | list | show | remove           # 5 built-in templates
+aidlc agent    add | list | show | remove
+aidlc pipeline add | list | show | remove
+aidlc preset   apply | save | list                  # built-ins: code-review, release-notes, sdlc
+```
+
+### Run lifecycle (sequential, mirrors the upstream PipelineRunner)
+```
+aidlc run start <pipeline> [--id …] [--context epic=ABC-123]
+aidlc run mark-done <runId>      # validate produces, advance or await review
+aidlc run approve  <runId> [--comment …]
+aidlc run reject   <runId> --reason …
+aidlc run rerun    <runId> [--feedback …]
+aidlc run delete   <runId> [--force]
+aidlc run open     <runId> [--path]
+aidlc run exec     <runId> [--until …] [--auto-approve] [--dry-run]
+```
+
+### Step control (jump to any step, any order — bypasses sequential gate)
+```
+aidlc step start  <runId> <step>          # → awaiting_work, moves pointer
+aidlc step done   <runId> <step> [--reason …]
+aidlc step skip   <runId> <step>
+aidlc step reset  <runId> <step>          # → pending
+aidlc step set    <runId> <step> <status> # raw any StepStatus
+aidlc step jump   <runId> <step>          # auto-approve earlier pending steps
+```
+
+### Agent execution (one-shot, no run state)
+```
+aidlc agent run <agentId> [--message …] [--context epic=ABC-123] [--dry-run]
+```
+
+`<step>` accepts a 0-based index or an agent id. Pass `-w <path>` (or
+`AIDLC_WORKSPACE=<path>`) to point at a workspace other than `cwd`.
+
+## Architecture
+
+```
+                          ┌────────────────────┐
+                          │  workspace.yaml    │  ← single source of truth
+                          │  (Zod validated)   │
+                          └──────────┬─────────┘
+                                     │
+                  ┌──────────────────┼──────────────────┐
+                  │                  │                  │
+            ┌─────▼─────┐      ┌─────▼─────┐      ┌─────▼─────┐
+            │  CLI      │      │ Extension │      │  Future   │
+            │  (Node)   │      │  (VS Code)│      │  cloud    │
+            └─────┬─────┘      └─────┬─────┘      └───────────┘
+                  │                  │
+                  └────────┬─────────┘
+                           │
+                    ┌──────▼──────┐
+                    │ @aidlc/core │  ← shared engine
+                    │   (no UI)   │
+                    └──────┬──────┘
+                           │
+                    ┌──────▼──────┐
+                    │ DefaultRunner│ → spawns `claude --print --append-system-prompt …`
+                    └─────────────┘
+                           │
+                    ┌──────▼──────┐
+                    │.aidlc/runs/ │  ← state, watched by both UIs (live sync)
+                    │  *.json     │
+                    └─────────────┘
+```
+
+Both surfaces read and write the same files; the OS handles atomic renames so
+neither side ever sees a half-written run state.
+
+## Status
+
+- ✅ **Phase 0** — monorepo scaffold
+- ✅ **Phase 1** — core engine: Zod schema, loaders, `DefaultRunner`, `RunState` state machine, custom runner support
+- ✅ **Phase 2** — extension shell rewrite (Builder webview, sidebar, command wizards)
+- 🚧 **Phase 3** — Builder UI polish (drag-drop reorder, inline skill editor, canvas view)
+- 🚧 **Phase 4** — AIDLC Terminal + slash command auto-routing
+- ✅ **CLI M1–M4** — `init` / `doctor` / dynamic config (agent / skill / pipeline / preset) / run lifecycle / step control / **`run exec` (Claude auto-execution)** / `agent run`
+
+See [PLAN.md](PLAN.md) for the CLI roadmap and remaining milestones (M5: live
+watch / tail / dashboard, M6: Claude-specific polish).
 
 ## Marketplace
 
 - **VS Code Marketplace**: [hueanmy.aidlc](https://marketplace.visualstudio.com/items?itemName=hueanmy.aidlc)
 - **Open VSX**: [hueanmy.aidlc](https://open-vsx.org/extension/hueanmy/aidlc)
 
-## Status
+## License
 
-- [x] Phase 0 — monorepo scaffold (`packages/extension`, `packages/core` placeholder)
-- [x] Phase 1 — core engine: `WorkspaceSchema` (Zod), `WorkspaceLoader`, `EnvResolver`, `SkillLoader`, `RunnerRegistry` + `DefaultRunner` (claude CLI shell-out) + `CustomRunnerLoader`. 24 tests pass. **`PipelineExecutor` deferred to Phase 1.5.**
-- [ ] Phase 2 — extension shell rewrite (consume `@aidlc/core`, replace tree view with workspace.yaml driven UI)
-- [ ] Phase 3 — Config UI (4-tab webview: Agents / Skills / Env / Pipelines)
-- [ ] Phase 4 — AIDLC Terminal + slash command router
-- [ ] Phase 5 — bundled templates + onboarding wizard
-
-See [docs/sdlc/epics/](docs/) (when present) for the full v2 product spec.
-
-## CLI
-
-A minimal `@aidlc/cli` package ships read-only inspection commands today:
-
-```sh
-pnpm aidlc validate                       # check .aidlc/workspace.yaml
-pnpm aidlc list                           # agents, skills, pipelines
-pnpm aidlc status [runId] [--json]        # list runs or show one
-```
-
-Pass `-w <path>` (or `AIDLC_WORKSPACE=<path>`) to point at a workspace other than `cwd`. Run-orchestration commands (`run`, `approve`, `reject`, `rerun`, `tail`) are tracked under Phase 4 and will land alongside the slash command router.
+MIT
