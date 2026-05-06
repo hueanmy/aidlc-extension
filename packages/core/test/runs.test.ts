@@ -1,0 +1,330 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+import {
+  startRun,
+  canStartStep,
+  markStepDone,
+  approveStep,
+  rejectStep,
+  rerunStep,
+  submitAutoReviewVerdict,
+  runAutoReview,
+  PipelineRunError,
+  type PipelineConfig,
+  type RunState,
+  type AutoReviewVerdict,
+} from '../src';
+
+function tmpRoot(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'aidlc-runs-'));
+}
+
+function touch(root: string, rel: string, content = 'x'.repeat(20)): void {
+  const abs = path.join(root, rel);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, content);
+}
+
+const PIPELINE_HUMAN: PipelineConfig = {
+  id: 'p1',
+  on_failure: 'stop',
+  steps: [
+    { agent: 'po',        requires: [],         produces: ['PRD.md'],         human_review: true,  auto_review: false, enabled: true },
+    { agent: 'tech-lead', requires: ['PRD.md'], produces: ['TECH-DESIGN.md'], human_review: true,  auto_review: false, enabled: true },
+  ],
+};
+
+const PIPELINE_AUTO: PipelineConfig = {
+  id: 'p2',
+  on_failure: 'stop',
+  steps: [
+    { agent: 'po', requires: [], produces: ['PRD.md'], human_review: false, auto_review: false, enabled: true },
+    {
+      agent: 'tech-lead',
+      requires: ['PRD.md'],
+      produces: ['TECH-DESIGN.md'],
+      human_review: true,
+      auto_review: true,
+      auto_review_runner: '.aidlc/scripts/check-design.mjs',
+      enabled: true,
+    },
+  ],
+};
+
+describe('PipelineRunner — state machine', () => {
+  let root: string;
+  beforeEach(() => { root = tmpRoot(); });
+
+  it('startRun puts step 0 in awaiting_work, others pending', () => {
+    const s = startRun({ runId: 'R-1', pipeline: PIPELINE_HUMAN, context: { epic: 'R-1' } });
+    expect(s.steps[0].status).toBe('awaiting_work');
+    expect(s.steps[1].status).toBe('pending');
+    expect(s.currentStepIdx).toBe(0);
+    expect(s.status).toBe('running');
+  });
+
+  it('markStepDone hard-blocks when produces missing', () => {
+    const s = startRun({ runId: 'R-2', pipeline: PIPELINE_HUMAN, context: {} });
+    expect(() => markStepDone({ state: s, pipeline: PIPELINE_HUMAN, workspaceRoot: root })).toThrow(PipelineRunError);
+  });
+
+  it('markStepDone hard-blocks when requires missing on step 2 path', () => {
+    const s = startRun({ runId: 'R-3', pipeline: PIPELINE_HUMAN, context: {} });
+    // Move to step 1 by passing step 0
+    touch(root, 'PRD.md');
+    let next = markStepDone({ state: s, pipeline: PIPELINE_HUMAN, workspaceRoot: root });
+    next = approveStep({ state: next, pipeline: PIPELINE_HUMAN });
+    expect(next.currentStepIdx).toBe(1);
+    expect(next.steps[1].status).toBe('awaiting_work');
+    // Delete the upstream artifact then try markStepDone on step 1 — should hard-block
+    fs.rmSync(path.join(root, 'PRD.md'));
+    touch(root, 'TECH-DESIGN.md');
+    expect(() => markStepDone({ state: next, pipeline: PIPELINE_HUMAN, workspaceRoot: root })).toThrowError(/blocked/i);
+  });
+
+  it('canStartStep is a soft read-only check for requires', () => {
+    const s = startRun({ runId: 'R-4', pipeline: PIPELINE_HUMAN, context: {} });
+    // Step 0 has no requires
+    expect(canStartStep({ state: s, pipeline: PIPELINE_HUMAN, workspaceRoot: root })).toEqual({ ok: true });
+    // Step 1 needs PRD.md — not there yet
+    const check = canStartStep({ state: s, pipeline: PIPELINE_HUMAN, workspaceRoot: root, stepIdx: 1 });
+    expect(check.ok).toBe(false);
+    if (check.ok) { throw new Error('unreachable'); }
+    expect(check.missing).toContain('PRD.md');
+  });
+
+  it('human-review path: markStepDone → awaiting_review → approveStep → advance', () => {
+    let s = startRun({ runId: 'R-5', pipeline: PIPELINE_HUMAN, context: {} });
+    touch(root, 'PRD.md');
+    s = markStepDone({ state: s, pipeline: PIPELINE_HUMAN, workspaceRoot: root });
+    expect(s.steps[0].status).toBe('awaiting_review');
+    expect(s.currentStepIdx).toBe(0);
+    s = approveStep({ state: s, pipeline: PIPELINE_HUMAN });
+    expect(s.steps[0].status).toBe('approved');
+    expect(s.currentStepIdx).toBe(1);
+    expect(s.steps[1].status).toBe('awaiting_work');
+  });
+
+  it('reject + rerun bumps revision and clears artifacts', () => {
+    let s = startRun({ runId: 'R-6', pipeline: PIPELINE_HUMAN, context: {} });
+    touch(root, 'PRD.md');
+    s = markStepDone({ state: s, pipeline: PIPELINE_HUMAN, workspaceRoot: root });
+    s = rejectStep({ state: s, reason: 'missing acceptance criteria' });
+    expect(s.steps[0].status).toBe('rejected');
+    expect(s.steps[0].rejectReason).toContain('acceptance');
+
+    s = rerunStep({ state: s, feedback: 'add AC list' });
+    expect(s.steps[0].status).toBe('awaiting_work');
+    expect(s.steps[0].revision).toBe(2);
+    expect(s.steps[0].feedback).toBe('add AC list');
+    expect(s.steps[0].rejectReason).toBeUndefined();
+    expect(s.steps[0].artifactsProduced).toEqual([]);
+  });
+
+  // ── Auto-review path ─────────────────────────────────────────────────
+
+  it('auto-review path: markStepDone → awaiting_auto_review (NOT awaiting_review)', () => {
+    let s = startRun({ runId: 'R-7', pipeline: PIPELINE_AUTO, context: {} });
+    // Step 0 has no auto_review and no human_review → auto-approves and advances
+    touch(root, 'PRD.md');
+    s = markStepDone({ state: s, pipeline: PIPELINE_AUTO, workspaceRoot: root });
+    expect(s.steps[0].status).toBe('approved');
+    expect(s.currentStepIdx).toBe(1);
+
+    // Step 1: auto_review=true, human_review=true → after produces, goes to awaiting_auto_review
+    touch(root, 'TECH-DESIGN.md');
+    s = markStepDone({ state: s, pipeline: PIPELINE_AUTO, workspaceRoot: root });
+    expect(s.steps[1].status).toBe('awaiting_auto_review');
+    expect(s.currentStepIdx).toBe(1);
+  });
+
+  it('submitAutoReviewVerdict pass → awaiting_review (when human_review=true)', () => {
+    let s = startRun({ runId: 'R-8', pipeline: PIPELINE_AUTO, context: {} });
+    touch(root, 'PRD.md');
+    s = markStepDone({ state: s, pipeline: PIPELINE_AUTO, workspaceRoot: root });
+    touch(root, 'TECH-DESIGN.md');
+    s = markStepDone({ state: s, pipeline: PIPELINE_AUTO, workspaceRoot: root });
+    expect(s.steps[1].status).toBe('awaiting_auto_review');
+
+    const verdict: AutoReviewVerdict = {
+      decision: 'pass',
+      reason: 'all sections present',
+      at: '2026-05-05T00:00:00Z',
+      runner: 'check-design.mjs',
+    };
+    s = submitAutoReviewVerdict({ state: s, pipeline: PIPELINE_AUTO, verdict });
+    expect(s.steps[1].status).toBe('awaiting_review');
+    expect(s.steps[1].autoReviewVerdict).toEqual(verdict);
+  });
+
+  it('submitAutoReviewVerdict pass → advance (when human_review=false)', () => {
+    const pipelineNoHuman: PipelineConfig = {
+      id: 'p3',
+      on_failure: 'stop',
+      steps: [
+        { agent: 'po',        requires: [],         produces: ['PRD.md'],         human_review: false, auto_review: false, enabled: true },
+        {
+          agent: 'qa',
+          requires: ['PRD.md'],
+          produces: ['TEST-PLAN.md'],
+          human_review: false,
+          auto_review: true,
+          auto_review_runner: 'x.mjs',
+          enabled: true,
+        },
+      ],
+    };
+    let s = startRun({ runId: 'R-9', pipeline: pipelineNoHuman, context: {} });
+    touch(root, 'PRD.md');
+    s = markStepDone({ state: s, pipeline: pipelineNoHuman, workspaceRoot: root });
+    touch(root, 'TEST-PLAN.md');
+    s = markStepDone({ state: s, pipeline: pipelineNoHuman, workspaceRoot: root });
+    expect(s.steps[1].status).toBe('awaiting_auto_review');
+
+    s = submitAutoReviewVerdict({
+      state: s,
+      pipeline: pipelineNoHuman,
+      verdict: { decision: 'pass', reason: 'ok', at: 't', runner: 'x.mjs' },
+    });
+    expect(s.steps[1].status).toBe('approved');
+    expect(s.status).toBe('completed');
+  });
+
+  it('submitAutoReviewVerdict reject → rejected with reason', () => {
+    let s = startRun({ runId: 'R-10', pipeline: PIPELINE_AUTO, context: {} });
+    touch(root, 'PRD.md');
+    s = markStepDone({ state: s, pipeline: PIPELINE_AUTO, workspaceRoot: root });
+    touch(root, 'TECH-DESIGN.md');
+    s = markStepDone({ state: s, pipeline: PIPELINE_AUTO, workspaceRoot: root });
+
+    s = submitAutoReviewVerdict({
+      state: s,
+      pipeline: PIPELINE_AUTO,
+      verdict: { decision: 'reject', reason: 'missing Risks section', at: 't', runner: 'r.mjs' },
+    });
+    expect(s.steps[1].status).toBe('rejected');
+    expect(s.steps[1].rejectReason).toBe('missing Risks section');
+    expect(s.steps[1].autoReviewVerdict?.decision).toBe('reject');
+
+    // Rerun then pass second time
+    s = rerunStep({ state: s, feedback: 'addressed' });
+    expect(s.steps[1].status).toBe('awaiting_work');
+    expect(s.steps[1].autoReviewVerdict).toBeDefined(); // verdict persists
+  });
+
+  it('submitAutoReviewVerdict throws when status is not awaiting_auto_review', () => {
+    const s = startRun({ runId: 'R-11', pipeline: PIPELINE_AUTO, context: {} });
+    expect(() =>
+      submitAutoReviewVerdict({
+        state: s,
+        pipeline: PIPELINE_AUTO,
+        verdict: { decision: 'pass', reason: 'ok', at: 't', runner: 'r' },
+      }),
+    ).toThrow(PipelineRunError);
+  });
+});
+
+describe('AutoReviewer — runAutoReview script invocation', () => {
+  let root: string;
+  beforeEach(() => { root = tmpRoot(); });
+
+  function writeScript(rel: string, body: string): void {
+    const abs = path.join(root, rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, body);
+  }
+
+  it('invokes a passing validator and returns pass verdict', async () => {
+    const scriptRel = '.aidlc/scripts/pass.mjs';
+    writeScript(
+      scriptRel,
+      `export default async function () {
+        return { decision: 'pass', reason: 'looks fine' };
+      }`,
+    );
+
+    const pipeline: PipelineConfig = {
+      id: 'p',
+      on_failure: 'stop',
+      steps: [
+        {
+          agent: 'tech-lead',
+          requires: [],
+          produces: ['DESIGN.md'],
+          human_review: false,
+          auto_review: true,
+          auto_review_runner: scriptRel,
+          enabled: true,
+        },
+      ],
+    };
+    let s = startRun({ runId: 'R-AR1', pipeline, context: {} });
+    touch(root, 'DESIGN.md');
+    s = markStepDone({ state: s, pipeline, workspaceRoot: root });
+    expect(s.steps[0].status).toBe('awaiting_auto_review');
+
+    const verdict = await runAutoReview({ workspaceRoot: root, state: s, pipeline });
+    expect(verdict.decision).toBe('pass');
+    expect(verdict.reason).toBe('looks fine');
+    expect(verdict.runner.endsWith('pass.mjs')).toBe(true);
+  });
+
+  it('catches script throws and emits a reject verdict', async () => {
+    const scriptRel = '.aidlc/scripts/throws.mjs';
+    writeScript(
+      scriptRel,
+      `export default async function () {
+        throw new Error('boom');
+      }`,
+    );
+    const pipeline: PipelineConfig = {
+      id: 'p',
+      on_failure: 'stop',
+      steps: [
+        {
+          agent: 'tech-lead',
+          requires: [],
+          produces: ['DESIGN.md'],
+          human_review: false,
+          auto_review: true,
+          auto_review_runner: scriptRel,
+          enabled: true,
+        },
+      ],
+    };
+    let s = startRun({ runId: 'R-AR2', pipeline, context: {} });
+    touch(root, 'DESIGN.md');
+    s = markStepDone({ state: s, pipeline, workspaceRoot: root });
+
+    const verdict = await runAutoReview({ workspaceRoot: root, state: s, pipeline });
+    expect(verdict.decision).toBe('reject');
+    expect(verdict.reason).toMatch(/boom/);
+  });
+
+  it('rejects when default export is missing', async () => {
+    const scriptRel = '.aidlc/scripts/empty.mjs';
+    writeScript(scriptRel, `export const notDefault = 1;`);
+    const pipeline: PipelineConfig = {
+      id: 'p',
+      on_failure: 'stop',
+      steps: [
+        {
+          agent: 'a',
+          requires: [],
+          produces: ['X.md'],
+          human_review: false,
+          auto_review: true,
+          auto_review_runner: scriptRel,
+          enabled: true,
+        },
+      ],
+    };
+    let s = startRun({ runId: 'R-AR3', pipeline, context: {} });
+    touch(root, 'X.md');
+    s = markStepDone({ state: s, pipeline, workspaceRoot: root });
+    await expect(runAutoReview({ workspaceRoot: root, state: s, pipeline })).rejects.toThrow(/default function/);
+  });
+});

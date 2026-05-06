@@ -100,6 +100,57 @@ describe('WorkspaceSchema', () => {
     expect(ft.group_by).toBe('flat'); // default
   });
 
+  it('accepts pipeline step with auto_review + auto_review_runner', () => {
+    const config = validateWorkspace(
+      {
+        version: '1.0',
+        name: 'Auto-review',
+        pipelines: [
+          {
+            id: 'p',
+            steps: [
+              { agent: 'po', produces: ['PRD.md'], human_review: true },
+              {
+                agent: 'tech-lead',
+                requires: ['PRD.md'],
+                produces: ['TECH-DESIGN.md'],
+                auto_review: true,
+                auto_review_runner: '.aidlc/scripts/check-design.mjs',
+                human_review: false,
+              },
+            ],
+          },
+        ],
+      },
+      'memory:test',
+    );
+    const step = config.pipelines[0].steps[1];
+    if (typeof step === 'string') { throw new Error('expected object form'); }
+    expect(step.auto_review).toBe(true);
+    expect(step.auto_review_runner).toBe('.aidlc/scripts/check-design.mjs');
+    expect(step.enabled).toBe(true); // default
+  });
+
+  it('rejects pipeline step with auto_review: true but no runner path', () => {
+    expect(() =>
+      validateWorkspace(
+        {
+          version: '1.0',
+          name: 'Bad',
+          pipelines: [
+            {
+              id: 'p',
+              steps: [
+                { agent: 'po', auto_review: true /* missing auto_review_runner */ },
+              ],
+            },
+          ],
+        },
+        'memory:test',
+      ),
+    ).toThrow(WorkspaceValidationError);
+  });
+
   it('rejects unknown sidebar view type', () => {
     expect(() =>
       validateWorkspace(

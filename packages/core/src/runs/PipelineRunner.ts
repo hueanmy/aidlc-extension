@@ -23,7 +23,7 @@ import * as path from 'path';
 
 import type { PipelineConfig } from '../schema/WorkspaceSchema';
 import { normalizeStep } from '../schema/WorkspaceSchema';
-import type { RunState, StepRecord } from './RunState';
+import type { RunState, StepRecord, AutoReviewVerdict } from './RunState';
 import { resolvePath } from './RunState';
 
 export class PipelineRunError extends Error {
@@ -75,9 +75,43 @@ export function startRun(args: {
 }
 
 /**
- * User clicked "Mark step done". Validate the current step's `produces`
- * paths exist relative to workspaceRoot. On success, transition to
- * awaiting_review (when human_review) or approved + advance to next step.
+ * Soft gate-check for a step's `requires`. Returns `{ ok: true }` when all
+ * required upstream artifacts exist on disk, `{ ok: false, missing: [...] }`
+ * otherwise. Used by the extension UI to surface a warning *before* the user
+ * starts work on a step (e.g. show a banner / disable the "Mark step done"
+ * button) — orthogonal to the hard-block at markStepDone time.
+ *
+ * Pure read-only — does not mutate state, does not throw.
+ */
+export function canStartStep(args: {
+  state: RunState;
+  pipeline: PipelineConfig;
+  workspaceRoot: string;
+  /** Defaults to the current step. */
+  stepIdx?: number;
+}): { ok: true } | { ok: false; missing: string[] } {
+  const { state, pipeline, workspaceRoot } = args;
+  const idx = args.stepIdx ?? state.currentStepIdx;
+  const stepConfig = pipeline.steps[idx];
+  if (!stepConfig) {
+    return { ok: false, missing: [`(no step at index ${idx})`] };
+  }
+  const norm = normalizeStep(stepConfig);
+  const missing: string[] = [];
+  for (const rel of norm.requires.map((p) => resolvePath(p, state.context))) {
+    const abs = path.isAbsolute(rel) ? rel : path.join(workspaceRoot, rel);
+    if (!fs.existsSync(abs)) { missing.push(rel); }
+  }
+  return missing.length === 0 ? { ok: true } : { ok: false, missing };
+}
+
+/**
+ * User clicked "Mark step done". Validate the current step's `requires` AND
+ * `produces` paths exist relative to workspaceRoot. On success, transition to:
+ *
+ *   - `awaiting_auto_review` when `auto_review: true`  (validator pending)
+ *   - `awaiting_review`      when `human_review: true` and no auto-review
+ *   - `approved` + advance   when neither gate is configured
  *
  * Throws PipelineRunError with `missing` populated when artifacts aren't
  * found — caller surfaces this in the UI so the user can fix and retry.
@@ -105,6 +139,20 @@ export function markStepDone(args: {
   }
   const norm = normalizeStep(stepConfig);
 
+  // Hard gate-check on requires (separate from the soft check at start time).
+  const resolvedRequires = norm.requires.map((p) => resolvePath(p, state.context));
+  const missingRequires: string[] = [];
+  for (const rel of resolvedRequires) {
+    const abs = path.isAbsolute(rel) ? rel : path.join(workspaceRoot, rel);
+    if (!fs.existsSync(abs)) { missingRequires.push(rel); }
+  }
+  if (missingRequires.length > 0) {
+    throw new PipelineRunError(
+      `Step "${step.agent}" is blocked — required upstream artifacts are missing.`,
+      missingRequires,
+    );
+  }
+
   // Validate produces — each path resolved with run context, then existsSync.
   const resolvedProduces = norm.produces.map((p) => resolvePath(p, state.context));
   const missing: string[] = [];
@@ -122,6 +170,14 @@ export function markStepDone(args: {
   const next = clone(state);
   const nextStep = next.steps[idx];
   nextStep.artifactsProduced = resolvedProduces;
+  // Clear any prior verdict so the new run gets a fresh one.
+  nextStep.autoReviewVerdict = undefined;
+
+  if (norm.auto_review) {
+    nextStep.status = 'awaiting_auto_review';
+    next.status = 'running';
+    return next;
+  }
 
   if (norm.human_review) {
     nextStep.status = 'awaiting_review';
@@ -129,7 +185,61 @@ export function markStepDone(args: {
     return next;
   }
 
-  // Auto-approve + advance.
+  // Neither gate — auto-approve + advance.
+  return advance(next, idx, pipeline);
+}
+
+/**
+ * Apply an auto-reviewer verdict to the current `awaiting_auto_review` step.
+ *
+ *   - decision: 'pass' + step has `human_review: true`  → `awaiting_review`
+ *   - decision: 'pass' + no human gate                  → approve + advance
+ *   - decision: 'reject'                                → `rejected` + reason
+ *
+ * The verdict is also stored on the step record so the human reviewer (and
+ * the rerun flow) can see why the validator failed.
+ */
+export function submitAutoReviewVerdict(args: {
+  state: RunState;
+  pipeline: PipelineConfig;
+  verdict: AutoReviewVerdict;
+}): RunState {
+  const { state, pipeline, verdict } = args;
+  const idx = state.currentStepIdx;
+  const step = state.steps[idx];
+  if (!step) {
+    throw new PipelineRunError(`No step at index ${idx}`);
+  }
+  if (step.status !== 'awaiting_auto_review') {
+    throw new PipelineRunError(
+      `Cannot submit auto-review verdict for step "${step.agent}": status is "${step.status}", expected "awaiting_auto_review"`,
+    );
+  }
+
+  const stepConfig = pipeline.steps[idx];
+  if (!stepConfig) {
+    throw new PipelineRunError(`Pipeline mismatch — index ${idx} not in pipeline.steps`);
+  }
+  const norm = normalizeStep(stepConfig);
+
+  const next = clone(state);
+  const nextStep = next.steps[idx];
+  nextStep.autoReviewVerdict = verdict;
+
+  if (verdict.decision === 'reject') {
+    nextStep.status = 'rejected';
+    nextStep.rejectReason = verdict.reason;
+    next.status = 'running';
+    return next;
+  }
+
+  // pass
+  if (norm.human_review) {
+    nextStep.status = 'awaiting_review';
+    next.status = 'running';
+    return next;
+  }
+
   return advance(next, idx, pipeline);
 }
 

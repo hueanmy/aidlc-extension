@@ -11,7 +11,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import type { YamlDocument } from './yamlIO';
+import { RunStateStore, normalizeStep } from '@aidlc/core';
+import type { StepStatus, AutoReviewVerdict, PipelineConfig, PipelineStepConfig } from '@aidlc/core';
+
+import { readYaml, type YamlDocument } from './yamlIO';
 
 export type EpicStatus = 'pending' | 'in_progress' | 'done' | 'failed';
 
@@ -32,7 +35,30 @@ export interface EpicSummary {
     status: EpicStatus;
     startedAt: string | null;
     finishedAt: string | null;
+    /**
+     * When this epic has a matching pipeline run (`.aidlc/runs/<id>.json`),
+     * this is the per-step status from the run-state machine. Richer than
+     * `status` — surfaces `awaiting_work` / `awaiting_auto_review` /
+     * `awaiting_review` / `rejected` so the panel can show the right
+     * action buttons.
+     */
+    runStatus: StepStatus | null;
+    /** True when this is the current step of an active run. */
+    isCurrentRunStep: boolean;
+    /** Most recent rejection reason for this step, when rejected. */
+    rejectReason?: string;
+    /** Most recent auto-reviewer verdict (persists through the human gate). */
+    autoReviewVerdict?: AutoReviewVerdict;
+    /** Step config: does this step opt into auto_review in the pipeline yaml? */
+    stepHasAutoReview: boolean;
+    /** Step config: does this step opt into human_review in the pipeline yaml? */
+    stepHasHumanReview: boolean;
   }>;
+  /**
+   * runId of the matching run state, if any. Convention: runId === epic.id.
+   * When set, the panel can dispatch `aidlc.markStepDone` etc. with this id.
+   */
+  runId: string | null;
   /** Resolved inputs (capability id → user-supplied value). Keys may be empty. */
   inputs: Record<string, string>;
   inputsCount: number;
@@ -83,17 +109,65 @@ export function listEpics(workspaceRoot: string, doc: YamlDocument | null): Epic
       ? (parsed.stepStates as Array<Record<string, unknown>>)
       : [];
 
-    const stepDetails = stepStatesRaw.map((s) => ({
-      agent: typeof s.agent === 'string' ? s.agent : '',
-      status: asStatus(s.status),
-      startedAt: typeof s.startedAt === 'string' ? s.startedAt : null,
-      finishedAt: typeof s.finishedAt === 'string' ? s.finishedAt : null,
-    }));
+    const epicId = typeof parsed.id === 'string' ? parsed.id : folder;
+
+    // Overlay run-state if there's a matching pipeline run. The runId
+    // convention is `runId === epic.id`, set by `startPipelineRunCommand`.
+    // Wrap in try/catch so a malformed run file doesn't break the epic
+    // listing (the epic still renders with run-status === null).
+    let runState = null;
+    try {
+      runState = RunStateStore.load(workspaceRoot, epicId);
+    } catch { /* invalid runId — treat as no run */ }
+    const runStepByAgent = new Map<string, StepStatus>();
+    const runRejectByAgent = new Map<string, string>();
+    const runVerdictByAgent = new Map<string, AutoReviewVerdict>();
+    if (runState) {
+      for (const sr of runState.steps) {
+        runStepByAgent.set(sr.agent, sr.status);
+        if (sr.rejectReason) { runRejectByAgent.set(sr.agent, sr.rejectReason); }
+        if (sr.autoReviewVerdict) { runVerdictByAgent.set(sr.agent, sr.autoReviewVerdict); }
+      }
+    }
+    const runCurrentAgent = runState
+      ? runState.steps[runState.currentStepIdx]?.agent
+      : undefined;
+
+    // Look up the pipeline definition from workspace.yaml so we can surface
+    // each step's configured gates (auto_review / human_review) on the panel.
+    const pipelineId = typeof parsed.pipeline === 'string' ? parsed.pipeline : null;
+    const pipelineCfg = pipelineId
+      ? (doc?.pipelines as PipelineConfig[] | undefined)?.find((p) => p.id === pipelineId)
+      : undefined;
+    const stepGateByIdx = new Map<number, { auto: boolean; human: boolean }>();
+    if (pipelineCfg && Array.isArray(pipelineCfg.steps)) {
+      pipelineCfg.steps.forEach((raw, i) => {
+        const norm = normalizeStep(raw as PipelineStepConfig);
+        stepGateByIdx.set(i, { auto: norm.auto_review, human: norm.human_review });
+      });
+    }
+
+    const stepDetails = stepStatesRaw.map((s, i) => {
+      const agent = typeof s.agent === 'string' ? s.agent : '';
+      const gate = stepGateByIdx.get(i) ?? { auto: false, human: false };
+      return {
+        agent,
+        status: asStatus(s.status),
+        startedAt: typeof s.startedAt === 'string' ? s.startedAt : null,
+        finishedAt: typeof s.finishedAt === 'string' ? s.finishedAt : null,
+        runStatus: runStepByAgent.get(agent) ?? null,
+        isCurrentRunStep: !!runState && agent === runCurrentAgent,
+        rejectReason: runRejectByAgent.get(agent),
+        autoReviewVerdict: runVerdictByAgent.get(agent),
+        stepHasAutoReview: gate.auto,
+        stepHasHumanReview: gate.human,
+      };
+    });
 
     const inputs = readInputs(epicDir);
 
     epics.push({
-      id: typeof parsed.id === 'string' ? parsed.id : folder,
+      id: epicId,
       title: typeof parsed.title === 'string' ? parsed.title : '',
       description: typeof parsed.description === 'string' ? parsed.description : '',
       status: asStatus(parsed.status),
@@ -108,6 +182,7 @@ export function listEpics(workspaceRoot: string, doc: YamlDocument | null): Epic
       inputsCount: Object.keys(inputs).length,
       statePath: stateFile,
       epicDir,
+      runId: runState ? runState.runId : null,
     });
   }
 

@@ -49,6 +49,7 @@ import {
   approveStepCommand,
   rejectStepCommand,
   rerunStepCommand,
+  runAutoReviewCommand,
   openRunStateCommand,
   deleteRunCommand,
 } from './runCommands';
@@ -233,7 +234,8 @@ export function registerV2WorkspaceCommands(
   // Pipeline run commands (phase 1 orchestrator).
   const startRunCmd = vscode.commands.registerCommand(
     'aidlc.startPipelineRun',
-    () => startPipelineRunCommand(),
+    (pipelineId?: unknown) =>
+      startPipelineRunCommand(typeof pipelineId === 'string' ? pipelineId : undefined),
   );
   const markStepDoneCmd = vscode.commands.registerCommand(
     'aidlc.markStepDone',
@@ -250,6 +252,10 @@ export function registerV2WorkspaceCommands(
   const rerunStepCmd = vscode.commands.registerCommand(
     'aidlc.rerunStep',
     (runId?: unknown) => rerunStepCommand(typeof runId === 'string' ? runId : undefined),
+  );
+  const runAutoReviewCmd = vscode.commands.registerCommand(
+    'aidlc.runAutoReview',
+    (runId?: unknown) => runAutoReviewCommand(typeof runId === 'string' ? runId : undefined),
   );
   const openRunStateCmd = vscode.commands.registerCommand(
     'aidlc.openRunState',
@@ -280,6 +286,7 @@ export function registerV2WorkspaceCommands(
       approveStepCmd,
       rejectStepCmd,
       rerunStepCmd,
+      runAutoReviewCmd,
       openRunStateCmd,
       deleteRunCmd,
     ],

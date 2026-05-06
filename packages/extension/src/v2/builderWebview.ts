@@ -24,7 +24,9 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 import { readYaml, writeYaml, type YamlDocument } from './yamlIO';
-import { WORKSPACE_DIR, WORKSPACE_FILENAME, stepAgentId } from '@aidlc/core';
+import { WORKSPACE_DIR, WORKSPACE_FILENAME, stepAgentId, normalizeStep } from '@aidlc/core';
+import type { PipelineStepConfig } from '@aidlc/core';
+import { promptStepConfig } from './wizards';
 import { listEpics, type EpicSummary } from './epicsList';
 
 // ── State shape sent to webview ────────────────────────────────────────
@@ -50,7 +52,15 @@ interface BuilderState {
   }>;
   pipelines: Array<{
     id: string;
-    steps: string[];
+    steps: Array<{
+      agent: string;
+      enabled: boolean;
+      humanReview: boolean;
+      autoReview: boolean;
+      autoReviewRunner?: string;
+      requiresCount: number;
+      producesCount: number;
+    }>;
     on_failure: 'stop' | 'continue';
   }>;
   epics: EpicSummary[];
@@ -123,7 +133,20 @@ function buildState(): BuilderState {
     }),
     pipelines: doc.pipelines.map((p) => ({
       id: String(p.id),
-      steps: Array.isArray(p.steps) ? p.steps.map(stepAgentId) : [],
+      steps: Array.isArray(p.steps)
+        ? (p.steps as PipelineStepConfig[]).map((raw) => {
+            const norm = normalizeStep(raw);
+            return {
+              agent: norm.agent,
+              enabled: norm.enabled,
+              humanReview: norm.human_review,
+              autoReview: norm.auto_review,
+              autoReviewRunner: norm.auto_review_runner,
+              requiresCount: norm.requires.length,
+              producesCount: norm.produces.length,
+            };
+          })
+        : [],
       on_failure: p.on_failure === 'continue' ? 'continue' : 'stop',
     })),
     epics,
@@ -323,6 +346,13 @@ export class BuilderPanel {
         );
         return;
 
+      case 'editStepConfig':
+        await this.editStepConfig(
+          String(msg.pipelineId ?? ''),
+          Number(msg.idx ?? -1),
+        );
+        return;
+
       case 'deleteAgent':
         await this.deleteItem('agents', String(msg.id ?? ''));
         return;
@@ -337,6 +367,13 @@ export class BuilderPanel {
 
       case 'togglePipelineFailure':
         await this.togglePipelineFailure(String(msg.pipelineId ?? ''));
+        return;
+
+      case 'runPipeline':
+        await vscode.commands.executeCommand(
+          'aidlc.startPipelineRun',
+          String(msg.pipelineId ?? ''),
+        );
         return;
     }
   }
@@ -393,6 +430,57 @@ export class BuilderPanel {
    * (already-in-pipeline ones are flagged in the detail line, but still
    * pickable so the user can intentionally add a duplicate).
    */
+  /**
+   * Open the step-config wizard for an existing step. Pre-fills each prompt
+   * with the step's current values. Writes back as object form so all the
+   * gates (human_review / auto_review / requires / produces / enabled) are
+   * persisted — even if the step was originally a bare string.
+   */
+  private async editStepConfig(pipelineId: string, idx: number): Promise<void> {
+    if (!pipelineId || idx < 0) { return; }
+    const root = this.getRootOrWarn();
+    if (!root) { return; }
+    const doc = readYaml(root);
+    if (!doc) { return; }
+
+    const pipeline = doc.pipelines.find((x) => x.id === pipelineId);
+    if (!pipeline || !Array.isArray(pipeline.steps) || idx >= pipeline.steps.length) {
+      void vscode.window.showWarningMessage(`Step #${idx + 1} not found in \`${pipelineId}\`.`);
+      return;
+    }
+
+    const raw = pipeline.steps[idx] as PipelineStepConfig;
+    const norm = normalizeStep(raw);
+    const draft = await promptStepConfig(norm.agent, {
+      enabled: norm.enabled,
+      requires: norm.requires,
+      produces: norm.produces,
+      human_review: norm.human_review,
+      auto_review: norm.auto_review,
+      auto_review_runner: norm.auto_review_runner,
+    });
+    if (!draft) { return; }
+
+    this.mutateYaml((d) => {
+      const p = d.pipelines.find((x) => x.id === pipelineId);
+      if (!p || !Array.isArray(p.steps) || idx >= p.steps.length) { return false; }
+      // Always persist as object form. Stripping `name` (we don't prompt for
+      // it) is intentional — the schema treats it as optional display-only.
+      const obj: Record<string, unknown> = {
+        agent: draft.agent,
+        enabled: draft.enabled,
+        requires: draft.requires,
+        produces: draft.produces,
+        human_review: draft.human_review,
+        auto_review: draft.auto_review,
+      };
+      if (draft.auto_review && draft.auto_review_runner) {
+        obj.auto_review_runner = draft.auto_review_runner;
+      }
+      p.steps[idx] = obj;
+    });
+  }
+
   private async addStepToPipeline(pipelineId: string): Promise<void> {
     if (!pipelineId) { return; }
     const root = this.getRootOrWarn();
@@ -824,6 +912,17 @@ body {
 }
 .failure-stop { color: var(--warn); border-color: rgba(251,191,36,0.30); background: rgba(251,191,36,0.10); }
 .failure-continue { color: var(--text-soft); border-color: rgba(255,255,255,0.10); background: rgba(255,255,255,0.04); }
+.workflow-run {
+  font-size: 9px; font-weight: 700; letter-spacing: 0.5px;
+  padding: 3px 9px; border-radius: 999px; text-transform: uppercase;
+  cursor: pointer;
+  border: 1px solid rgba(94,234,212,0.35);
+  background: rgba(94,234,212,0.10);
+  color: var(--accent);
+  font-family: inherit;
+  margin-left: 8px;
+}
+.workflow-run:hover { background: rgba(94,234,212,0.18); border-color: rgba(94,234,212,0.55); }
 
 /* Mermaid-style flowchart — horizontal LR layout, scroll-x when wide.
  * Horizontal saves vertical space for long pipelines (9+ steps fit
@@ -835,10 +934,10 @@ body {
   gap: 0;
 }
 .flow-node {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; flex-direction: column; gap: 6px;
   flex-shrink: 0;
-  min-width: 130px;
-  max-width: 200px;
+  min-width: 150px;
+  max-width: 240px;
   padding: 9px 12px;
   background: linear-gradient(135deg, rgba(94,234,212,0.06), rgba(255,255,255,0.02));
   border: 1.5px solid rgba(94,234,212,0.22);
@@ -847,6 +946,7 @@ body {
   transition: all .15s ease;
   box-shadow: 0 2px 10px rgba(0,0,0,0.18);
 }
+.flow-node-row { display: flex; align-items: center; gap: 8px; }
 .flow-node:hover {
   border-color: rgba(94,234,212,0.45);
   background: linear-gradient(135deg, rgba(94,234,212,0.10), rgba(255,255,255,0.04));
@@ -854,6 +954,28 @@ body {
   box-shadow: 0 4px 14px rgba(94,234,212,0.18);
   z-index: 2;
 }
+.flow-node-disabled {
+  opacity: 0.55;
+  border-style: dashed;
+}
+.flow-node-badges {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  margin-top: 2px;
+}
+.step-badge {
+  font-size: 9.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+}
+.step-badge-human    { color: #fbbf24; background: rgba(251,191,36,0.12); border-color: rgba(251,191,36,0.30); }
+.step-badge-auto     { color: #93c5fd; background: rgba(147,197,253,0.12); border-color: rgba(147,197,253,0.30); }
+.step-badge-requires { color: var(--text-soft); background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.10); }
+.step-badge-produces { color: var(--text-soft); background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.10); }
+.step-badge-disabled { color: var(--text-faint); background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.15); }
 .flow-num {
   font-family: 'SF Mono', Menlo, Consolas, monospace;
   font-size: 9.5px;
@@ -1215,6 +1337,7 @@ function renderWorkflow(p) {
   html += '<div class="workflow-meta">' + p.steps.length + ' steps</div>';
   html += '<div class="spacer"></div>';
   const failureCls = p.on_failure === 'continue' ? 'failure-continue' : 'failure-stop';
+  html += '<button class="workflow-run" data-action="runPipeline" data-pipeline-id="' + escapeHtml(p.id) + '" title="Start a pipeline run for this workflow">▶ Run</button>';
   html += '<button class="failure-toggle ' + failureCls + '" data-action="togglePipelineFailure" data-pipeline-id="' + escapeHtml(p.id) + '" title="Click to toggle">on_failure: ' + p.on_failure + '</button>';
   html += '<button class="btn btn-icon btn-ghost" data-action="deletePipeline" data-id="' + escapeHtml(p.id) + '" title="Delete workflow">×</button>';
   html += '</div>';
@@ -1222,7 +1345,9 @@ function renderWorkflow(p) {
   html += '<div class="flowchart">';
   for (let i = 0; i < p.steps.length; i++) {
     html += renderFlowNode(p.id, p.steps[i], i, p.steps.length);
-    html += '<div class="flow-edge"></div>';
+    if (i < p.steps.length - 1 || true) {
+      html += '<div class="flow-edge"></div>';
+    }
   }
   // Trailing "+ add step" button — sits at the end of the chain.
   html += '<button class="flow-add-btn" data-action="addStepToPipeline" data-pipeline-id="' + escapeHtml(p.id) + '" title="Append a step to this workflow">+</button>';
@@ -1231,11 +1356,16 @@ function renderWorkflow(p) {
   return html;
 }
 
-function renderFlowNode(pipelineId, agentId, idx, total) {
-  let html = '<div class="flow-node">';
+function renderFlowNode(pipelineId, step, idx, total) {
+  const disabledCls = step.enabled ? '' : ' flow-node-disabled';
+  let html = '<div class="flow-node' + disabledCls + '">';
+
+  // Top row: number + agent id + config/reorder/delete actions.
+  html += '<div class="flow-node-row">';
   html += '<span class="flow-num">' + (idx + 1) + '</span>';
-  html += '<span class="flow-id">' + escapeHtml(agentId) + '</span>';
+  html += '<span class="flow-id">' + escapeHtml(step.agent) + '</span>';
   html += '<div class="flow-actions">';
+  html += '<button class="btn btn-icon btn-ghost" data-action="editStepConfig" data-pipeline-id="' + escapeHtml(pipelineId) + '" data-idx="' + idx + '" title="Configure step (human review, auto review, requires, produces)">⚙</button>';
   if (idx > 0) {
     html += '<button class="btn btn-icon btn-ghost" data-action="reorderStep" data-pipeline-id="' + escapeHtml(pipelineId) + '" data-from="' + idx + '" data-to="' + (idx - 1) + '" title="Move up">↑</button>';
   }
@@ -1243,7 +1373,34 @@ function renderFlowNode(pipelineId, agentId, idx, total) {
     html += '<button class="btn btn-icon btn-ghost" data-action="reorderStep" data-pipeline-id="' + escapeHtml(pipelineId) + '" data-from="' + idx + '" data-to="' + (idx + 1) + '" title="Move down">↓</button>';
   }
   html += '<button class="btn btn-icon btn-ghost" data-action="deleteStep" data-pipeline-id="' + escapeHtml(pipelineId) + '" data-idx="' + idx + '" title="Remove from workflow">×</button>';
-  html += '</div></div>';
+  html += '</div>';
+  html += '</div>';
+
+  // Gate badges — surface what the runner will do AFTER this step's
+  // produces validate. Without these, the only way for a user to see the
+  // step's gates is to open the YAML by hand.
+  const badges = [];
+  if (!step.enabled) {
+    badges.push('<span class="step-badge step-badge-disabled" title="enabled: false — runner skips this step">disabled</span>');
+  }
+  if (step.requiresCount > 0) {
+    badges.push('<span class="step-badge step-badge-requires" title="' + step.requiresCount + ' upstream artifact path(s) the step is gated on (requires)">⤴ ' + step.requiresCount + ' req</span>');
+  }
+  if (step.producesCount > 0) {
+    badges.push('<span class="step-badge step-badge-produces" title="' + step.producesCount + ' artifact path(s) this step writes (produces)">⤵ ' + step.producesCount + ' out</span>');
+  }
+  if (step.autoReview) {
+    const runner = step.autoReviewRunner ? ' — runs ' + step.autoReviewRunner : '';
+    badges.push('<span class="step-badge step-badge-auto" title="auto_review: true' + escapeHtml(runner) + '">🤖 auto-review</span>');
+  }
+  if (step.humanReview) {
+    badges.push('<span class="step-badge step-badge-human" title="human_review: true — pauses for approve/reject after the step is marked done (and after auto-review, if any)">👤 human review</span>');
+  }
+  if (badges.length > 0) {
+    html += '<div class="flow-node-badges">' + badges.join('') + '</div>';
+  }
+
+  html += '</div>';
   return html;
 }
 
@@ -1367,6 +1524,7 @@ document.addEventListener('click', (e) => {
     case 'deleteSkill':             post('deleteSkill', { id: target.dataset.id }); return;
     case 'deletePipeline':          post('deletePipeline', { id: target.dataset.id }); return;
     case 'togglePipelineFailure':   post('togglePipelineFailure', { pipelineId: target.dataset.pipelineId }); return;
+    case 'runPipeline':             post('runPipeline', { pipelineId: target.dataset.pipelineId }); return;
     case 'addStepToPipeline':
       post('addStepToPipeline', { pipelineId: target.dataset.pipelineId });
       return;
@@ -1379,6 +1537,12 @@ document.addEventListener('click', (e) => {
       return;
     case 'deleteStep':
       post('deleteStep', {
+        pipelineId: target.dataset.pipelineId,
+        idx: Number(target.dataset.idx),
+      });
+      return;
+    case 'editStepConfig':
+      post('editStepConfig', {
         pipelineId: target.dataset.pipelineId,
         idx: Number(target.dataset.idx),
       });

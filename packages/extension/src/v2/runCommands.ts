@@ -27,11 +27,15 @@ import {
   RunStateStore,
   RUN_ID_PATTERN,
   startRun,
+  canStartStep,
   markStepDone,
   approveStep,
   rejectStep,
   rerunStep,
+  submitAutoReviewVerdict,
+  runAutoReview,
   PipelineRunError,
+  AutoReviewerError,
 } from '@aidlc/core';
 import type { PipelineConfig, RunState } from '@aidlc/core';
 
@@ -89,7 +93,7 @@ async function resolveRunId(
 
 // ── start ────────────────────────────────────────────────────────────────
 
-export async function startPipelineRunCommand(): Promise<void> {
+export async function startPipelineRunCommand(pipelineIdArg?: string): Promise<void> {
   const root = requireRoot('Start Pipeline Run');
   if (!root) { return; }
 
@@ -101,14 +105,26 @@ export async function startPipelineRunCommand(): Promise<void> {
     return;
   }
 
-  const pickedPipeline = await vscode.window.showQuickPick(
-    (doc.pipelines as PipelineConfig[]).map((p) => ({
-      label: p.id,
-      description: `${p.steps.length} step${p.steps.length === 1 ? '' : 's'} · on_failure: ${p.on_failure}`,
-      pipeline: p,
-    })),
-    { placeHolder: 'Pick a pipeline to run', ignoreFocusOut: true },
-  );
+  let pickedPipeline: { pipeline: PipelineConfig } | undefined;
+  if (pipelineIdArg) {
+    const found = (doc.pipelines as PipelineConfig[]).find((p) => p.id === pipelineIdArg);
+    if (!found) {
+      void vscode.window.showWarningMessage(
+        `AIDLC: pipeline "${pipelineIdArg}" not found in workspace.yaml.`,
+      );
+      return;
+    }
+    pickedPipeline = { pipeline: found };
+  } else {
+    pickedPipeline = await vscode.window.showQuickPick(
+      (doc.pipelines as PipelineConfig[]).map((p) => ({
+        label: p.id,
+        description: `${p.steps.length} step${p.steps.length === 1 ? '' : 's'} · on_failure: ${p.on_failure}`,
+        pipeline: p,
+      })),
+      { placeHolder: 'Pick a pipeline to run', ignoreFocusOut: true },
+    );
+  }
   if (!pickedPipeline) { return; }
 
   const runId = await vscode.window.showInputBox({
@@ -168,6 +184,20 @@ export async function markStepDoneCommand(runIdArg?: string): Promise<void> {
     return;
   }
 
+  // Soft gate-check: surface missing requires as a warning before we attempt
+  // markStepDone. The user can still proceed (they may know the requires
+  // path is wrong / outdated); we just don't want them to be surprised.
+  const gate = canStartStep({ state, pipeline, workspaceRoot: root });
+  if (!gate.ok) {
+    const choice = await vscode.window.showWarningMessage(
+      `Step "${state.steps[state.currentStepIdx].agent}" is missing required upstream artifacts:\n${gate.missing.join(', ')}`,
+      { modal: false },
+      'Mark done anyway',
+      'Cancel',
+    );
+    if (choice !== 'Mark done anyway') { return; }
+  }
+
   try {
     const next = markStepDone({ state, pipeline, workspaceRoot: root });
     RunStateStore.save(root, next);
@@ -175,6 +205,59 @@ export async function markStepDoneCommand(runIdArg?: string): Promise<void> {
   } catch (err) {
     surfaceRunError(err);
   }
+}
+
+// ── runAutoReview ────────────────────────────────────────────────────────
+
+export async function runAutoReviewCommand(runIdArg?: string): Promise<void> {
+  const root = requireRoot('Run Auto-Review');
+  if (!root) { return; }
+  const runId = await resolveRunId(
+    root,
+    runIdArg,
+    (s) => currentStepStatus(s) === 'awaiting_auto_review',
+  );
+  if (!runId) { return; }
+
+  const state = RunStateStore.load(root, runId);
+  if (!state) { return; }
+  const pipeline = loadPipeline(root, state.pipelineId);
+  if (!pipeline) {
+    void vscode.window.showErrorMessage(
+      `Pipeline "${state.pipelineId}" missing from workspace.yaml.`,
+    );
+    return;
+  }
+
+  const step = state.steps[state.currentStepIdx];
+  await vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: `Auto-reviewing "${step.agent}"…`, cancellable: false },
+    async () => {
+      try {
+        const verdict = await runAutoReview({ workspaceRoot: root, state, pipeline });
+        const next = submitAutoReviewVerdict({ state, pipeline, verdict });
+        RunStateStore.save(root, next);
+
+        const tag = verdict.decision === 'pass' ? '✅ pass' : '❌ reject';
+        const followUp = next.steps[next.currentStepIdx];
+        const action =
+          next.status === 'completed'        ? 'Pipeline completed.' :
+          followUp.status === 'awaiting_review' ? 'Awaiting your review in the sidebar.' :
+          followUp.status === 'rejected'     ? 'Step rejected — see Rerun button.' :
+          followUp.status === 'awaiting_work' ? `Advanced to "${followUp.agent}".` :
+          'Run state updated.';
+        void vscode.window.showInformationMessage(
+          `Auto-review ${tag}: ${verdict.reason}\n${action}`,
+        );
+      } catch (err) {
+        if (err instanceof AutoReviewerError) {
+          void vscode.window.showErrorMessage(`Auto-review failed: ${err.message}`);
+          return;
+        }
+        surfaceRunError(err);
+      }
+    },
+  );
 }
 
 // ── approveStep ──────────────────────────────────────────────────────────

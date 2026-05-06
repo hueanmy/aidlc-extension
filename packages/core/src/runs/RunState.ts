@@ -23,11 +23,12 @@
  */
 
 export type StepStatus =
-  | 'pending'           // not yet reached
-  | 'awaiting_work'     // current step, user is doing the work externally
-  | 'awaiting_review'   // produces validated, paused for human approve/reject
-  | 'approved'          // human approved (or auto-approved when human_review=false)
-  | 'rejected';         // human rejected; can rerun
+  | 'pending'                // not yet reached
+  | 'awaiting_work'          // current step, user is doing the work externally
+  | 'awaiting_auto_review'   // produces validated, auto-reviewer pending (auto_review=true)
+  | 'awaiting_review'        // auto-review passed (or skipped), paused for human approve/reject
+  | 'approved'               // human approved (or auto-approved when human_review=false)
+  | 'rejected';              // human or auto-reviewer rejected; can rerun
 
 export type RunStatus =
   | 'running'           // a step is awaiting_work or awaiting_review
@@ -55,6 +56,27 @@ export interface StepRecord {
   feedback?: string;
   /** Reason supplied with the most recent rejection. Cleared on rerun. */
   rejectReason?: string;
+  /**
+   * Verdict from the most recent auto-reviewer run for this step. Persists
+   * across the human gate so the human reviewer can see what the validator
+   * said. Cleared on rerun.
+   */
+  autoReviewVerdict?: AutoReviewVerdict;
+}
+
+/**
+ * Outcome of an auto-reviewer (validator script) run for a step. Produced
+ * by the AutoReviewer module and applied to RunState via
+ * `submitAutoReviewVerdict`.
+ */
+export interface AutoReviewVerdict {
+  decision: 'pass' | 'reject';
+  /** Human-readable rationale (failed checks, summary, etc.). */
+  reason: string;
+  /** ISO timestamp the verdict was produced. */
+  at: string;
+  /** Identifier of the runner that produced the verdict — usually the resolved script path. */
+  runner: string;
 }
 
 export interface RunState {

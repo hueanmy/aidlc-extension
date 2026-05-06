@@ -321,6 +321,7 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       case 'approveStep':
       case 'rejectStep':
       case 'rerunStep':
+      case 'runAutoReview':
       case 'openRunState':
       case 'deleteRun': {
         const runId = String(msg.runId ?? '');
@@ -640,6 +641,10 @@ body {
 .status-awaiting_work {
   color: var(--accent);
   background: rgba(94,234,212,0.12);
+}
+.status-awaiting_auto_review {
+  color: #93c5fd;
+  background: rgba(147,197,253,0.14);
 }
 .status-awaiting_review {
   color: #fbbf24;
@@ -1092,6 +1097,8 @@ function renderActiveRuns() {
     html += '<div class="run-actions">';
     if (r.currentStepStatus === 'awaiting_work') {
       html += '<button class="btn-run btn-run-primary" data-action="markStepDone" data-run-id="' + escapeHtml(r.runId) + '">Mark step done</button>';
+    } else if (r.currentStepStatus === 'awaiting_auto_review') {
+      html += '<button class="btn-run btn-run-primary" data-action="runAutoReview" data-run-id="' + escapeHtml(r.runId) + '">Run auto-review</button>';
     } else if (r.currentStepStatus === 'awaiting_review') {
       html += '<button class="btn-run btn-run-approve" data-action="approveStep" data-run-id="' + escapeHtml(r.runId) + '">Approve</button>';
       html += '<button class="btn-run btn-run-reject" data-action="rejectStep" data-run-id="' + escapeHtml(r.runId) + '">Reject</button>';
@@ -1167,6 +1174,7 @@ document.addEventListener('click', (e) => {
     action === 'approveStep' ||
     action === 'rejectStep' ||
     action === 'rerunStep' ||
+    action === 'runAutoReview' ||
     action === 'openRunState' ||
     action === 'deleteRun'
   ) {

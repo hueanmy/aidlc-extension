@@ -26,7 +26,8 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { stepAgentId } from '@aidlc/core';
+import { stepAgentId, startRun, RunStateStore } from '@aidlc/core';
+import type { PipelineConfig } from '@aidlc/core';
 
 import { readYaml, type YamlDocument } from './yamlIO';
 
@@ -163,6 +164,37 @@ export async function startEpicCommand(): Promise<void> {
 
   fs.writeFileSync(path.join(epicDir, 'state.json'), JSON.stringify(state, null, 2) + '\n', 'utf8');
   fs.writeFileSync(path.join(epicDir, 'inputs.json'), JSON.stringify(inputs, null, 2) + '\n', 'utf8');
+
+  // When the epic is bound to a pipeline, also scaffold a RunState so the
+  // Epics panel can render per-step action buttons (Mark step done / Run
+  // auto-review / Approve / Reject / Rerun). Convention: runId === epicId.
+  // Without this, RunStateStore.load returns null and the gate UI stays
+  // hidden, leaving the epic stuck on read-only step circles.
+  if (target.kind === 'pipeline') {
+    const pipelineCfg = (doc.pipelines as PipelineConfig[] | undefined)?.find(
+      (p) => p.id === target.id,
+    );
+    if (pipelineCfg && Array.isArray(pipelineCfg.steps) && pipelineCfg.steps.length > 0) {
+      const existingRun = RunStateStore.load(root, epicId);
+      if (!existingRun) {
+        try {
+          const runState = startRun({
+            runId: epicId,
+            pipeline: pipelineCfg,
+            context: { epic: epicId, ...inputs },
+          });
+          RunStateStore.save(root, runState);
+        } catch (err) {
+          // Don't fail the whole wizard on run creation — surface a warning
+          // and let the user click "Start pipeline run" from the sidebar
+          // later.
+          void vscode.window.showWarningMessage(
+            `Epic created, but pipeline run could not be scaffolded: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+    }
+  }
 
   const firstAgent = target.agents[0];
   const slash = findSlashCommand(doc, firstAgent, target);
