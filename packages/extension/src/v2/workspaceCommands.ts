@@ -1,15 +1,9 @@
 /**
- * v2 demo commands — exercises @aidlc/core in the extension host so the user
- * can see Phase 1 actually working before Phase 2 rewires the whole sidebar.
- *
- * Two commands:
+ * Workspace commands exposed by the extension host:
  *   aidlc.showWorkspaceConfig — load .aidlc/workspace.yaml + dump parsed config
  *                               to the Output channel.
  *   aidlc.initWorkspace       — scaffold a starter workspace.yaml + sample
  *                               skill so the user has something to load.
- *
- * Both are namespaced `aidlc.*` (not `cfPipeline.*`) to mark the v2 boundary.
- * The legacy SDLC pipeline keeps its existing namespace untouched.
  */
 
 import * as vscode from 'vscode';

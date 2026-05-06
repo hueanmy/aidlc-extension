@@ -5,6 +5,7 @@
       "Bash(git -C /Users/meii/Documents/aidlc-extension ls-files .vscode/)",
       "Bash(git -C /Users/meii/Documents/aidlc-extension add .claude/settings.json packages/extension/src/v2/sidebarWebview.ts)",
       "Bash(git -C /Users/meii/Documents/aidlc-extension commit -m ' *)"
-    ]
+    ],
+    "additionalDirectories": []
   }
 }
