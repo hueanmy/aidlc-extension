@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.8.3
+
+- Discover and display Claude Code native skills + agents from `.claude/` (project) and `~/.claude/` (global), unified with AIDLC-scoped items declared in `workspace.yaml`. Builder + sidebar group items by scope, count items across all three scopes, and flag overridden ids. Add Skill / Add Agent wizards now prompt for a scope. Watchers on `.claude/{skills,agents}/**` and `.aidlc/{skills,agents}/**` keep the catalog in sync without a manual refresh.
+
 ## 0.8.2
 
 - Drop the legacy SDLC-pipeline branding from README and CHANGELOG.

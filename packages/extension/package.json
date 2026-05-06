@@ -2,7 +2,7 @@
   "name": "aidlc",
   "displayName": "aidlc",
   "description": "Agent workflow runner for VS Code — define agents, skills, and pipelines in workspace.yaml. Build, edit, and run AI workflows visually without leaving the editor.",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "publisher": "hueanmy",
   "license": "MIT",
   "repository": {
