@@ -15,12 +15,19 @@
 
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 import { readYaml, writeYaml, existingIds, type YamlDocument } from './yamlIO';
 import { SKILL_TEMPLATES, type SkillTemplate } from './skillTemplates';
 
-import { WORKSPACE_FILENAME } from '@aidlc/core';
+import {
+  WORKSPACE_FILENAME,
+  discoverAssets,
+  targetPath,
+  type AssetScope,
+  type AssetKind,
+} from '@aidlc/core';
 
 // ── Shared helpers ──────────────────────────────────────────────────────
 
@@ -78,6 +85,82 @@ async function promptUniqueId(opts: {
   }).then((v) => v?.trim());
 }
 
+// ── Scope picker ────────────────────────────────────────────────────────
+
+/**
+ * Ask the user where to save a new skill / agent. The three scopes map to
+ * different on-disk locations and have different sharing semantics:
+ *
+ *   - project → `<ws>/.claude/...`        committable, this project only
+ *   - aidlc   → `<ws>/.aidlc/...`         committable, shared with team via the
+ *                                         AIDLC framework (also entered into
+ *                                         workspace.yaml)
+ *   - global  → `~/.claude/...`           personal, every project on this machine
+ *
+ * Defaults to **project** because that matches what users want most often
+ * — the "I want this to live with the code I'm working on" case.
+ */
+async function pickScope(kind: AssetKind): Promise<AssetScope | undefined> {
+  const noun = kind === 'skill' ? 'skill' : 'agent';
+  const choice = await vscode.window.showQuickPick(
+    [
+      {
+        label: '$(folder) Project',
+        description: '.claude/' + noun + 's/',
+        detail:
+          `Project-local ${noun}. Commit to repo, applies to **this project only**. ` +
+          `Use for domain-specific tooling (deploy scripts, project conventions, etc.).`,
+        value: 'project' as AssetScope,
+      },
+      {
+        label: '$(package) AIDLC',
+        description: '.aidlc/' + noun + 's/',
+        detail:
+          `AIDLC framework ${noun}. Commit to repo, declared in workspace.yaml, ` +
+          `share with team via the SDLC pipeline (epic, prd, tech-design, review, release...).`,
+        value: 'aidlc' as AssetScope,
+      },
+      {
+        label: '$(home) Global',
+        description: '~/.claude/' + noun + 's/',
+        detail:
+          `Personal ${noun}. Stored in your home directory, available on **every project** ` +
+          `on this machine. Not committed. Use for personal helpers and habits.`,
+        value: 'global' as AssetScope,
+      },
+    ],
+    {
+      placeHolder: `Where do you want to save this ${noun}?`,
+      ignoreFocusOut: true,
+      matchOnDescription: true,
+      matchOnDetail: true,
+    },
+  );
+  return choice?.value;
+}
+
+/**
+ * Build the union of taken ids across all 3 scopes, plus (for skills) the
+ * workspace.yaml `skills[]` declarations. Used by the wizard's id-prompt so
+ * the same id can't collide with an existing file in any scope.
+ */
+function takenIdsForKind(
+  workspaceRoot: string,
+  doc: YamlDocument,
+  kind: AssetKind,
+): Set<string> {
+  const taken = new Set<string>();
+  const discovered = discoverAssets(workspaceRoot);
+  const list = kind === 'skill' ? discovered.skills : discovered.agents;
+  for (const a of list) { taken.add(a.id); }
+  if (kind === 'skill') {
+    for (const id of existingIds(doc.skills)) { taken.add(id); }
+  } else {
+    for (const id of existingIds(doc.agents)) { taken.add(id); }
+  }
+  return taken;
+}
+
 // ── addSkill ────────────────────────────────────────────────────────────
 
 type SkillSource =
@@ -91,18 +174,20 @@ export async function addSkillCommand(): Promise<void> {
   if (!ctx) { return; }
   const { root, doc } = ctx;
 
+  const scope = await pickScope('skill');
+  if (!scope) { return; }
+
   const skillId = await promptUniqueId({
     prompt: 'Skill id',
     placeholder: 'e.g. code-reviewer (lowercase, dashes ok)',
-    existing: existingIds(doc.skills),
+    existing: takenIdsForKind(root, doc, 'skill'),
   });
   if (!skillId) { return; }
 
   const source = await pickSkillSource();
   if (!source) { return; }
 
-  const skillDir = path.join(root, '.aidlc', 'skills');
-  const skillPath = path.join(skillDir, `${skillId}.md`);
+  const skillPath = targetPath(root, scope, 'skill', skillId);
 
   let content: string;
   let openInEditor = false;
@@ -121,22 +206,27 @@ export async function addSkillCommand(): Promise<void> {
       break;
   }
 
-  fs.mkdirSync(skillDir, { recursive: true });
+  fs.mkdirSync(path.dirname(skillPath), { recursive: true });
   if (fs.existsSync(skillPath)) {
     const overwrite = await vscode.window.showWarningMessage(
-      `${path.relative(root, skillPath)} already exists. Overwrite?`,
+      `${displayPath(root, skillPath)} already exists. Overwrite?`,
       'Overwrite', 'Cancel',
     );
     if (overwrite !== 'Overwrite') { return; }
   }
   fs.writeFileSync(skillPath, content, 'utf8');
 
-  // Append to YAML skills[]
-  doc.skills.push({
-    id: skillId,
-    path: `./.aidlc/skills/${skillId}.md`,
-  });
-  writeYaml(root, doc);
+  // AIDLC scope is the only one that registers in workspace.yaml — the
+  // pipeline runner reads agents/skills from there. Project + global skills
+  // are file-only catalog entries (sit alongside Claude Code's own
+  // .claude/ skills) and are surfaced through the discovery layer.
+  if (scope === 'aidlc') {
+    doc.skills.push({
+      id: skillId,
+      path: `./.aidlc/skills/${skillId}.md`,
+    });
+    writeYaml(root, doc);
+  }
 
   // Open the file so the user can edit it. Always for `blank`, optional for
   // `template` (so they can copy/paste before tweaking).
@@ -145,9 +235,26 @@ export async function addSkillCommand(): Promise<void> {
     await vscode.window.showTextDocument(docOpen, { preview: false });
   }
 
+  const yamlNote = scope === 'aidlc' ? ' + workspace.yaml' : '';
   void vscode.window.showInformationMessage(
-    `Skill \`${skillId}\` added — ${path.relative(root, skillPath)} + workspace.yaml.`,
+    `Skill \`${skillId}\` added (${scope}) — ${displayPath(root, skillPath)}${yamlNote}.`,
   );
+}
+
+/**
+ * Workspace-relative path when the file is inside the workspace, otherwise
+ * a `~`-prefixed home-relative path. Used in user-facing notifications so
+ * paths stay readable regardless of scope.
+ */
+function displayPath(workspaceRoot: string, abs: string): string {
+  if (abs.startsWith(workspaceRoot + path.sep)) {
+    return path.relative(workspaceRoot, abs);
+  }
+  const home = os.homedir();
+  if (abs.startsWith(home + path.sep)) {
+    return '~/' + path.relative(home, abs);
+  }
+  return abs;
 }
 
 async function pickSkillSource(): Promise<SkillSource | undefined> {
@@ -214,9 +321,17 @@ export async function addAgentCommand(): Promise<void> {
   if (!ctx) { return; }
   const { root, doc } = ctx;
 
-  if (doc.skills.length === 0) {
+  const scope = await pickScope('agent');
+  if (!scope) { return; }
+
+  // AIDLC-scoped agents are pipeline-runnable and need a `skill` reference;
+  // require at least one skill to exist before letting the user create one.
+  // Project / global agents are Claude Code native format — the .md file
+  // is the agent's own prompt, no separate skill needed — so this gate
+  // doesn't apply to them.
+  if (scope === 'aidlc' && doc.skills.length === 0) {
     const choice = await vscode.window.showWarningMessage(
-      'No skills available — add a skill first, then assign it to an agent.',
+      'No skills available — add a skill first, then assign it to an AIDLC agent.',
       'Add Skill',
     );
     if (choice === 'Add Skill') {
@@ -228,7 +343,7 @@ export async function addAgentCommand(): Promise<void> {
   const agentId = await promptUniqueId({
     prompt: 'Agent id',
     placeholder: 'e.g. doc-writer (lowercase, dashes ok)',
-    existing: existingIds(doc.agents),
+    existing: takenIdsForKind(root, doc, 'agent'),
   });
   if (!agentId) { return; }
 
@@ -240,6 +355,25 @@ export async function addAgentCommand(): Promise<void> {
   });
   if (!name || !name.trim()) { return; }
 
+  if (scope === 'aidlc') {
+    await addAidlcAgent(root, doc, agentId, name.trim());
+  } else {
+    await addClaudeAgent(root, scope, agentId, name.trim());
+  }
+}
+
+/**
+ * AIDLC-scope agent: declared in workspace.yaml, referenced by pipelines.
+ * Walks the user through skill / model / env / capabilities pickers (the
+ * existing flow before scope was introduced) and appends the result to
+ * `agents[]`.
+ */
+async function addAidlcAgent(
+  root: string,
+  doc: YamlDocument,
+  agentId: string,
+  name: string,
+): Promise<void> {
   const skillPick = await vscode.window.showQuickPick(
     doc.skills.map((s) => {
       const id = String(s.id);
@@ -259,14 +393,14 @@ export async function addAgentCommand(): Promise<void> {
   if (!modelPick) { return; }
 
   const env = await collectEnvVars();
-  if (env === undefined) { return; }  // user cancelled
+  if (env === undefined) { return; }
 
   const capabilities = await collectCapabilities();
   if (capabilities === undefined) { return; }
 
   const agent: Record<string, unknown> = {
     id: agentId,
-    name: name.trim(),
+    name,
     skill: skillPick.label,
     model: modelPick.value,
   };
@@ -282,7 +416,66 @@ export async function addAgentCommand(): Promise<void> {
   const extraNote = extras.length > 0 ? ` · ${extras.join(', ')}` : '';
 
   void vscode.window.showInformationMessage(
-    `Agent \`${agentId}\` added (skill: ${skillPick.label}, model: ${modelPick.label})${extraNote}.`,
+    `Agent \`${agentId}\` added (aidlc · skill: ${skillPick.label}, model: ${modelPick.label})${extraNote}.`,
+  );
+}
+
+/**
+ * Project- or global-scope agent: a Claude Code native `.md` file. The
+ * file's contents ARE the agent's prompt — no separate skill reference,
+ * no workspace.yaml entry. Matches the convention of files already in
+ * `.claude/agents/` / `~/.claude/agents/` so users get a unified catalog.
+ *
+ * The wizard offers a tiny scaffold (frontmatter + heading) and opens the
+ * file so the user can write the actual prompt.
+ */
+async function addClaudeAgent(
+  root: string,
+  scope: AssetScope,
+  agentId: string,
+  name: string,
+): Promise<void> {
+  const description = await vscode.window.showInputBox({
+    prompt: 'One-line description (used by Claude Code to decide when to invoke this agent)',
+    placeHolder: 'e.g. "Reviews TypeScript code for type-safety issues"',
+    ignoreFocusOut: true,
+  });
+  if (description === undefined) { return; }
+
+  const agentPath = targetPath(root, scope, 'agent', agentId);
+  fs.mkdirSync(path.dirname(agentPath), { recursive: true });
+
+  if (fs.existsSync(agentPath)) {
+    const overwrite = await vscode.window.showWarningMessage(
+      `${displayPath(root, agentPath)} already exists. Overwrite?`,
+      'Overwrite', 'Cancel',
+    );
+    if (overwrite !== 'Overwrite') { return; }
+  }
+
+  // Frontmatter follows Claude Code's agent file convention so the file
+  // is recognized whether read by Claude Code itself or by AIDLC's
+  // discovery layer.
+  const desc = description.trim() || `${name} agent.`;
+  const content =
+`---
+name: ${agentId}
+description: ${desc}
+---
+
+# ${name}
+
+<!-- Write the agent's system prompt here. This file's contents are the
+     full prompt — there's no separate skill reference. -->
+`;
+
+  fs.writeFileSync(agentPath, content, 'utf8');
+
+  const docOpen = await vscode.workspace.openTextDocument(agentPath);
+  await vscode.window.showTextDocument(docOpen, { preview: false });
+
+  void vscode.window.showInformationMessage(
+    `Agent \`${agentId}\` added (${scope}) — ${displayPath(root, agentPath)}.`,
   );
 }
 

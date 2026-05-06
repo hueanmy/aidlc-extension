@@ -23,6 +23,7 @@ import {
   RunStateStore,
   normalizeStep,
   resolvePath,
+  discoverAssets,
 } from '@aidlc/core';
 import type { PipelineConfig } from '@aidlc/core';
 import { listEpics } from './epicsList';
@@ -100,6 +101,15 @@ function buildState(presetStore: PresetStore | null): SidebarState {
 
   // Epics live on disk independent of workspace.yaml — list them either way.
   const allEpics = listEpics(root, doc);
+
+  // Discovered skills + agents from .claude/ (project) and ~/.claude/
+  // (global). These are independent of workspace.yaml — they exist as
+  // long as the folder is open. The disk scan returns aidlc-scope items
+  // too, but for counting we ignore those and rely on the workspace.yaml
+  // declarations (the runtime source of truth for AIDLC pipelines).
+  const discovered = discoverAssets(root);
+  const claudeSkills = discovered.skills.filter((s) => s.scope !== 'aidlc');
+  const claudeAgents = discovered.agents.filter((a) => a.scope !== 'aidlc');
   const recentEpics = allEpics.slice(0, 3).map((e) => ({
     id: e.id,
     title: e.title,
@@ -121,7 +131,9 @@ function buildState(presetStore: PresetStore | null): SidebarState {
       hasFolder: true,
       workspaceName: folder.name,
       configExists: false,
-      agentsCount: 0, skillsCount: 0, pipelinesCount: 0,
+      agentsCount: claudeAgents.length,
+      skillsCount: claudeSkills.length,
+      pipelinesCount: 0,
       epicsCount: allEpics.length, recentEpics,
       slashCommands: [],
       builtinTemplates, projectTemplates,
@@ -135,8 +147,10 @@ function buildState(presetStore: PresetStore | null): SidebarState {
     // free-form `name:` field (see comment in builderWebview.ts).
     workspaceName: folder.name,
     configExists: true,
-    agentsCount: doc.agents.length,
-    skillsCount: doc.skills.length,
+    // Counts span all 3 scopes: workspace.yaml entries (aidlc) + .claude/
+    // (project) + ~/.claude/ (global). Same total the Builder tab shows.
+    agentsCount: doc.agents.length + claudeAgents.length,
+    skillsCount: doc.skills.length + claudeSkills.length,
     pipelinesCount: doc.pipelines.length,
     epicsCount: allEpics.length,
     recentEpics,

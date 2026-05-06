@@ -24,32 +24,56 @@ import * as path from 'path';
 import * as fs from 'fs';
 
 import { readYaml, writeYaml, type YamlDocument } from './yamlIO';
-import { WORKSPACE_DIR, WORKSPACE_FILENAME, stepAgentId, normalizeStep } from '@aidlc/core';
-import type { PipelineStepConfig } from '@aidlc/core';
+import {
+  WORKSPACE_DIR,
+  WORKSPACE_FILENAME,
+  stepAgentId,
+  normalizeStep,
+  discoverAssets,
+} from '@aidlc/core';
+import type { PipelineStepConfig, AssetScope, DiscoveredAsset } from '@aidlc/core';
 import { promptStepConfig } from './wizards';
 import { listEpics, type EpicSummary } from './epicsList';
 
 // ── State shape sent to webview ────────────────────────────────────────
 
+/**
+ * One catalog row for the Skills / Agents tabs. Both AIDLC-declared items
+ * (sourced from workspace.yaml) and Claude-Code-native items (discovered
+ * on disk under `.claude/` or `~/.claude/`) flatten into this same shape so
+ * the UI can render a single grouped list. Scope-specific extras hang off
+ * `aidlcMeta` (skill ref / model / capabilities), which is undefined for
+ * project + global rows.
+ */
+interface AssetRow {
+  id: string;
+  scope: AssetScope;
+  /** Absolute file path, or null when an AIDLC skill row has no `path` (builtin). */
+  filePath: string | null;
+  /** True only for AIDLC skills referencing a `path:` whose file is missing on disk. */
+  fileMissing?: boolean;
+  /** True when a higher-precedence scope shadows this row. */
+  overridden?: boolean;
+  overriddenBy?: AssetScope;
+  /** AIDLC-only metadata. Project + global agents have no skill/model concept. */
+  aidlcMeta?: {
+    name?: string;
+    skill?: string;
+    model?: string;
+    runner?: 'default' | 'custom';
+    envCount?: number;
+    capabilities?: string[];
+    /** True for AIDLC-bundled `builtin: true` skills with no on-disk path. */
+    builtin?: boolean;
+  };
+}
+
 interface BuilderState {
   workspaceRoot: string | null;
   workspaceName: string;
   configExists: boolean;
-  agents: Array<{
-    id: string;
-    name: string;
-    skill: string;
-    model: string;
-    runner: 'default' | 'custom';
-    envCount: number;
-    capabilities: string[];
-  }>;
-  skills: Array<{
-    id: string;
-    source: 'builtin' | 'path';
-    path?: string;
-    pathExists?: boolean;
-  }>;
+  agents: AssetRow[];
+  skills: AssetRow[];
   pipelines: Array<{
     id: string;
     steps: Array<{
@@ -85,12 +109,19 @@ function buildState(): BuilderState {
   // List them even when there's no config so the user can still see prior runs.
   const epics = listEpics(root, doc);
 
+  // Discovered assets exist regardless of workspace.yaml presence — they're
+  // just files on disk. Build them once and reuse for both the no-config
+  // and configured branches.
+  const discovered = discoverAssets(root);
+
   if (!doc) {
     return {
       workspaceRoot: root,
       workspaceName,
       configExists: false,
-      agents: [], skills: [], pipelines: [],
+      agents: claudeAssetsToRows(discovered.agents),
+      skills: claudeAssetsToRows(discovered.skills),
+      pipelines: [],
       epics,
     };
   }
@@ -104,33 +135,8 @@ function buildState(): BuilderState {
     workspaceRoot: root,
     workspaceName,
     configExists: true,
-    agents: doc.agents.map((a) => ({
-      id: String(a.id),
-      name: typeof a.name === 'string' ? a.name : String(a.id),
-      skill: typeof a.skill === 'string' ? a.skill : '',
-      model: typeof a.model === 'string' ? a.model : '',
-      runner: a.runner === 'custom' ? 'custom' : 'default',
-      envCount: a.env && typeof a.env === 'object' ? Object.keys(a.env as object).length : 0,
-      capabilities: Array.isArray(a.capabilities)
-        ? (a.capabilities as unknown[]).map(String)
-        : [],
-    })),
-    skills: doc.skills.map((s) => {
-      const id = String(s.id);
-      if (s.builtin) {
-        return { id, source: 'builtin' as const };
-      }
-      const skillPath = typeof s.path === 'string' ? s.path : undefined;
-      const exists = skillPath
-        ? fs.existsSync(path.resolve(root, skillPath))
-        : false;
-      return {
-        id,
-        source: 'path' as const,
-        path: skillPath,
-        pathExists: exists,
-      };
-    }),
+    agents: mergeAgentRows(doc, discovered.agents),
+    skills: mergeSkillRows(doc, root, discovered.skills),
     pipelines: doc.pipelines.map((p) => ({
       id: String(p.id),
       steps: Array.isArray(p.steps)
@@ -151,6 +157,184 @@ function buildState(): BuilderState {
     })),
     epics,
   };
+}
+
+/**
+ * Convert Claude-Code-native discovered assets (project + global scope) to
+ * unified AssetRow form. AIDLC-scope items are NOT touched here — those
+ * have richer metadata pulled from workspace.yaml in `mergeAgentRows` /
+ * `mergeSkillRows`.
+ */
+function claudeAssetsToRows(items: DiscoveredAsset[]): AssetRow[] {
+  return items
+    .filter((a) => a.scope !== 'aidlc')
+    .map((a) => ({
+      id: a.id,
+      scope: a.scope,
+      filePath: a.filePath,
+      overridden: a.overridden,
+      overriddenBy: a.overriddenBy,
+    }));
+}
+
+/**
+ * Merge AIDLC agents (declared in workspace.yaml) with project + global
+ * agents (discovered on disk). Output preserves precedence ordering —
+ * project items are flagged `overridden` only when they collide with an
+ * AIDLC agent of the same id (project > aidlc > global).
+ *
+ * Workspace.yaml agents always render as scope: 'aidlc' even though their
+ * .md (if any) might live elsewhere — the workspace.yaml entry is the
+ * authoritative declaration for AIDLC pipeline runs.
+ */
+function mergeAgentRows(doc: YamlDocument, discovered: DiscoveredAsset[]): AssetRow[] {
+  const winnerById = new Map<string, AssetScope>();
+  for (const a of discovered) {
+    if (a.scope === 'project' && !winnerById.has(a.id)) {
+      winnerById.set(a.id, 'project');
+    }
+  }
+  for (const a of doc.agents) {
+    const id = String(a.id);
+    if (!winnerById.has(id)) { winnerById.set(id, 'aidlc'); }
+  }
+  for (const a of discovered) {
+    if (a.scope === 'global' && !winnerById.has(a.id)) {
+      winnerById.set(a.id, 'global');
+    }
+  }
+
+  const rows: AssetRow[] = [];
+
+  for (const a of discovered.filter((x) => x.scope === 'project')) {
+    const winner = winnerById.get(a.id);
+    rows.push({
+      id: a.id,
+      scope: 'project',
+      filePath: a.filePath,
+      overridden: winner !== undefined && winner !== 'project',
+      overriddenBy: winner !== 'project' ? winner : undefined,
+    });
+  }
+
+  for (const a of doc.agents) {
+    const id = String(a.id);
+    const winner = winnerById.get(id);
+    rows.push({
+      id,
+      scope: 'aidlc',
+      filePath: null,
+      overridden: winner !== undefined && winner !== 'aidlc',
+      overriddenBy: winner !== 'aidlc' ? winner : undefined,
+      aidlcMeta: {
+        name: typeof a.name === 'string' ? a.name : id,
+        skill: typeof a.skill === 'string' ? a.skill : '',
+        model: typeof a.model === 'string' ? a.model : '',
+        runner: a.runner === 'custom' ? 'custom' : 'default',
+        envCount: a.env && typeof a.env === 'object'
+          ? Object.keys(a.env as object).length
+          : 0,
+        capabilities: Array.isArray(a.capabilities)
+          ? (a.capabilities as unknown[]).map(String)
+          : [],
+      },
+    });
+  }
+
+  for (const a of discovered.filter((x) => x.scope === 'global')) {
+    const winner = winnerById.get(a.id);
+    rows.push({
+      id: a.id,
+      scope: 'global',
+      filePath: a.filePath,
+      overridden: winner !== undefined && winner !== 'global',
+      overriddenBy: winner !== 'global' ? winner : undefined,
+    });
+  }
+
+  return rows;
+}
+
+/**
+ * Merge AIDLC skills (workspace.yaml) with project + global skills
+ * (discovered). AIDLC skills can be `builtin: true` (no on-disk path) or
+ * point at a `path:` (resolved relative to workspace root). Both forms
+ * surface as scope: 'aidlc' rows.
+ */
+function mergeSkillRows(
+  doc: YamlDocument,
+  root: string,
+  discovered: DiscoveredAsset[],
+): AssetRow[] {
+  const winnerById = new Map<string, AssetScope>();
+  for (const s of discovered) {
+    if (s.scope === 'project' && !winnerById.has(s.id)) {
+      winnerById.set(s.id, 'project');
+    }
+  }
+  for (const s of doc.skills) {
+    const id = String(s.id);
+    if (!winnerById.has(id)) { winnerById.set(id, 'aidlc'); }
+  }
+  for (const s of discovered) {
+    if (s.scope === 'global' && !winnerById.has(s.id)) {
+      winnerById.set(s.id, 'global');
+    }
+  }
+
+  const rows: AssetRow[] = [];
+
+  for (const s of discovered.filter((x) => x.scope === 'project')) {
+    const winner = winnerById.get(s.id);
+    rows.push({
+      id: s.id,
+      scope: 'project',
+      filePath: s.filePath,
+      overridden: winner !== undefined && winner !== 'project',
+      overriddenBy: winner !== 'project' ? winner : undefined,
+    });
+  }
+
+  for (const s of doc.skills) {
+    const id = String(s.id);
+    const winner = winnerById.get(id);
+    if (s.builtin) {
+      rows.push({
+        id,
+        scope: 'aidlc',
+        filePath: null,
+        overridden: winner !== undefined && winner !== 'aidlc',
+        overriddenBy: winner !== 'aidlc' ? winner : undefined,
+        aidlcMeta: { builtin: true },
+      });
+      continue;
+    }
+    const skillPath = typeof s.path === 'string' ? s.path : undefined;
+    const abs = skillPath
+      ? (path.isAbsolute(skillPath) ? skillPath : path.resolve(root, skillPath))
+      : null;
+    rows.push({
+      id,
+      scope: 'aidlc',
+      filePath: abs,
+      fileMissing: abs ? !fs.existsSync(abs) : true,
+      overridden: winner !== undefined && winner !== 'aidlc',
+      overriddenBy: winner !== 'aidlc' ? winner : undefined,
+    });
+  }
+
+  for (const s of discovered.filter((x) => x.scope === 'global')) {
+    const winner = winnerById.get(s.id);
+    rows.push({
+      id: s.id,
+      scope: 'global',
+      filePath: s.filePath,
+      overridden: winner !== undefined && winner !== 'global',
+      overriddenBy: winner !== 'global' ? winner : undefined,
+    });
+  }
+
+  return rows;
 }
 
 // ── Provider / panel lifecycle ─────────────────────────────────────────
@@ -301,14 +485,20 @@ export class BuilderPanel {
         await vscode.commands.executeCommand('aidlc.openClaudeTerminal');
         return;
 
-      case 'openSkill': {
+      case 'openSkill':
+      case 'openAgent': {
+        // Both actions open a discovered .md file. We accept absolute or
+        // workspace-relative paths so the caller doesn't need to know
+        // which scope the asset lives in (project + aidlc are workspace-
+        // relative; global lives in the home dir, always absolute).
         const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        if (!root) { return; }
-        const skillPath = String(msg.path ?? '');
-        if (!skillPath) { return; }
-        const abs = path.isAbsolute(skillPath) ? skillPath : path.resolve(root, skillPath);
+        const targetPathArg = String(msg.path ?? '');
+        if (!targetPathArg) { return; }
+        const abs = path.isAbsolute(targetPathArg)
+          ? targetPathArg
+          : (root ? path.resolve(root, targetPathArg) : targetPathArg);
         if (!fs.existsSync(abs)) {
-          void vscode.window.showWarningMessage(`Skill file not found: ${skillPath}`);
+          void vscode.window.showWarningMessage(`File not found: ${targetPathArg}`);
           return;
         }
         const doc = await vscode.workspace.openTextDocument(abs);
@@ -780,6 +970,87 @@ body {
 .tag-missing { background: rgba(248,113,113,0.14); color: var(--rejected); border-color: rgba(248,113,113,0.30); }
 .tag-env { background: rgba(251,191,36,0.12); color: var(--warn); border-color: rgba(251,191,36,0.28); }
 
+/* ── Scope groups (skills + agents tabs) ─────────────────────────── */
+
+.scope-group {
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius);
+  background: rgba(255,255,255,0.015);
+}
+.scope-head {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--hairline);
+  cursor: pointer;
+  user-select: none;
+}
+.scope-head:hover { border-bottom-color: var(--glass-border); }
+.scope-chevron {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--text-soft);
+  width: 12px; text-align: center;
+  transition: transform .15s ease;
+  transform: rotate(0deg);
+}
+.scope-group.is-collapsed .scope-head {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+.scope-group.is-collapsed .scope-chevron { transform: rotate(-90deg); }
+.scope-group.is-collapsed { padding-bottom: 4px; }
+.scope-icon { font-size: 14px; }
+.scope-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.scope-count {
+  font-size: 9.5px; font-weight: 700;
+  padding: 1px 7px; border-radius: 999px;
+  background: var(--glass);
+  color: var(--text-soft);
+  font-variant-numeric: tabular-nums;
+}
+.scope-sub {
+  margin-left: auto;
+  font-size: 10px; color: var(--text-faint);
+  font-style: italic;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0;
+}
+.scope-empty {
+  font-size: 10.5px; color: var(--text-faint);
+  padding: 8px 4px;
+  font-style: italic;
+}
+.scope-project .scope-icon { color: #5eead4; }
+.scope-aidlc   .scope-icon { color: #c4a4d4; }
+.scope-global  .scope-icon { color: #fbbf24; }
+
+/* Per-card scope badge — sits next to the id in the card head. */
+.scope-badge {
+  margin-left: auto;
+  font-size: 8.5px; font-weight: 700; letter-spacing: 0.5px;
+  padding: 1.5px 6px; border-radius: 999px;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.scope-badge-project  { background: rgba(94,234,212,0.10); color: var(--accent);   border-color: rgba(94,234,212,0.24); }
+.scope-badge-aidlc    { background: rgba(155,109,255,0.10); color: #c4a4d4;        border-color: rgba(155,109,255,0.26); }
+.scope-badge-global   { background: rgba(251,191,36,0.10); color: var(--warn);    border-color: rgba(251,191,36,0.26); }
+.scope-badge-overridden {
+  background: rgba(248,113,113,0.10);
+  color: var(--rejected);
+  border-color: rgba(248,113,113,0.30);
+}
+.card-overridden { opacity: 0.55; }
+.card-overridden:hover { opacity: 0.85; }
+
 .card-caps {
   margin-top: 5px;
   padding-top: 5px;
@@ -1090,9 +1361,15 @@ let state = null;
 /** Persisted across panel hide/show + soft reloads via vscode.setState. */
 const persisted = vscode.getState() || {};
 let activeTab = persisted.activeTab || 'workflows';
+/** Set of "kind:scope" keys (e.g. "agent:project") whose body is hidden. */
+const collapsedScopes = new Set(Array.isArray(persisted.collapsedScopes) ? persisted.collapsedScopes : []);
 
 function persistUiState() {
-  vscode.setState({ ...(vscode.getState() || {}), activeTab });
+  vscode.setState({
+    ...(vscode.getState() || {}),
+    activeTab,
+    collapsedScopes: Array.from(collapsedScopes),
+  });
 }
 
 window.addEventListener('message', (e) => {
@@ -1213,25 +1490,97 @@ function renderTabs() {
   return html;
 }
 
+// Per-scope display metadata, used by the section header to explain to
+// the user what each scope means (mirrors the wizard's scope picker copy
+// — keep them aligned when editing).
+const SCOPE_INFO = {
+  project: {
+    label: 'Project',
+    icon: '📂',
+    sub: '.claude/ — committed to this repo, applies to this project only',
+  },
+  aidlc: {
+    label: 'AIDLC',
+    icon: '📦',
+    sub: '.aidlc/ — committed to this repo, declared in workspace.yaml, shared with the team',
+  },
+  global: {
+    label: 'Global',
+    icon: '🏠',
+    sub: '~/.claude/ — your personal assets, available on every project on this machine',
+  },
+};
+
+const SCOPE_ORDER = ['project', 'aidlc', 'global'];
+
 function renderAgents() {
+  return renderAssetTab('agent', state.agents);
+}
+
+function renderSkills() {
+  return renderAssetTab('skill', state.skills);
+}
+
+/**
+ * Unified renderer for the Skills + Agents tabs. Splits rows into 3 scope
+ * groups (project / aidlc / global) and emits a sub-section per scope so
+ * the user can see at a glance which assets are shared via repo, AIDLC,
+ * or their home dir. Empty scope groups still render with a hint
+ * explaining how to fill them — discoverability matters more than
+ * compactness here.
+ */
+function renderAssetTab(kind, rows) {
+  const noun = kind === 'agent' ? 'Agents' : 'Skills';
+  const addAction = kind === 'agent' ? 'addAgent' : 'addSkill';
+
   let html = '<section class="section">';
   html += '<div class="section-head">';
-  html += '<h2>Agents</h2>';
-  html += '<span class="section-count">' + state.agents.length + '</span>';
+  html += '<h2>' + noun + '</h2>';
+  html += '<span class="section-count">' + rows.length + '</span>';
   html += '<div class="spacer"></div>';
-  html += '<button class="btn btn-primary" data-action="addAgent">+ Add Agent</button>';
+  html += '<button class="btn btn-primary" data-action="' + addAction + '">+ Add ' + (kind === 'agent' ? 'Agent' : 'Skill') + '</button>';
   html += '</div>';
 
-  if (state.agents.length === 0) {
-    html += '<div class="empty"><p>No agents yet — add one to define a callable AI worker.</p>';
-    html += '<button class="btn btn-primary" data-action="addAgent">+ Add Agent</button></div>';
-  } else {
-    html += '<div class="cards">';
-    for (const a of state.agents) { html += renderAgentCard(a); }
-    html += '</div>';
+  for (const scope of SCOPE_ORDER) {
+    const scopeRows = rows.filter(function(r) { return r.scope === scope; });
+    html += renderScopeGroup(kind, scope, scopeRows);
   }
+
   html += '</section>';
   return html;
+}
+
+function renderScopeGroup(kind, scope, rows) {
+  const info = SCOPE_INFO[scope];
+  const collapsed = isScopeCollapsed(kind, scope);
+  const groupCls = 'scope-group scope-' + scope + (collapsed ? ' is-collapsed' : '');
+  let html = '<div class="' + groupCls + '">';
+  html += '<div class="scope-head" data-action="toggleScope" data-kind="' + kind + '" data-scope="' + scope + '" title="' + (collapsed ? 'Expand' : 'Collapse') + '">';
+  html += '<span class="scope-chevron" aria-hidden="true">▾</span>';
+  html += '<span class="scope-icon">' + info.icon + '</span>';
+  html += '<span class="scope-label">' + info.label + '</span>';
+  html += '<span class="scope-count">' + rows.length + '</span>';
+  html += '<span class="scope-sub">' + escapeHtml(info.sub) + '</span>';
+  html += '</div>';
+
+  if (!collapsed) {
+    if (rows.length === 0) {
+      html += '<div class="scope-empty">No ' + (kind === 'agent' ? 'agents' : 'skills') + ' here yet.</div>';
+    } else {
+      html += '<div class="cards">';
+      for (const r of rows) {
+        html += kind === 'agent' ? renderAgentCard(r) : renderSkillCard(r);
+      }
+      html += '</div>';
+    }
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function isScopeCollapsed(kind, scope) {
+  return collapsedScopes.has(kind + ':' + scope);
 }
 
 // Map well-known capability ids to their display icon. Unknown ids fall
@@ -1251,64 +1600,87 @@ function capabilityIcon(id) {
 }
 
 function renderAgentCard(a) {
-  let html = '<div class="card" data-action="openYaml">';
+  // AIDLC agents have rich metadata (skill / model / capabilities) and
+  // open the YAML; project + global agents are .md files we open
+  // directly. The two card layouts share an outer shell + scope badge
+  // but diverge on body content.
+  const isAidlc = a.scope === 'aidlc';
+  const clickAction = isAidlc
+    ? ' data-action="openYaml"'
+    : (a.filePath ? ' data-action="openAgent" data-path="' + escapeHtml(a.filePath) + '"' : '');
+  const titleAttr = isAidlc
+    ? ''
+    : (a.filePath ? ' title="Click to open .md file"' : '');
+
+  let html = '<div class="card' + (a.overridden ? ' card-overridden' : '') + '"' + clickAction + titleAttr + '>';
   html += '<div class="card-actions">';
-  html += '<button class="btn btn-icon btn-ghost" data-action="deleteAgent" data-id="' + escapeHtml(a.id) + '" title="Delete agent">×</button>';
+  if (isAidlc) {
+    // Only AIDLC agents are deletable from this UI today — they live in
+    // workspace.yaml. Project + global agent files require explicit file
+    // delete (do that from the explorer for now to avoid surprises).
+    html += '<button class="btn btn-icon btn-ghost" data-action="deleteAgent" data-id="' + escapeHtml(a.id) + '" title="Delete from workspace.yaml">×</button>';
+  }
   html += '</div>';
-  html += '<div class="card-head"><span class="card-id">' + escapeHtml(a.id) + '</span></div>';
-  html += '<div class="card-meta">' + escapeHtml(a.name) + '</div>';
-  html += '<div class="card-tags">';
-  if (a.skill) { html += '<span class="tag tag-skill">' + escapeHtml(a.skill) + '</span>'; }
-  if (a.model) { html += '<span class="tag tag-model">' + escapeHtml(a.model) + '</span>'; }
-  if (a.runner === 'custom') { html += '<span class="tag tag-runner-custom">custom runner</span>'; }
-  if (a.envCount > 0) { html += '<span class="tag tag-env">env: ' + a.envCount + '</span>'; }
+  html += '<div class="card-head"><span class="card-id">' + escapeHtml(a.id) + '</span>';
+  html += renderScopeBadge(a);
   html += '</div>';
-  if (a.capabilities && a.capabilities.length > 0) {
-    html += '<div class="card-caps">';
-    for (const cap of a.capabilities) {
-      html += '<span class="cap" title="capability: ' + escapeHtml(cap) + '">' + capabilityIcon(cap) + ' ' + escapeHtml(cap) + '</span>';
+
+  if (isAidlc && a.aidlcMeta) {
+    const m = a.aidlcMeta;
+    html += '<div class="card-meta">' + escapeHtml(m.name || a.id) + '</div>';
+    html += '<div class="card-tags">';
+    if (m.skill) { html += '<span class="tag tag-skill">' + escapeHtml(m.skill) + '</span>'; }
+    if (m.model) { html += '<span class="tag tag-model">' + escapeHtml(m.model) + '</span>'; }
+    if (m.runner === 'custom') { html += '<span class="tag tag-runner-custom">custom runner</span>'; }
+    if (m.envCount && m.envCount > 0) { html += '<span class="tag tag-env">env: ' + m.envCount + '</span>'; }
+    html += '</div>';
+    if (m.capabilities && m.capabilities.length > 0) {
+      html += '<div class="card-caps">';
+      for (const cap of m.capabilities) {
+        html += '<span class="cap" title="capability: ' + escapeHtml(cap) + '">' + capabilityIcon(cap) + ' ' + escapeHtml(cap) + '</span>';
+      }
+      html += '</div>';
     }
-    html += '</div>';
-  }
-  html += '</div>';
-  return html;
-}
-
-function renderSkills() {
-  let html = '<section class="section">';
-  html += '<div class="section-head">';
-  html += '<h2>Skills</h2>';
-  html += '<span class="section-count">' + state.skills.length + '</span>';
-  html += '<div class="spacer"></div>';
-  html += '<button class="btn btn-primary" data-action="addSkill">+ Add Skill</button>';
-  html += '</div>';
-
-  if (state.skills.length === 0) {
-    html += '<div class="empty"><p>No skills yet — add a markdown prompt that an agent can use.</p>';
-    html += '<button class="btn btn-primary" data-action="addSkill">+ Add Skill</button></div>';
   } else {
-    html += '<div class="cards">';
-    for (const s of state.skills) { html += renderSkillCard(s); }
-    html += '</div>';
+    // Claude Code native agents: just the file path. The .md is the agent.
+    html += '<div class="card-meta">' + escapeHtml(a.filePath || '') + '</div>';
   }
-  html += '</section>';
+
+  html += '</div>';
   return html;
 }
 
 function renderSkillCard(s) {
-  const clickable = s.source === 'path' && s.path && s.pathExists;
-  const action = clickable ? ' data-action="openSkill" data-path="' + escapeHtml(s.path) + '"' : '';
-  let html = '<div class="card"' + action + ' title="' + (clickable ? 'Click to open .md file' : '') + '">';
+  const meta = s.aidlcMeta || {};
+  const clickable = !!(s.filePath && !s.fileMissing);
+  const action = clickable ? ' data-action="openSkill" data-path="' + escapeHtml(s.filePath) + '"' : '';
+  let html = '<div class="card' + (s.overridden ? ' card-overridden' : '') + '"' + action + ' title="' + (clickable ? 'Click to open .md file' : '') + '">';
   html += '<div class="card-actions">';
-  html += '<button class="btn btn-icon btn-ghost" data-action="deleteSkill" data-id="' + escapeHtml(s.id) + '" title="Delete skill (file kept)">×</button>';
+  if (s.scope === 'aidlc') {
+    html += '<button class="btn btn-icon btn-ghost" data-action="deleteSkill" data-id="' + escapeHtml(s.id) + '" title="Delete from workspace.yaml (file kept on disk)">×</button>';
+  }
   html += '</div>';
-  html += '<div class="card-head"><span class="card-id">' + escapeHtml(s.id) + '</span></div>';
-  html += '<div class="card-meta">' + escapeHtml(s.path || '(builtin)') + '</div>';
+  html += '<div class="card-head"><span class="card-id">' + escapeHtml(s.id) + '</span>';
+  html += renderScopeBadge(s);
+  html += '</div>';
+  html += '<div class="card-meta">' + escapeHtml(s.filePath || '(builtin)') + '</div>';
   html += '<div class="card-tags">';
-  if (s.source === 'builtin') { html += '<span class="tag tag-builtin">builtin</span>'; }
-  if (s.source === 'path' && s.pathExists === false) { html += '<span class="tag tag-missing">file missing</span>'; }
+  if (meta.builtin) { html += '<span class="tag tag-builtin">builtin</span>'; }
+  if (s.fileMissing) { html += '<span class="tag tag-missing">file missing</span>'; }
   html += '</div></div>';
   return html;
+}
+
+/**
+ * Small badge that appears in the card header. For non-overridden rows
+ * we show a discreet scope tag; for overridden rows we replace it with a
+ * louder warning so the user knows another scope is shadowing this one.
+ */
+function renderScopeBadge(r) {
+  if (r.overridden && r.overriddenBy) {
+    return '<span class="scope-badge scope-badge-overridden" title="Overridden by ' + escapeHtml(r.overriddenBy) + ' scope — this entry is shadowed.">overridden by ' + escapeHtml(r.overriddenBy) + '</span>';
+  }
+  return '<span class="scope-badge scope-badge-' + escapeHtml(r.scope) + '">' + escapeHtml(r.scope) + '</span>';
 }
 
 function renderWorkflows() {
@@ -1505,6 +1877,17 @@ document.addEventListener('click', (e) => {
         persistUiState();
         render();
       }
+      return;
+    }
+    case 'toggleScope': {
+      const k = target.dataset.kind;
+      const s = target.dataset.scope;
+      if (!k || !s) { return; }
+      const key = k + ':' + s;
+      if (collapsedScopes.has(key)) { collapsedScopes.delete(key); }
+      else { collapsedScopes.add(key); }
+      persistUiState();
+      render();
       return;
     }
     case 'init':                    post('init'); return;
