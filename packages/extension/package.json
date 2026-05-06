@@ -1,7 +1,7 @@
 {
   "name": "aidlc",
-  "displayName": "aidlc",
-  "description": "Agent workflow runner for VS Code — define agents, skills, and pipelines in workspace.yaml. Build, edit, and run AI workflows visually without leaving the editor.",
+  "displayName": "AIDLC",
+  "description": "Drive Claude through any pipeline declared in workspace.yaml — agents, skills, pipelines, and epics with sequential approve/reject/rerun runs, all from VS Code.",
   "version": "0.8.4",
   "publisher": "hueanmy",
   "license": "MIT",
@@ -150,7 +150,81 @@
           "group": "navigation@2"
         }
       ]
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "aidlc.gettingStarted",
+        "title": "Get started with AIDLC",
+        "description": "Drive Claude through any pipeline declared in workspace.yaml — visually, from the editor.",
+        "steps": [
+          {
+            "id": "aidlc.welcome",
+            "title": "Welcome to AIDLC",
+            "description": "AIDLC turns a single `workspace.yaml` into a runnable pipeline of Claude agents — edit it visually, run epics step-by-step, approve or reject each handoff.\n\nThe fastest way to feel it is to load the demo project in the next step.",
+            "media": {
+              "markdown": "media/walkthrough/welcome.md"
+            }
+          },
+          {
+            "id": "aidlc.loadDemo",
+            "title": "Load the demo project",
+            "description": "One click scaffolds a full pipeline plus 6 sample epics into your current folder — no YAML to write.\n[Load Demo Project](command:aidlc.loadDemoProject)",
+            "media": {
+              "markdown": "media/walkthrough/demo.md"
+            },
+            "completionEvents": [
+              "onCommand:aidlc.loadDemoProject"
+            ]
+          },
+          {
+            "id": "aidlc.builder",
+            "title": "Open the Workspace Builder",
+            "description": "Visual editor for your agents, skills, and pipelines. Add an agent, swap its model, edit a skill inline.\n[Open Workspace Builder](command:aidlc.openBuilder)",
+            "media": {
+              "markdown": "media/walkthrough/builder.md"
+            },
+            "completionEvents": [
+              "onCommand:aidlc.openBuilder"
+            ]
+          },
+          {
+            "id": "aidlc.runEpic",
+            "title": "Run your first epic",
+            "description": "Pick a sample epic and watch Claude work through the pipeline. Approve, reject, or rerun any step.\n[Open Epics List](command:aidlc.openEpicsList) · [Start Epic](command:aidlc.startEpic)",
+            "media": {
+              "markdown": "media/walkthrough/epics.md"
+            },
+            "completionEvents": [
+              "onCommand:aidlc.openEpicsList",
+              "onCommand:aidlc.startEpic"
+            ]
+          },
+          {
+            "id": "aidlc.terminal",
+            "title": "Drive runs from the terminal",
+            "description": "One-click zsh terminal in the bottom panel with the Claude CLI auto-launched. Use slash commands or run `aidlc` directly.\n[Open Claude CLI Terminal](command:aidlc.openClaudeTerminal)",
+            "media": {
+              "markdown": "media/walkthrough/terminal.md"
+            },
+            "completionEvents": [
+              "onCommand:aidlc.openClaudeTerminal"
+            ]
+          },
+          {
+            "id": "aidlc.buildYourOwn",
+            "title": "Build your own workspace",
+            "description": "Scaffold a fresh `.aidlc/workspace.yaml`, add custom skills/agents/pipelines, save the result as a reusable template.\n[Init Sample Workspace](command:aidlc.initWorkspace) · [Add Skill](command:aidlc.addSkill) · [Add Agent](command:aidlc.addAgent) · [Save as Template](command:aidlc.savePreset)",
+            "media": {
+              "markdown": "media/walkthrough/build.md"
+            },
+            "completionEvents": [
+              "onCommand:aidlc.initWorkspace",
+              "onCommand:aidlc.savePreset"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p ./",
