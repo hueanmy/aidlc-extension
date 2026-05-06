@@ -22,7 +22,7 @@ Run these checks in parallel and abort on any failure:
   > `OVSX_PAT` not set. Create a token at https://open-vsx.org/user-settings/tokens then `export OVSX_PAT=<token>` and retry.
 - `test -n "$VSCE_PAT"` (via `printenv VSCE_PAT | head -c 4`) — must be non-empty. If missing, stop with:
   > `VSCE_PAT` not set. Create an Azure DevOps PAT (scope: Marketplace → Manage, org: All accessible) at https://dev.azure.com → User settings → Personal access tokens, then `export VSCE_PAT=<token>` and retry.
-- Read current `version` from [package.json](../../../package.json).
+- Read current `version` from [packages/extension/package.json](../../../packages/extension/package.json). The repo-root `package.json` has no version — it's the monorepo manifest.
 
 ## 2. Compute new version
 
@@ -52,19 +52,19 @@ Filter the output:
 
 If the list is empty, stop and report: "No commits since `$LAST_TAG` — nothing to release."
 
-## 4. Update package.json + package-lock.json
+## 4. Update packages/extension/package.json
 
-Use npm to bump both files atomically without creating a git tag (we tag ourselves later):
+Bump the extension's `package.json` (NOT the repo root — that one has no version). pnpm-workspace, no lockfile to bump:
 
 ```
-npm version <patch|minor|major> --no-git-tag-version
+(cd packages/extension && npm version <patch|minor|major> --no-git-tag-version)
 ```
 
-Verify the new version in [package.json](../../../package.json) matches what you computed in step 2.
+Verify the new version in [packages/extension/package.json](../../../packages/extension/package.json) matches what you computed in step 2.
 
 ## 5. Update CHANGELOG.md
 
-Prepend a new section to [CHANGELOG.md](../../../CHANGELOG.md) directly under the `# Changelog` heading. Format:
+Prepend a new section to [packages/extension/CHANGELOG.md](../../../packages/extension/CHANGELOG.md) directly under the `# Changelog` heading. Format:
 
 ```
 ## <new-version>
@@ -76,17 +76,26 @@ Leave a blank line between the new section and the previous one. Preserve all ex
 
 ## 6. Build + package
 
-Run sequentially — stop on first failure:
+> CRITICAL: do NOT just `tsc` and `vsce package` separately. The TS output is unbundled — it `require()`s `@aidlc/core` and `js-yaml`, which aren't shipped with `--no-dependencies`. That produces a VSIX that throws on activation (`command 'aidlc.openBuilder' not found`). The `package` script in [packages/extension/package.json](../../../packages/extension/package.json) does typecheck → esbuild bundle → `vsce package --no-dependencies` in the right order; always go through it.
 
-1. `npm run compile`
-2. `npx -y @vscode/vsce package` — produces `aidlc-<new-version>.vsix` in the repo root.
+Run from the repo root:
 
-Verify the `.vsix` file exists before moving on.
+```
+pnpm package:extension
+```
+
+This script (see root [package.json](../../../package.json)) runs `pnpm --filter aidlc package`, which produces `packages/extension/aidlc-<new-version>.vsix`. The bundled `out/extension.js` should be ~600–700kb; if you see ~10kb, the bundle step didn't run — stop and investigate before publishing.
+
+Verify the `.vsix` file exists before moving on:
+
+```
+ls packages/extension/aidlc-<new-version>.vsix
+```
 
 ## 7. Commit + tag
 
 ```
-git add package.json package-lock.json CHANGELOG.md
+git add packages/extension/package.json packages/extension/CHANGELOG.md
 git commit -m "Release v<new-version>"
 git tag "v<new-version>"
 ```
@@ -96,20 +105,20 @@ Do NOT amend. Do NOT use `--no-verify`.
 ## 8. Publish to Open VSX
 
 ```
-npx -y ovsx publish aidlc-<new-version>.vsix -p "$OVSX_PAT"
+npx -y --registry=https://registry.npmjs.org/ ovsx publish packages/extension/aidlc-<new-version>.vsix -p "$OVSX_PAT"
 ```
 
 If this fails, the commit and tag already exist locally — report the failure clearly and tell the user:
-> Local commit + tag `v<new-version>` created, but Open VSX publish failed. Fix the error, then retry with `npx -y ovsx publish aidlc-<new-version>.vsix -p "$OVSX_PAT"`. Do NOT re-run /publish.
+> Local commit + tag `v<new-version>` created, but Open VSX publish failed. Fix the error, then retry with `npx -y --registry=https://registry.npmjs.org/ ovsx publish packages/extension/aidlc-<new-version>.vsix -p "$OVSX_PAT"`. Do NOT re-run /publish.
 
 ## 8b. Publish to VS Code Marketplace
 
 ```
-npx -y @vscode/vsce publish --packagePath aidlc-<new-version>.vsix -p "$VSCE_PAT"
+npx -y --registry=https://registry.npmjs.org/ @vscode/vsce publish --packagePath packages/extension/aidlc-<new-version>.vsix -p "$VSCE_PAT"
 ```
 
 If this fails, Open VSX already succeeded and the commit/tag exist locally — report the failure and tell the user:
-> Open VSX published + local tag `v<new-version>` created, but VS Code Marketplace publish failed. Fix the error (usually a stale/invalid `VSCE_PAT`), then retry with `npx -y @vscode/vsce publish --packagePath aidlc-<new-version>.vsix -p "$VSCE_PAT"`. Do NOT re-run /publish.
+> Open VSX published + local tag `v<new-version>` created, but VS Code Marketplace publish failed. Fix the error (usually a stale/invalid `VSCE_PAT`), then retry with `npx -y --registry=https://registry.npmjs.org/ @vscode/vsce publish --packagePath packages/extension/aidlc-<new-version>.vsix -p "$VSCE_PAT"`. Do NOT re-run /publish.
 
 ## 9. Push
 

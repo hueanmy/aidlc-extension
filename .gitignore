@@ -15,6 +15,7 @@ packages/*/bin/
 
 # local test workspace (user's playground, not part of repo)
 /docs/
+.aidlc/
 
 # editor
 .idea/
