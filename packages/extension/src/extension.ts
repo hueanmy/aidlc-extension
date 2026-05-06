@@ -65,6 +65,31 @@ export function activate(context: vscode.ExtensionContext): void {
     context.subscriptions.push(templatesWatcher);
   }
 
+  // Watch project-level Claude assets (.claude/skills, .claude/agents) so
+  // the sidebar + builder reflect new / deleted skills + agents without a
+  // manual refresh. Global ~/.claude lives outside the workspace so it
+  // refreshes only when the panel becomes visible (good enough — users
+  // edit globals rarely).
+  const claudeWatcher = createClaudeAssetsWatcher();
+  if (claudeWatcher) {
+    const refresh = () => sidebar.refresh();
+    claudeWatcher.onDidChange(refresh, null, context.subscriptions);
+    claudeWatcher.onDidCreate(refresh, null, context.subscriptions);
+    claudeWatcher.onDidDelete(refresh, null, context.subscriptions);
+    context.subscriptions.push(claudeWatcher);
+  }
+
+  // Same for AIDLC scope's agent/skill folders — workspace.yaml is already
+  // watched, but the .md files referenced from it can change independently.
+  const aidlcAssetsWatcher = createAidlcAssetsWatcher();
+  if (aidlcAssetsWatcher) {
+    const refresh = () => sidebar.refresh();
+    aidlcAssetsWatcher.onDidChange(refresh, null, context.subscriptions);
+    aidlcAssetsWatcher.onDidCreate(refresh, null, context.subscriptions);
+    aidlcAssetsWatcher.onDidDelete(refresh, null, context.subscriptions);
+    context.subscriptions.push(aidlcAssetsWatcher);
+  }
+
   // Watch pipeline run state so the sidebar's "Pipeline runs" section
   // updates whenever a step transitions (markStepDone / approve / reject /
   // rerun all rewrite the run JSON).
@@ -167,6 +192,33 @@ function createTemplatesWatcher(): vscode.FileSystemWatcher | null {
     folder,
     path.join(WORKSPACE_DIR, 'templates', '*.json'),
   );
+  return vscode.workspace.createFileSystemWatcher(pattern);
+}
+
+/**
+ * Watcher for `<workspace>/.claude/{skills,agents}/**` — project-scoped
+ * Claude Code native assets. Triggers a refresh on add / change / delete
+ * so the catalog the user sees in the Builder is always in sync with
+ * disk. The glob is broad on purpose (recursive) — folder-form skills
+ * `<id>/SKILL.md` count as a change to the asset itself, not just to a
+ * deeply-nested file.
+ */
+function createClaudeAssetsWatcher(): vscode.FileSystemWatcher | null {
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  if (!folder) { return null; }
+  const pattern = new vscode.RelativePattern(folder, '.claude/{skills,agents}/**');
+  return vscode.workspace.createFileSystemWatcher(pattern);
+}
+
+/**
+ * Watcher for `<workspace>/.aidlc/{skills,agents}/**` — AIDLC-scoped
+ * skill / agent .md files. Workspace.yaml has its own watcher; this one
+ * picks up edits to the referenced .md files themselves.
+ */
+function createAidlcAssetsWatcher(): vscode.FileSystemWatcher | null {
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  if (!folder) { return null; }
+  const pattern = new vscode.RelativePattern(folder, '.aidlc/{skills,agents}/**');
   return vscode.workspace.createFileSystemWatcher(pattern);
 }
 

@@ -49,6 +49,18 @@ export {
 } from './loader/SkillLoader';
 export type { SkillLoaderOptions } from './loader/SkillLoader';
 
+export {
+  discoverAssets,
+  scopePaths,
+  targetPath,
+} from './loader/AssetDiscovery';
+export type {
+  AssetScope,
+  AssetKind,
+  DiscoveredAsset,
+  DiscoveryResult,
+} from './loader/AssetDiscovery';
+
 export { RunnerRegistry } from './runner/RunnerRegistry';
 export { DefaultRunner } from './runner/DefaultRunner';
 export type { DefaultRunnerOptions } from './runner/DefaultRunner';
