@@ -40,11 +40,24 @@ const SkillSchema = z
  * `slack`, `files`, `web`. Users can also write any custom string —
  * downstream tooling can match on whatever it understands.
  */
-const AgentSchema = z.object({
+const AgentSchema = z.preprocess(
+  // Backwards-compat: legacy YAML uses `skill: <id>`; new form is `skills: [<id>, ...]`.
+  // Coerce the old shape into the new one before zod validation runs.
+  (raw) => {
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      const obj = raw as Record<string, unknown>;
+      if (obj.skills === undefined && typeof obj.skill === 'string') {
+        const { skill, ...rest } = obj;
+        return { ...rest, skills: [skill] };
+      }
+    }
+    return raw;
+  },
+  z.object({
   id: z.string().min(1),
   name: z.string().min(1),
-  /** Skill id — must reference a skill in the `skills` list. */
-  skill: z.string().min(1),
+  /** Skill ids — every entry must reference a skill in the workspace `skills` list. */
+  skills: z.array(z.string().min(1)).min(1, 'Agent must reference at least one skill'),
   model: z.string().optional(),
   runner: z.enum(['default', 'custom']).default('default'),
   /** Required when runner === 'custom'. Relative path to .js or .ts file. */
@@ -70,7 +83,7 @@ const AgentSchema = z.object({
 }).refine(
   (a) => a.runner !== 'custom' || !!a.runner_path,
   { message: 'Agent with `runner: custom` must set `runner_path`' },
-);
+));
 
 // ── Slash commands ─────────────────────────────────────────────────
 

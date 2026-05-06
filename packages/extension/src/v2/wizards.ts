@@ -324,14 +324,13 @@ export async function addAgentCommand(): Promise<void> {
   const scope = await pickScope('agent');
   if (!scope) { return; }
 
-  // AIDLC-scoped agents are pipeline-runnable and need a `skill` reference;
-  // require at least one skill to exist before letting the user create one.
-  // Project / global agents are Claude Code native format — the .md file
-  // is the agent's own prompt, no separate skill needed — so this gate
-  // doesn't apply to them.
-  if (scope === 'aidlc' && doc.skills.length === 0) {
+  // Every agent — aidlc, project, or global — must reference at least one
+  // skill at creation time. AIDLC agents resolve skills at runtime; project
+  // and global agents inline the picked skills' content into the .md body
+  // as a starting prompt the user can then edit.
+  if (doc.skills.length === 0) {
     const choice = await vscode.window.showWarningMessage(
-      'No skills available — add a skill first, then assign it to an AIDLC agent.',
+      'No skills available — add a skill first, then assign it to an agent.',
       'Add Skill',
     );
     if (choice === 'Add Skill') {
@@ -358,8 +357,63 @@ export async function addAgentCommand(): Promise<void> {
   if (scope === 'aidlc') {
     await addAidlcAgent(root, doc, agentId, name.trim());
   } else {
-    await addClaudeAgent(root, scope, agentId, name.trim());
+    await addClaudeAgent(root, doc, scope, agentId, name.trim());
   }
+}
+
+/**
+ * Multi-select skill picker. Returns the picked skill ids, or undefined
+ * if the user cancels (Esc or Enter with nothing selected — both treated
+ * as "abort the wizard"). Shared by aidlc and Claude-native agent flows.
+ */
+async function pickSkills(doc: YamlDocument): Promise<string[] | undefined> {
+  const skillPicks = await vscode.window.showQuickPick(
+    doc.skills.map((s) => {
+      const id = String(s.id);
+      const src = s.builtin
+        ? 'builtin'
+        : (typeof s.path === 'string' ? s.path : '(no source)');
+      return { label: id, description: src };
+    }),
+    {
+      placeHolder: 'Pick one or more skills this agent uses (space to toggle, enter to confirm)',
+      canPickMany: true,
+      ignoreFocusOut: true,
+    },
+  );
+  if (!skillPicks || skillPicks.length === 0) {
+    if (skillPicks && skillPicks.length === 0) {
+      void vscode.window.showWarningMessage('Agent must reference at least one skill — wizard cancelled.');
+    }
+    return undefined;
+  }
+  return skillPicks.map((p) => p.label);
+}
+
+/**
+ * Read a skill's markdown content from disk for inlining into a Claude
+ * Code native agent file. Returns the raw content with any leading
+ * frontmatter block stripped (so it doesn't collide with the agent's own
+ * frontmatter). Builtin skills and missing files return a `reason` the
+ * caller can surface as a placeholder comment.
+ */
+function loadSkillContentForInline(
+  root: string,
+  doc: YamlDocument,
+  skillId: string,
+): { ok: true; content: string } | { ok: false; reason: string } {
+  const decl = doc.skills.find((s) => String(s.id) === skillId);
+  if (!decl) { return { ok: false, reason: 'no declaration in workspace.yaml' }; }
+  if (decl.builtin) { return { ok: false, reason: 'builtin skill — content not available to inline' }; }
+  const declPath = typeof decl.path === 'string' ? decl.path : '';
+  if (!declPath) { return { ok: false, reason: 'skill has no path' }; }
+  const resolved = path.isAbsolute(declPath) ? declPath : path.resolve(root, declPath);
+  if (!fs.existsSync(resolved)) { return { ok: false, reason: `file not found at ${declPath}` }; }
+  const raw = fs.readFileSync(resolved, 'utf8');
+  // Strip a leading `---\n…\n---` frontmatter block so the inlined skill
+  // doesn't introduce stray frontmatter inside the agent body.
+  const stripped = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+  return { ok: true, content: stripped.trim() };
 }
 
 /**
@@ -374,17 +428,8 @@ async function addAidlcAgent(
   agentId: string,
   name: string,
 ): Promise<void> {
-  const skillPick = await vscode.window.showQuickPick(
-    doc.skills.map((s) => {
-      const id = String(s.id);
-      const src = s.builtin
-        ? 'builtin'
-        : (typeof s.path === 'string' ? s.path : '(no source)');
-      return { label: id, description: src };
-    }),
-    { placeHolder: 'Pick the skill this agent uses', ignoreFocusOut: true },
-  );
-  if (!skillPick) { return; }
+  const skillIds = await pickSkills(doc);
+  if (!skillIds) { return; }
 
   const modelPick = await vscode.window.showQuickPick(MODEL_CHOICES, {
     placeHolder: 'Pick a Claude model',
@@ -401,7 +446,7 @@ async function addAidlcAgent(
   const agent: Record<string, unknown> = {
     id: agentId,
     name,
-    skill: skillPick.label,
+    skills: skillIds,
     model: modelPick.value,
   };
   if (Object.keys(env).length > 0) { agent.env = env; }
@@ -415,26 +460,31 @@ async function addAidlcAgent(
   if (capabilities.length > 0) { extras.push(`${capabilities.length} capability${capabilities.length === 1 ? '' : 'ies'}`); }
   const extraNote = extras.length > 0 ? ` · ${extras.join(', ')}` : '';
 
+  const skillsLabel = skillIds.join(', ');
   void vscode.window.showInformationMessage(
-    `Agent \`${agentId}\` added (aidlc · skill: ${skillPick.label}, model: ${modelPick.label})${extraNote}.`,
+    `Agent \`${agentId}\` added (aidlc · skills: ${skillsLabel}, model: ${modelPick.label})${extraNote}.`,
   );
 }
 
 /**
  * Project- or global-scope agent: a Claude Code native `.md` file. The
- * file's contents ARE the agent's prompt — no separate skill reference,
- * no workspace.yaml entry. Matches the convention of files already in
- * `.claude/agents/` / `~/.claude/agents/` so users get a unified catalog.
+ * file's contents ARE the agent's prompt. Matches the convention of files
+ * in `.claude/agents/` / `~/.claude/agents/` so users get a unified catalog.
  *
- * The wizard offers a tiny scaffold (frontmatter + heading) and opens the
- * file so the user can write the actual prompt.
+ * Skills picked here are inlined into the body as a starting prompt — the
+ * file is a snapshot, not a live reference, so the user can edit freely
+ * after creation without affecting the source skill.
  */
 async function addClaudeAgent(
   root: string,
+  doc: YamlDocument,
   scope: AssetScope,
   agentId: string,
   name: string,
 ): Promise<void> {
+  const skillIds = await pickSkills(doc);
+  if (!skillIds) { return; }
+
   const description = await vscode.window.showInputBox({
     prompt: 'One-line description (used by Claude Code to decide when to invoke this agent)',
     placeHolder: 'e.g. "Reviews TypeScript code for type-safety issues"',
@@ -453,9 +503,16 @@ async function addClaudeAgent(
     if (overwrite !== 'Overwrite') { return; }
   }
 
-  // Frontmatter follows Claude Code's agent file convention so the file
-  // is recognized whether read by Claude Code itself or by AIDLC's
-  // discovery layer.
+  const sections: string[] = [];
+  for (const id of skillIds) {
+    sections.push(`<!-- ── Skill: ${id} ── -->`);
+    const result = loadSkillContentForInline(root, doc, id);
+    sections.push(result.ok
+      ? result.content
+      : `<!-- TODO: paste content for skill "${id}" — ${result.reason} -->`);
+    sections.push('');
+  }
+
   const desc = description.trim() || `${name} agent.`;
   const content =
 `---
@@ -465,8 +522,7 @@ description: ${desc}
 
 # ${name}
 
-<!-- Write the agent's system prompt here. This file's contents are the
-     full prompt — there's no separate skill reference. -->
+${sections.join('\n').trimEnd()}
 `;
 
   fs.writeFileSync(agentPath, content, 'utf8');
@@ -474,8 +530,9 @@ description: ${desc}
   const docOpen = await vscode.workspace.openTextDocument(agentPath);
   await vscode.window.showTextDocument(docOpen, { preview: false });
 
+  const skillsLabel = skillIds.join(', ');
   void vscode.window.showInformationMessage(
-    `Agent \`${agentId}\` added (${scope}) — ${displayPath(root, agentPath)}.`,
+    `Agent \`${agentId}\` added (${scope} · skills: ${skillsLabel}) — ${displayPath(root, agentPath)}.`,
   );
 }
 

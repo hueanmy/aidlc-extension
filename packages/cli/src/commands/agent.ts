@@ -5,7 +5,7 @@ import chalk from 'chalk';
 import { validateWorkspace, WorkspaceLoader } from '@aidlc/core';
 import { requireYaml, writeYaml, existingIds } from '../yamlIO';
 import { resolveWorkspaceRoot } from '../workspaceRoot';
-import { parseContext } from '../runHelpers';
+import { parseContext, loadAgentSkills, formatSkillsList } from '../runHelpers';
 
 export function registerAgent(program: Command): void {
   const cmd = program.command('agent').description('Manage agents in workspace.yaml');
@@ -16,14 +16,14 @@ export function registerAgent(program: Command): void {
     .description('Add a new agent to workspace.yaml')
     .requiredOption('--id <id>',     'unique agent id (e.g. code-reviewer)')
     .requiredOption('--name <name>',  'display name (e.g. "Code Reviewer")')
-    .requiredOption('--skill <skill>', 'skill id this agent uses')
+    .requiredOption('--skills <ids>', 'comma-separated skill ids this agent uses (at least one)')
     .option('--model <model>',   'Claude model override', 'claude-sonnet-4-5')
     .option('--capabilities <caps>', 'comma-separated capabilities (e.g. files,github)')
     .option('--description <desc>',  'one-line description shown in the sidebar')
     .option('--runner <runner>',  'runner type: default or custom', 'default')
     .option('--runner-path <path>',  'path to custom runner .js (required when --runner custom)')
     .action((opts: {
-      id: string; name: string; skill: string; model: string;
+      id: string; name: string; skills: string; model: string;
       capabilities?: string; description?: string;
       runner: string; runnerPath?: string;
     }, actionCmd: Command) => {
@@ -35,9 +35,16 @@ export function registerAgent(program: Command): void {
         process.exit(1);
       }
 
+      const requestedSkills = opts.skills.split(',').map(s => s.trim()).filter(Boolean);
+      if (requestedSkills.length === 0) {
+        console.error(chalk.red('--skills must list at least one skill id.'));
+        process.exit(1);
+      }
+
       const skillIds = existingIds(doc.skills);
-      if (!skillIds.has(opts.skill)) {
-        console.error(chalk.red(`Skill "${opts.skill}" not found in workspace.yaml.`));
+      const missing = requestedSkills.filter(id => !skillIds.has(id));
+      if (missing.length > 0) {
+        console.error(chalk.red(`Skill${missing.length === 1 ? '' : 's'} not found in workspace.yaml: ${missing.join(', ')}`));
         if (skillIds.size > 0) {
           console.error(chalk.dim(`  Available: ${[...skillIds].join(', ')}`));
         } else {
@@ -54,7 +61,7 @@ export function registerAgent(program: Command): void {
       const agent: Record<string, unknown> = {
         id: opts.id,
         name: opts.name,
-        skill: opts.skill,
+        skills: requestedSkills,
         model: opts.model,
       };
       if (opts.capabilities) {
@@ -75,7 +82,7 @@ export function registerAgent(program: Command): void {
       }
 
       writeYaml(root, doc);
-      console.log(chalk.green('✔') + ` Added agent ${chalk.bold(opts.id)} (skill: ${opts.skill})`);
+      console.log(chalk.green('✔') + ` Added agent ${chalk.bold(opts.id)} (skills: ${requestedSkills.join(', ')})`);
     });
 
   // ── list ───────────────────────────────────────────────────────────────────
@@ -88,14 +95,17 @@ export function registerAgent(program: Command): void {
       if (opts.json) { console.log(JSON.stringify(doc.agents, null, 2)); return; }
 
       if (doc.agents.length === 0) {
-        console.log(chalk.dim('No agents defined. Run: aidlc agent add --id <id> --name <name> --skill <skill>'));
+        console.log(chalk.dim('No agents defined. Run: aidlc agent add --id <id> --name <name> --skills <ids>'));
         return;
       }
       for (const a of doc.agents) {
         const model  = a.model  ? chalk.dim(` [${a.model}]`)  : '';
         const runner = a.runner && a.runner !== 'default' ? chalk.yellow(` (${a.runner})`) : '';
         const desc   = a.description ? chalk.dim(`  ${a.description}`) : '';
-        console.log(`  ${chalk.bold(String(a.id))}  ${chalk.dim('skill:')}${a.skill}${model}${runner}${desc}`);
+        const skills = Array.isArray(a.skills)
+          ? (a.skills as unknown[]).map(String).join(',')
+          : (typeof a.skill === 'string' ? a.skill : '');
+        console.log(`  ${chalk.bold(String(a.id))}  ${chalk.dim('skills:')}${skills}${model}${runner}${desc}`);
       }
       console.log(chalk.dim(`\n${doc.agents.length} agent${doc.agents.length !== 1 ? 's' : ''}`));
     });
@@ -161,9 +171,9 @@ export function registerAgent(program: Command): void {
 
       let skillText: string;
       try {
-        skillText = ws.skills.load(agent.skill);
+        skillText = loadAgentSkills(ws.skills, agent);
       } catch (err) {
-        console.error(chalk.red(`Failed to load skill "${agent.skill}": ${err instanceof Error ? err.message : String(err)}`));
+        console.error(chalk.red(`Failed to load skills for agent "${id}": ${err instanceof Error ? err.message : String(err)}`));
         process.exit(1);
       }
 
@@ -173,7 +183,7 @@ export function registerAgent(program: Command): void {
       const userMessage = opts.message ?? (contextStr || `Run agent: ${id}`);
 
       if (opts.dryRun) {
-        console.log(chalk.bold('\n── System prompt (skill) ──────────────────────────────'));
+        console.log(chalk.bold(`\n── System prompt (skills: ${formatSkillsList(agent)}) ──`));
         console.log(chalk.dim(skillText));
         console.log(chalk.bold('\n── User message ───────────────────────────────────────'));
         console.log(userMessage || chalk.dim('(empty)'));
@@ -181,7 +191,7 @@ export function registerAgent(program: Command): void {
         return;
       }
 
-      console.log(chalk.bold(`\n▶  ${id}`) + chalk.dim(`  skill: ${agent.skill}`));
+      console.log(chalk.bold(`\n▶  ${id}`) + chalk.dim(`  skills: ${formatSkillsList(agent)}`));
       if (userMessage) { console.log(chalk.dim(`   ${userMessage}`)); }
       console.log(chalk.dim('─'.repeat(60)));
 

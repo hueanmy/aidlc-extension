@@ -21,6 +21,8 @@ import {
   requireStepIdx,
   printRunSummary,
   parseContext,
+  loadAgentSkills,
+  formatSkillsList,
 } from '../runHelpers';
 
 export function registerRun(program: Command): void {
@@ -337,12 +339,12 @@ async function execStep(
     return false;
   }
 
-  // Load skill
+  // Load skill(s) — concatenated when an agent declares multiple
   let skillText: string;
   try {
-    skillText = ws.skills.load(agent.skill);
+    skillText = loadAgentSkills(ws.skills, agent);
   } catch (err) {
-    console.error(chalk.red(`Failed to load skill "${agent.skill}": ${err instanceof Error ? err.message : String(err)}`));
+    console.error(chalk.red(`Failed to load skills for agent "${agentId}": ${err instanceof Error ? err.message : String(err)}`));
     return false;
   }
 
@@ -356,7 +358,7 @@ async function execStep(
 
   // Dry run — print prompt and exit
   if (opts.dryRun) {
-    console.log(chalk.bold('\n── System prompt (skill) ──────────────────────────────'));
+    console.log(chalk.bold(`\n── System prompt (skills: ${formatSkillsList(agent)}) ──`));
     console.log(chalk.dim(skillText));
     console.log(chalk.bold('\n── User message ───────────────────────────────────────'));
     console.log(userMessage || chalk.dim('(empty)'));
@@ -372,7 +374,7 @@ async function execStep(
 
   // Execute
   console.log(chalk.bold(`\n▶  Step ${stepIdx}: ${agentId}`) + chalk.dim(` (rev ${stepRec.revision})`));
-  console.log(chalk.dim(`   skill: ${agent.skill}  model: ${agent.model ?? 'claude-sonnet-4-5'}`));
+  console.log(chalk.dim(`   skills: ${formatSkillsList(agent)}  model: ${agent.model ?? 'claude-sonnet-4-5'}`));
   if (userMessage) { console.log(chalk.dim(`   context: ${userMessage}`)); }
   console.log(chalk.dim('─'.repeat(60)));
 

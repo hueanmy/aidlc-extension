@@ -333,7 +333,7 @@ async function showWorkspaceConfig(output: vscode.OutputChannel): Promise<void> 
 
     output.appendLine(`agents (${loaded.config.agents.length}):`);
     for (const a of loaded.config.agents) {
-      output.appendLine(`  - ${a.id}  [${a.runner}]  → skill: ${a.skill}`);
+      output.appendLine(`  - ${a.id}  [${a.runner}]  → skills: ${a.skills.join(', ')}`);
     }
     output.appendLine('');
 

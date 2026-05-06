@@ -16,7 +16,7 @@ export function registerList(program: Command): void {
         console.log(JSON.stringify({
           name: c.name,
           version: c.version,
-          agents: c.agents.map((a) => ({ id: a.id, name: a.name, skill: a.skill })),
+          agents: c.agents.map((a) => ({ id: a.id, name: a.name, skills: a.skills })),
           skills: c.skills.map((s) => ({ id: s.id, builtin: s.builtin === true })),
           pipelines: c.pipelines.map((p) => ({
             id: p.id,
@@ -30,7 +30,7 @@ export function registerList(program: Command): void {
       console.log('');
       console.log(`Agents (${c.agents.length}):`);
       for (const a of c.agents) {
-        console.log(`  - ${a.id}: ${a.name} [skill=${a.skill}]`);
+        console.log(`  - ${a.id}: ${a.name} [skills=${a.skills.join(',')}]`);
       }
       console.log('');
       console.log(`Skills (${c.skills.length}):`);

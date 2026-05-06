@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.6
+
+- feat: add Get Started walkthrough (6 steps with command buttons)
+- feat: ✕ button on sidebar project bar to close the open folder
+- README: restore demo gif, refresh content (epics/runs, Load Demo Project, walkthrough)
+- fix: AutoReviewer dynamic import (route through `new Function` so CJS transpile keeps `import()`)
+- feat: Load Demo Project command, reject-to-upstream cascade, debug fixes
+- feat: surface slash commands in sidebar runs and Epics panel step detail
+
 ## 0.8.4
 
 - fix: ship bundled extension.js so commands register on activation. v0.8.3 packaged the unbundled tsc output, which threw on `require("@aidlc/core")` at startup and left every `aidlc.*` command unregistered ("command 'aidlc.openBuilder' not found"). v0.8.4 ships the esbuild bundle as intended.

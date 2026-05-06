@@ -151,6 +151,52 @@ describe('WorkspaceSchema', () => {
     ).toThrow(WorkspaceValidationError);
   });
 
+  it('accepts an agent with multiple skills', () => {
+    const config = validateWorkspace(
+      {
+        version: '1.0',
+        name: 'Multi',
+        agents: [
+          { id: 'qa', name: 'QA', skills: ['execute-test', 'performance-test'] },
+        ],
+        skills: [
+          { id: 'execute-test', builtin: true },
+          { id: 'performance-test', builtin: true },
+        ],
+      },
+      'memory:test',
+    );
+    expect(config.agents[0].skills).toEqual(['execute-test', 'performance-test']);
+  });
+
+  it('coerces legacy `skill: <id>` into `skills: [<id>]` for backwards compatibility', () => {
+    const config = validateWorkspace(
+      {
+        version: '1.0',
+        name: 'Legacy',
+        agents: [
+          { id: 'a', name: 'A', skill: 'legacy-skill' },
+        ],
+        skills: [{ id: 'legacy-skill', builtin: true }],
+      },
+      'memory:test',
+    );
+    expect(config.agents[0].skills).toEqual(['legacy-skill']);
+  });
+
+  it('rejects an agent with an empty skills array', () => {
+    expect(() =>
+      validateWorkspace(
+        {
+          version: '1.0',
+          name: 'Bad',
+          agents: [{ id: 'a', name: 'A', skills: [] }],
+        },
+        'memory:test',
+      ),
+    ).toThrow(WorkspaceValidationError);
+  });
+
   it('rejects unknown sidebar view type', () => {
     expect(() =>
       validateWorkspace(

@@ -9,6 +9,8 @@ import {
   type RunState,
   type StepRecord,
   type PipelineConfig,
+  type AgentConfig,
+  type SkillLoader,
 } from '@aidlc/core';
 
 // ── Run loading ───────────────────────────────────────────────────────────────
@@ -149,6 +151,28 @@ export function parseContext(raw: string): Record<string, string> {
     ctx[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
   }
   return ctx;
+}
+
+// ── Skill helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Load every skill referenced by an agent and concatenate their markdown
+ * into a single system prompt. Skills are joined with a horizontal-rule
+ * separator so claude treats them as discrete sections. Throws on the
+ * first missing skill so callers can decide whether to exit (one-shot
+ * commands) or just return a falsy step result (pipeline exec).
+ */
+export function loadAgentSkills(skills: SkillLoader, agent: AgentConfig): string {
+  const parts: string[] = [];
+  for (const skillId of agent.skills) {
+    parts.push(skills.load(skillId));
+  }
+  return parts.join('\n\n---\n\n');
+}
+
+/** Comma-joined skill ids, for log lines / status messages. */
+export function formatSkillsList(agent: AgentConfig): string {
+  return agent.skills.join(', ');
 }
 
 export type { RunState, StepRecord, PipelineConfig };

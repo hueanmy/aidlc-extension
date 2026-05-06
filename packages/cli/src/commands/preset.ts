@@ -25,7 +25,7 @@ const BUILTIN_PRESETS: BuiltinPreset[] = [
       addIfMissing(doc.agents, {
         id: 'reviewer',
         name: 'Code Reviewer',
-        skill: 'code-reviewer',
+        skills: ['code-reviewer'],
         model: 'claude-sonnet-4-5',
         capabilities: ['files', 'github'],
         description: 'Reviews diffs for bugs, security issues, and perf regressions.',
@@ -48,7 +48,7 @@ const BUILTIN_PRESETS: BuiltinPreset[] = [
       addIfMissing(doc.agents, {
         id: 'release-writer',
         name: 'Release Notes Writer',
-        skill: 'release-notes',
+        skills: ['release-notes'],
         model: 'claude-sonnet-4-5',
         description: 'Summarises git commits into user-facing release notes.',
         outputs: 'Markdown release notes grouped by ✨ New / 🛠 Improved / 🐛 Fixed.',
@@ -65,16 +65,16 @@ const BUILTIN_PRESETS: BuiltinPreset[] = [
     id: 'sdlc',
     description: 'Full SDLC pipeline: Plan → Design → Test Plan → Implement → Review → Execute Test → Release → Monitor → Doc Sync',
     apply(root, doc) {
-      const phases = [
-        { id: 'planner',       name: 'Planner',          skill: 'hello-world', model: 'claude-opus-4-7',    artifact: 'PRD.md' },
-        { id: 'designer',      name: 'Tech Lead',         skill: 'hello-world', model: 'claude-opus-4-7',    artifact: 'TECH-DESIGN.md' },
-        { id: 'test-planner',  name: 'QA Engineer',       skill: 'hello-world', model: 'claude-sonnet-4-5',  artifact: 'TEST-PLAN.md' },
-        { id: 'developer',     name: 'Developer',         skill: 'hello-world', model: 'claude-sonnet-4-5',  artifact: null },
-        { id: 'auto-reviewer', name: 'Auto Reviewer',     skill: 'code-reviewer', model: 'claude-opus-4-7', artifact: 'APPROVAL.md' },
-        { id: 'qa-executor',   name: 'QA Executor',       skill: 'hello-world', model: 'claude-sonnet-4-5',  artifact: 'TEST-SCRIPT.md' },
-        { id: 'release-mgr',   name: 'Release Manager',   skill: 'release-notes', model: 'claude-sonnet-4-5', artifact: 'RELEASE-NOTES.md' },
-        { id: 'sre',           name: 'SRE',               skill: 'hello-world', model: 'claude-sonnet-4-5',  artifact: null },
-        { id: 'archivist',     name: 'Archivist',         skill: 'hello-world', model: 'claude-sonnet-4-5',  artifact: 'DOC-SYNC.md' },
+      const phases: Array<{ id: string; name: string; skills: string[]; model: string; artifact: string | null }> = [
+        { id: 'planner',       name: 'Planner',          skills: ['hello-world'],   model: 'claude-opus-4-7',    artifact: 'PRD.md' },
+        { id: 'designer',      name: 'Tech Lead',         skills: ['hello-world'],   model: 'claude-opus-4-7',    artifact: 'TECH-DESIGN.md' },
+        { id: 'test-planner',  name: 'QA Engineer',       skills: ['hello-world'],   model: 'claude-sonnet-4-5',  artifact: 'TEST-PLAN.md' },
+        { id: 'developer',     name: 'Developer',         skills: ['hello-world'],   model: 'claude-sonnet-4-5',  artifact: null },
+        { id: 'auto-reviewer', name: 'Auto Reviewer',     skills: ['code-reviewer'], model: 'claude-opus-4-7',    artifact: 'APPROVAL.md' },
+        { id: 'qa-executor',   name: 'QA Executor',       skills: ['hello-world'],   model: 'claude-sonnet-4-5',  artifact: 'TEST-SCRIPT.md' },
+        { id: 'release-mgr',   name: 'Release Manager',   skills: ['release-notes'], model: 'claude-sonnet-4-5',  artifact: 'RELEASE-NOTES.md' },
+        { id: 'sre',           name: 'SRE',               skills: ['hello-world'],   model: 'claude-sonnet-4-5',  artifact: null },
+        { id: 'archivist',     name: 'Archivist',         skills: ['hello-world'],   model: 'claude-sonnet-4-5',  artifact: 'DOC-SYNC.md' },
       ];
 
       // Ensure all .md files exist on disk BEFORE modifying doc — if a write
@@ -89,7 +89,7 @@ const BUILTIN_PRESETS: BuiltinPreset[] = [
 
       for (const p of phases) {
         const agent: Record<string, unknown> = {
-          id: p.id, name: p.name, skill: p.skill, model: p.model,
+          id: p.id, name: p.name, skills: p.skills, model: p.model,
         };
         if (p.artifact) { agent.artifact = p.artifact; }
         addIfMissing(doc.agents, agent);

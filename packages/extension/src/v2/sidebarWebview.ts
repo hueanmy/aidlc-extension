@@ -317,6 +317,9 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
         }
         return;
       }
+      case 'closeProject':
+        await vscode.commands.executeCommand('workbench.action.closeFolder');
+        return;
       case 'init':
         await vscode.commands.executeCommand('aidlc.initWorkspace');
         return;
@@ -998,6 +1001,7 @@ function renderProjectBar() {
   }
   html += '</div>';
   html += '<span class="project-change" data-action="openProject" title="Switch project">⇄</span>';
+  html += '<span class="project-change" data-action="closeProject" title="Close project">✕</span>';
   html += '</div>';
   return html;
 }

@@ -58,7 +58,7 @@ interface AssetRow {
   /** AIDLC-only metadata. Project + global agents have no skill/model concept. */
   aidlcMeta?: {
     name?: string;
-    skill?: string;
+    skills?: string[];
     model?: string;
     runner?: 'default' | 'custom';
     envCount?: number;
@@ -187,6 +187,21 @@ function claudeAssetsToRows(items: DiscoveredAsset[]): AssetRow[] {
  * .md (if any) might live elsewhere — the workspace.yaml entry is the
  * authoritative declaration for AIDLC pipeline runs.
  */
+/**
+ * Extract the skill ids declared on a raw YAML agent row. Accepts both the
+ * new `skills: [a, b]` form and the legacy `skill: 'a'` shape so the Builder
+ * can render workspaces written before multi-skill landed.
+ */
+function extractSkillIds(a: Record<string, unknown>): string[] {
+  if (Array.isArray(a.skills)) {
+    return (a.skills as unknown[]).map(String).filter(Boolean);
+  }
+  if (typeof a.skill === 'string' && a.skill.length > 0) {
+    return [a.skill];
+  }
+  return [];
+}
+
 function mergeAgentRows(doc: YamlDocument, discovered: DiscoveredAsset[]): AssetRow[] {
   const winnerById = new Map<string, AssetScope>();
   for (const a of discovered) {
@@ -228,7 +243,7 @@ function mergeAgentRows(doc: YamlDocument, discovered: DiscoveredAsset[]): Asset
       overriddenBy: winner !== 'aidlc' ? winner : undefined,
       aidlcMeta: {
         name: typeof a.name === 'string' ? a.name : id,
-        skill: typeof a.skill === 'string' ? a.skill : '',
+        skills: extractSkillIds(a),
         model: typeof a.model === 'string' ? a.model : '',
         runner: a.runner === 'custom' ? 'custom' : 'default',
         envCount: a.env && typeof a.env === 'object'
@@ -1629,7 +1644,11 @@ function renderAgentCard(a) {
     const m = a.aidlcMeta;
     html += '<div class="card-meta">' + escapeHtml(m.name || a.id) + '</div>';
     html += '<div class="card-tags">';
-    if (m.skill) { html += '<span class="tag tag-skill">' + escapeHtml(m.skill) + '</span>'; }
+    if (Array.isArray(m.skills)) {
+      for (const sid of m.skills) {
+        if (sid) { html += '<span class="tag tag-skill">' + escapeHtml(sid) + '</span>'; }
+      }
+    }
     if (m.model) { html += '<span class="tag tag-model">' + escapeHtml(m.model) + '</span>'; }
     if (m.runner === 'custom') { html += '<span class="tag tag-runner-custom">custom runner</span>'; }
     if (m.envCount && m.envCount > 0) { html += '<span class="tag tag-env">env: ' + m.envCount + '</span>'; }
