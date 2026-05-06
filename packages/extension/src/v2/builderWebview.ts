@@ -298,7 +298,7 @@ export class BuilderPanel {
       }
 
       case 'openClaude':
-        await vscode.commands.executeCommand('cfPipeline.openClaudeTerminal');
+        await vscode.commands.executeCommand('aidlc.openClaudeTerminal');
         return;
 
       case 'openSkill': {
