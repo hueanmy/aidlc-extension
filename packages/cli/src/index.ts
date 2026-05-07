@@ -11,6 +11,9 @@ import { registerPipeline } from './commands/pipeline';
 import { registerPreset } from './commands/preset';
 import { registerRun } from './commands/run';
 import { registerStep } from './commands/step';
+import { registerWatch } from './commands/watch';
+import { registerTail } from './commands/tail';
+import { registerDashboard } from './commands/dashboard';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { version } = require('../package.json') as { version: string };
 
@@ -33,6 +36,9 @@ registerPipeline(program);
 registerPreset(program);
 registerRun(program);
 registerStep(program);
+registerWatch(program);
+registerTail(program);
+registerDashboard(program);
 
 program.parseAsync(process.argv).catch((err) => {
   console.error(err instanceof Error ? err.message : String(err));
