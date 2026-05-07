@@ -660,6 +660,20 @@ body {
   padding: 8px 10px;
   margin-bottom: 8px;
 }
+.run-card.is-collapsed { padding-bottom: 6px; }
+.run-card.is-collapsed .run-step { margin-bottom: 0; }
+.run-card.is-collapsed .run-step-cmd,
+.run-card.is-collapsed .run-reject-reason,
+.run-card.is-collapsed .run-paths,
+.run-card.is-collapsed .run-actions { display: none; }
+.run-toggle {
+  background: transparent; border: none;
+  cursor: pointer;
+  padding: 0; margin: 0;
+  display: inline-flex; align-items: center;
+  color: var(--text-faint);
+}
+.run-toggle:hover .section-chevron { color: var(--accent); }
 .run-head {
   display: flex; align-items: baseline; gap: 8px;
   cursor: pointer;
@@ -927,9 +941,22 @@ const collapsed = Object.assign(
   { recentEpics: false, slashCommands: true, workflows: false },
   persisted.collapsed || {},
 );
+/**
+ * Per-run collapse overrides keyed by runId. Undefined means use the
+ * smart default (rejected → collapsed, everything else → expanded).
+ * A stored boolean is the user's explicit choice.
+ */
+const collapsedRuns = Object.assign({}, persisted.collapsedRuns || {});
 
 function persistUi() {
-  vscode.setState(Object.assign({}, vscode.getState() || {}, { collapsed }));
+  vscode.setState(Object.assign({}, vscode.getState() || {}, { collapsed, collapsedRuns }));
+}
+
+function isRunCollapsed(runId, status) {
+  if (Object.prototype.hasOwnProperty.call(collapsedRuns, runId)) {
+    return !!collapsedRuns[runId];
+  }
+  return status === 'rejected';
 }
 
 window.addEventListener('message', (e) => {
@@ -1145,15 +1172,27 @@ function renderActiveRuns() {
   const canStart = state.pipelinesCount > 0;
   if (runs.length === 0 && !canStart) { return ''; }
 
+  // Prune overrides for runs that no longer exist so storage doesn't grow
+  // unbounded as runs come and go.
+  const liveIds = new Set(runs.map((r) => r.runId));
+  let pruned = false;
+  for (const id of Object.keys(collapsedRuns)) {
+    if (!liveIds.has(id)) { delete collapsedRuns[id]; pruned = true; }
+  }
+  if (pruned) { persistUi(); }
+
   let html = '<div class="section-title-row"><span class="section-title">Pipeline runs</span></div>';
 
   for (const r of runs) {
     const stepLabel = (r.currentStepIdx + 1) + '/' + r.totalSteps + ': ' + escapeHtml(r.currentAgent);
     const revBadge = r.revision > 1 ? ' <span class="run-rev">rev ' + r.revision + '</span>' : '';
     const statusClass = 'run-status status-' + escapeHtml(r.currentStepStatus);
+    const isCol = isRunCollapsed(r.runId, r.currentStepStatus);
+    const chev = '<span class="section-chevron' + (isCol ? ' collapsed' : '') + '">▾</span>';
 
-    html += '<div class="run-card">';
+    html += '<div class="run-card' + (isCol ? ' is-collapsed' : '') + '">';
     html += '<div class="run-head" data-action="openRunState" data-run-id="' + escapeHtml(r.runId) + '" title="Open run state JSON">';
+    html += '<button class="run-toggle" data-action="toggleRun" data-run-id="' + escapeHtml(r.runId) + '" title="' + (isCol ? 'Expand' : 'Collapse') + ' run">' + chev + '</button>';
     html += '<span class="run-id">' + escapeHtml(r.runId) + '</span>';
     html += '<span class="run-pipeline">' + escapeHtml(r.pipelineId) + '</span>';
     html += '</div>';
@@ -1237,6 +1276,20 @@ document.addEventListener('click', (e) => {
     const key = target.dataset.section;
     if (key) {
       collapsed[key] = !collapsed[key];
+      persistUi();
+      render();
+    }
+    return;
+  }
+
+  if (action === 'toggleRun') {
+    const runId = target.dataset.runId;
+    if (runId) {
+      const run = (state && state.activeRuns || []).find((r) => r.runId === runId);
+      const wasCollapsed = Object.prototype.hasOwnProperty.call(collapsedRuns, runId)
+        ? !!collapsedRuns[runId]
+        : (run && run.currentStepStatus === 'rejected');
+      collapsedRuns[runId] = !wasCollapsed;
       persistUi();
       render();
     }
