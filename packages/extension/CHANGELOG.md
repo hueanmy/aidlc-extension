@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.6
+
+- feat: collapsible run cards in pipeline runs sidebar
+- feat: kebab menu with rename/duplicate/delete for agent and skill cards; drag-and-drop workflow reorder; custom tooltip for truncated names
+- Fix: Readme & Dashboard view
+- M4 + M5: Fix and add command list epic
+- M5: Doctor, tail, dashboard
+
 ## 0.8.5
 
 - feat: add Get Started walkthrough (6 steps with command buttons)
