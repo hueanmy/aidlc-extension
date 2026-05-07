@@ -23,28 +23,32 @@
   "engines": {
     "node": ">=18"
   },
-  "main": "./dist/index.js",
+  "main": "./dist/bundle.js",
   "bin": {
-    "aidlc": "./dist/index.js"
+    "aidlc": "./dist/bundle.js"
   },
   "files": [
-    "dist",
+    "dist/bundle.js",
     "README.md"
   ],
   "scripts": {
     "compile": "tsc -p ./",
     "build": "tsc -p ./",
     "clean": "rm -rf dist",
-    "prepublishOnly": "pnpm build"
+    "bundle": "esbuild src/index.ts --bundle --platform=node --target=node18 --outfile=dist/bundle.js --external:fsevents",
+    "prepublishOnly": "pnpm bundle"
   },
   "dependencies": {
     "@aidlc/core": "workspace:*",
     "chalk": "^4.1.2",
+    "chokidar": "^3.6.0",
+    "cli-table3": "^0.6.5",
     "commander": "^11.1.0",
     "js-yaml": "^4.1.1"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^20.0.0"
+    "@types/node": "^20.0.0",
+    "esbuild": "^0.21.0"
   }
 }
