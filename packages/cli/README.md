@@ -145,6 +145,23 @@ aidlc preset save <name>                  # snapshot current workspace to .aidlc
 Built-in presets: `code-review`, `release-notes`, `sdlc` (full 9-phase SDLC
 pipeline ported from the legacy AIDLC).
 
+### Epics
+
+Mirrors the extension's "Epic Pipeline" panel — reads each epic's `state.json`
+under whatever `state.root` your `workspace.yaml` declares (default
+`docs/epics/`).
+
+```
+aidlc epic list [--status pending|in_progress|done|failed] [--json]
+aidlc epic status <id> [--json]                 # phase-by-phase view
+aidlc epic show <id>                            # alias for status
+```
+
+In v2 an **epic** is a domain entity persisted on disk (one folder per epic
+with a `state.json`); it's distinct from a pipeline **run**. An epic can exist
+without a run, and a run can exist without an epic — `epic` reads the former,
+`run` / `status` read the latter.
+
 ---
 
 ### `run` — pipeline lifecycle
@@ -202,6 +219,50 @@ aidlc status <runId>                      # detailed view of one run
 aidlc status [runId] --json               # raw RunState JSON
 ```
 
+### `watch` — live re-render of run state
+
+Uses `chokidar` on `.aidlc/runs/*.json` with a 150ms debounce. Clears the
+visible terminal area on every redraw (preserves scrollback so you can scroll
+up to past frames).
+
+```
+aidlc watch                               # multi-run table, all runs
+aidlc watch <runId>                       # single-run focus mode (step pipeline)
+```
+
+### `tail` — stream state transitions
+
+Same chokidar watch as `watch`, but emits one timestamped line per detected
+change instead of redrawing a table. Useful for CI logs or piping.
+
+```
+aidlc tail                                # all runs
+aidlc tail <runId>                        # one run
+```
+
+Output shape:
+
+```
+[16:42:01] ABC-123 step 0 awaiting_work → approved
+[16:42:01] ABC-123 pointer 0 → 1
+[16:42:01] ABC-123 step 1 pending → awaiting_work
+```
+
+### `dashboard` — browser UI with action buttons
+
+Single-process HTTP server, no build step. Same data as `watch`; adds
+click-to-approve / reject / rerun buttons. Updates push via SSE so the page
+refreshes within ~100ms when files change.
+
+```
+aidlc dashboard                           # http://127.0.0.1:8787
+aidlc dashboard --port 3000
+aidlc dashboard --host 0.0.0.0            # expose on LAN (use with care)
+```
+
+Endpoints (handy for scripts): `GET /api/runs`, `GET /api/runs/:id`,
+`POST /api/action`, `GET /events` (SSE).
+
 ## Recipes
 
 ### Drive a complete SDLC pipeline end-to-end
@@ -238,6 +299,29 @@ aidlc agent run reviewer --message "Review the diff in /tmp/patch.diff"
 ```sh
 aidlc list --json | jq '.pipelines[].id'
 aidlc status <runId> --json | jq '.steps[] | select(.status=="rejected")'
+aidlc epic list --json | jq '.[] | select(.status=="in_progress") | .id'
+```
+
+### Live monitor while a long pipeline runs
+
+```sh
+# Terminal 1 — kick off the run, then walk away
+aidlc run start sdlc-pipeline --id ABC-123 --context epic=ABC-123
+aidlc run exec ABC-123 --auto-approve
+
+# Terminal 2 — live table
+aidlc watch
+
+# Terminal 3 — transition log for grep / save
+aidlc tail | tee run-log.txt
+```
+
+### Open the browser dashboard
+
+```sh
+aidlc dashboard
+# then open http://127.0.0.1:8787
+# click any run → approve / reject / rerun directly from the page
 ```
 
 ## Filesystem layout

@@ -44,7 +44,15 @@ aidlc run exec <runId>                  # spawns claude, streams output, advance
 aidlc run exec <runId> --auto-approve
 ```
 
-### 4. Watch from VS Code
+### 4. Watch what's happening
+
+```sh
+aidlc watch                             # live-rendered table of all runs
+aidlc tail                              # one-line stream of state transitions
+aidlc dashboard                         # browser UI on http://127.0.0.1:8787
+```
+
+### 5. Watch from VS Code
 
 Install the extension. Edits made by either side update within ~200ms because
 both consume the same `.aidlc/workspace.yaml` and `.aidlc/runs/*.json`.
@@ -60,8 +68,7 @@ pnpm package:extension                  # build .vsix for the extension
 
 ## CLI reference (summary)
 
-The `aidlc` CLI ships **30+ commands** across nine groups. Highlights below;
-the full reference lives in [packages/cli/README.md](packages/cli/README.md).
+The full reference lives in [packages/cli/README.md](packages/cli/README.md).
 
 ### Workspace bootstrap
 ```
@@ -77,6 +84,12 @@ aidlc skill    add | list | show | remove           # 5 built-in templates
 aidlc agent    add | list | show | remove
 aidlc pipeline add | list | show | remove
 aidlc preset   apply | save | list                  # built-ins: code-review, release-notes, sdlc
+```
+
+### Epic inspection (mirrors the extension's epics panel)
+```
+aidlc epic list [--status pending|in_progress|done|failed] [--json]
+aidlc epic status <id>        # phase-by-phase view of one epic
 ```
 
 ### Run lifecycle (sequential, mirrors the upstream PipelineRunner)
@@ -99,6 +112,13 @@ aidlc step skip   <runId> <step>
 aidlc step reset  <runId> <step>          # → pending
 aidlc step set    <runId> <step> <status> # raw any StepStatus
 aidlc step jump   <runId> <step>          # auto-approve earlier pending steps
+```
+
+### Live observation
+```
+aidlc watch [runId]           # cli-table3 view, redraws on any state change
+aidlc tail  [runId]           # streams transitions as one-line events
+aidlc dashboard [--port …] [--host …]   # browser UI with action buttons
 ```
 
 ### Agent execution (one-shot, no run state)
@@ -143,18 +163,6 @@ aidlc agent run <agentId> [--message …] [--context epic=ABC-123] [--dry-run]
 
 Both surfaces read and write the same files; the OS handles atomic renames so
 neither side ever sees a half-written run state.
-
-## Status
-
-- ✅ **Phase 0** — monorepo scaffold
-- ✅ **Phase 1** — core engine: Zod schema, loaders, `DefaultRunner`, `RunState` state machine, custom runner support
-- ✅ **Phase 2** — extension shell rewrite (Builder webview, sidebar, command wizards)
-- 🚧 **Phase 3** — Builder UI polish (drag-drop reorder, inline skill editor, canvas view)
-- 🚧 **Phase 4** — AIDLC Terminal + slash command auto-routing
-- ✅ **CLI M1–M4** — `init` / `doctor` / dynamic config (agent / skill / pipeline / preset) / run lifecycle / step control / **`run exec` (Claude auto-execution)** / `agent run`
-
-See [PLAN.md](PLAN.md) for the CLI roadmap and remaining milestones (M5: live
-watch / tail / dashboard, M6: Claude-specific polish).
 
 ## Marketplace
 
