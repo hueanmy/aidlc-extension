@@ -566,6 +566,22 @@ export class BuilderPanel {
         await this.deleteItem('skills', String(msg.id ?? ''));
         return;
 
+      case 'renameAgent':
+        await this.renameItem('agents', String(msg.id ?? ''));
+        return;
+
+      case 'renameSkill':
+        await this.renameItem('skills', String(msg.id ?? ''));
+        return;
+
+      case 'duplicateAgent':
+        await this.duplicateItem('agents', String(msg.id ?? ''));
+        return;
+
+      case 'duplicateSkill':
+        await this.duplicateItem('skills', String(msg.id ?? ''));
+        return;
+
       case 'deletePipeline':
         await this.deleteItem('pipelines', String(msg.id ?? ''));
         return;
@@ -739,7 +755,7 @@ export class BuilderPanel {
     if (!id) { return; }
     const confirm = await vscode.window.showWarningMessage(
       `Delete ${field.replace(/s$/, '')} \`${id}\`?`,
-      { modal: false },
+      { modal: true },
       'Delete', 'Cancel',
     );
     if (confirm !== 'Delete') { return; }
@@ -749,6 +765,41 @@ export class BuilderPanel {
       const idx = arr.findIndex((x) => x.id === id);
       if (idx < 0) { return false; }
       arr.splice(idx, 1);
+    });
+  }
+
+  private async renameItem(field: 'agents' | 'skills', id: string): Promise<void> {
+    if (!id) { return; }
+    const newId = await vscode.window.showInputBox({
+      prompt: `New ID for ${field.replace(/s$/, '')} \`${id}\``,
+      value: id,
+      validateInput: (v) => v && v.trim() ? null : 'ID cannot be empty',
+    });
+    if (!newId || newId.trim() === id) { return; }
+    this.mutateYaml((doc) => {
+      const arr = doc[field];
+      if (!Array.isArray(arr)) { return false; }
+      const item = arr.find((x) => x.id === id);
+      if (!item) { return false; }
+      if (arr.some((x) => x.id === newId.trim())) { return false; }
+      item.id = newId.trim();
+    });
+  }
+
+  private async duplicateItem(field: 'agents' | 'skills', id: string): Promise<void> {
+    if (!id) { return; }
+    this.mutateYaml((doc) => {
+      const arr = doc[field];
+      if (!Array.isArray(arr)) { return false; }
+      const item = arr.find((x) => x.id === id);
+      if (!item) { return false; }
+      const newId = id + '-copy';
+      const suffix = arr.filter((x) => String(x.id).startsWith(newId)).length;
+      const finalId = suffix === 0 ? newId : newId + '-' + suffix;
+      const clone = JSON.parse(JSON.stringify(item));
+      clone.id = finalId;
+      const idx = arr.findIndex((x) => x.id === id);
+      arr.splice(idx + 1, 0, clone);
     });
   }
 
@@ -961,7 +1012,7 @@ body {
   position: relative;
 }
 .card:hover { border-color: var(--glass-border); background: var(--glass-strong); }
-.card-head { display: flex; align-items: baseline; gap: 6px; }
+.card-head { display: flex; align-items: center; gap: 6px; }
 .card-id {
   font-size: 11.5px; font-weight: 700;
   color: var(--accent); letter-spacing: 0.3px;
@@ -1153,11 +1204,34 @@ body {
 }
 .epic-meta strong { color: var(--text-soft); font-weight: 600; }
 
-.card-actions {
-  position: absolute; top: 8px; right: 8px;
-  display: none; gap: 4px;
+.card-actions { display: none; }
+.card-menu { position: relative; }
+.card-menu-trigger {
+  width: 20px; height: 14px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 4px; opacity: 0.55; flex-shrink: 0;
 }
-.card:hover .card-actions { display: flex; }
+.card-menu-trigger:hover { opacity: 1; background: rgba(255,255,255,0.08); }
+.card-menu-dropdown {
+  position: absolute; top: 100%; right: 0; z-index: 100;
+  background: var(--vscode-menu-background, #1e1e2e);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 130px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+.card-menu-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 7px 10px;
+  background: none; border: none; border-radius: 5px;
+  color: var(--text-normal, #cdd6f4); font-size: 12px;
+  cursor: pointer; text-align: left;
+}
+.card-menu-item:hover { background: rgba(255,255,255,0.07); }
+.card-menu-item-danger { color: #f38ba8; }
+.card-menu-item-danger:hover { background: rgba(243,139,168,0.12); }
+.card-menu-icon { font-size: 13px; opacity: 0.7; }
 
 .empty {
   padding: 22px 18px;
@@ -1243,6 +1317,13 @@ body {
 .flow-node-disabled {
   opacity: 0.55;
   border-style: dashed;
+}
+.flow-node[draggable] { cursor: grab; }
+.flow-node.drag-dragging { opacity: 0.35; cursor: grabbing; }
+.flow-node.drag-over {
+  border-color: rgba(94,234,212,0.85);
+  box-shadow: 0 0 0 2px rgba(94,234,212,0.35);
+  transform: translateY(-2px);
 }
 .flow-node-badges {
   display: flex; flex-wrap: wrap; gap: 4px;
@@ -1628,16 +1709,18 @@ function renderAgentCard(a) {
     : (a.filePath ? ' title="Click to open .md file"' : '');
 
   let html = '<div class="card' + (a.overridden ? ' card-overridden' : '') + '"' + clickAction + titleAttr + '>';
-  html += '<div class="card-actions">';
-  if (isAidlc) {
-    // Only AIDLC agents are deletable from this UI today — they live in
-    // workspace.yaml. Project + global agent files require explicit file
-    // delete (do that from the explorer for now to avoid surprises).
-    html += '<button class="btn btn-icon btn-ghost" data-action="deleteAgent" data-id="' + escapeHtml(a.id) + '" title="Delete from workspace.yaml">×</button>';
-  }
-  html += '</div>';
   html += '<div class="card-head"><span class="card-id">' + escapeHtml(a.id) + '</span>';
   html += renderScopeBadge(a);
+  if (isAidlc) {
+    html += '<div class="card-menu">';
+    html += '<button class="btn btn-icon btn-ghost card-menu-trigger" data-action="toggleCardMenu" title="More actions"><svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style="pointer-events:none"><circle cx="2" cy="6" r="1.2"/><circle cx="6" cy="6" r="1.2"/><circle cx="10" cy="6" r="1.2"/></svg></button>';
+    html += '<div class="card-menu-dropdown" data-menu-id="' + escapeHtml(a.id) + '" data-menu-type="agent" style="display:none">';
+    html += '<button class="card-menu-item" data-action="renameAgent" data-id="' + escapeHtml(a.id) + '"><span class="card-menu-icon">✎</span> Rename</button>';
+    html += '<button class="card-menu-item" data-action="duplicateAgent" data-id="' + escapeHtml(a.id) + '"><span class="card-menu-icon">⧉</span> Duplicate</button>';
+    html += '<button class="card-menu-item card-menu-item-danger" data-action="deleteAgent" data-id="' + escapeHtml(a.id) + '"><span class="card-menu-icon">🗑</span> Delete</button>';
+    html += '</div>';
+    html += '</div>';
+  }
   html += '</div>';
 
   if (isAidlc && a.aidlcMeta) {
@@ -1674,13 +1757,18 @@ function renderSkillCard(s) {
   const clickable = !!(s.filePath && !s.fileMissing);
   const action = clickable ? ' data-action="openSkill" data-path="' + escapeHtml(s.filePath) + '"' : '';
   let html = '<div class="card' + (s.overridden ? ' card-overridden' : '') + '"' + action + ' title="' + (clickable ? 'Click to open .md file' : '') + '">';
-  html += '<div class="card-actions">';
-  if (s.scope === 'aidlc') {
-    html += '<button class="btn btn-icon btn-ghost" data-action="deleteSkill" data-id="' + escapeHtml(s.id) + '" title="Delete from workspace.yaml (file kept on disk)">×</button>';
-  }
-  html += '</div>';
   html += '<div class="card-head"><span class="card-id">' + escapeHtml(s.id) + '</span>';
   html += renderScopeBadge(s);
+  if (s.scope === 'aidlc') {
+    html += '<div class="card-menu">';
+    html += '<button class="btn btn-icon btn-ghost card-menu-trigger" data-action="toggleCardMenu" title="More actions"><svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style="pointer-events:none"><circle cx="2" cy="6" r="1.2"/><circle cx="6" cy="6" r="1.2"/><circle cx="10" cy="6" r="1.2"/></svg></button>';
+    html += '<div class="card-menu-dropdown" data-menu-id="' + escapeHtml(s.id) + '" data-menu-type="skill" style="display:none">';
+    html += '<button class="card-menu-item" data-action="renameSkill" data-id="' + escapeHtml(s.id) + '"><span class="card-menu-icon">✎</span> Rename</button>';
+    html += '<button class="card-menu-item" data-action="duplicateSkill" data-id="' + escapeHtml(s.id) + '"><span class="card-menu-icon">⧉</span> Duplicate</button>';
+    html += '<button class="card-menu-item card-menu-item-danger" data-action="deleteSkill" data-id="' + escapeHtml(s.id) + '"><span class="card-menu-icon">🗑</span> Delete</button>';
+    html += '</div>';
+    html += '</div>';
+  }
   html += '</div>';
   html += '<div class="card-meta">' + escapeHtml(s.filePath || '(builtin)') + '</div>';
   html += '<div class="card-tags">';
@@ -1749,7 +1837,7 @@ function renderWorkflow(p) {
 
 function renderFlowNode(pipelineId, step, idx, total) {
   const disabledCls = step.enabled ? '' : ' flow-node-disabled';
-  let html = '<div class="flow-node' + disabledCls + '">';
+  let html = '<div class="flow-node' + disabledCls + '" draggable="true" data-pipeline-id="' + escapeHtml(pipelineId) + '" data-idx="' + idx + '">';
 
   // Top row: number + agent id + config/reorder/delete actions.
   html += '<div class="flow-node-row">';
@@ -1922,8 +2010,23 @@ document.addEventListener('click', (e) => {
     case 'openSkill':               post('openSkill', { path: target.dataset.path }); return;
     case 'openEpicState':           post('openEpicState', { path: target.dataset.path }); return;
     case 'openEpicsList':           post('openEpicsList'); return;
-    case 'deleteAgent':             post('deleteAgent', { id: target.dataset.id }); return;
-    case 'deleteSkill':             post('deleteSkill', { id: target.dataset.id }); return;
+    case 'toggleCardMenu': {
+      e.stopPropagation();
+      const menu = target.closest('.card-menu');
+      const dropdown = menu && menu.querySelector('.card-menu-dropdown');
+      if (!dropdown) { return; }
+      const isOpen = dropdown.style.display !== 'none';
+      // Close all open menus first
+      document.querySelectorAll('.card-menu-dropdown').forEach(d => { d.style.display = 'none'; });
+      if (!isOpen) { dropdown.style.display = 'block'; }
+      return;
+    }
+    case 'renameAgent':             e.stopPropagation(); post('renameAgent', { id: target.dataset.id }); return;
+    case 'renameSkill':             e.stopPropagation(); post('renameSkill', { id: target.dataset.id }); return;
+    case 'duplicateAgent':          e.stopPropagation(); post('duplicateAgent', { id: target.dataset.id }); return;
+    case 'duplicateSkill':          e.stopPropagation(); post('duplicateSkill', { id: target.dataset.id }); return;
+    case 'deleteAgent':             e.stopPropagation(); post('deleteAgent', { id: target.dataset.id }); return;
+    case 'deleteSkill':             e.stopPropagation(); post('deleteSkill', { id: target.dataset.id }); return;
     case 'deletePipeline':          post('deletePipeline', { id: target.dataset.id }); return;
     case 'togglePipelineFailure':   post('togglePipelineFailure', { pipelineId: target.dataset.pipelineId }); return;
     case 'runPipeline':             post('runPipeline', { pipelineId: target.dataset.pipelineId }); return;
@@ -1951,6 +2054,99 @@ document.addEventListener('click', (e) => {
       return;
   }
 });
+
+document.addEventListener('click', function(ev) {
+  if (!ev.target.closest('.card-menu')) {
+    document.querySelectorAll('.card-menu-dropdown').forEach(d => { d.style.display = 'none'; });
+  }
+});
+
+// ── Drag & drop reorder for flow nodes ──────────────────────────────
+(function() {
+  let dragSrc = null; // { pipelineId, idx }
+
+  document.addEventListener('dragstart', function(e) {
+    const node = e.target.closest('.flow-node[draggable]');
+    if (!node) { return; }
+    dragSrc = { pipelineId: node.dataset.pipelineId, idx: Number(node.dataset.idx) };
+    node.classList.add('drag-dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+
+  document.addEventListener('dragend', function(e) {
+    const node = e.target.closest('.flow-node[draggable]');
+    if (node) { node.classList.remove('drag-dragging'); }
+    document.querySelectorAll('.flow-node.drag-over').forEach(function(n) { n.classList.remove('drag-over'); });
+    dragSrc = null;
+  });
+
+  document.addEventListener('dragover', function(e) {
+    const node = e.target.closest('.flow-node[draggable]');
+    if (!node || !dragSrc) { return; }
+    if (node.dataset.pipelineId !== dragSrc.pipelineId) { return; }
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    document.querySelectorAll('.flow-node.drag-over').forEach(function(n) { n.classList.remove('drag-over'); });
+    if (Number(node.dataset.idx) !== dragSrc.idx) { node.classList.add('drag-over'); }
+  });
+
+  document.addEventListener('dragleave', function(e) {
+    const node = e.target.closest('.flow-node[draggable]');
+    if (node) { node.classList.remove('drag-over'); }
+  });
+
+  document.addEventListener('drop', function(e) {
+    const node = e.target.closest('.flow-node[draggable]');
+    if (!node || !dragSrc) { return; }
+    node.classList.remove('drag-over');
+    const toIdx = Number(node.dataset.idx);
+    if (node.dataset.pipelineId !== dragSrc.pipelineId || toIdx === dragSrc.idx) { return; }
+    e.preventDefault();
+    post('reorderStep', { pipelineId: dragSrc.pipelineId, fromIdx: dragSrc.idx, toIdx: toIdx });
+  });
+})();
+
+// ── Custom tooltip (VS Code blocks native title tooltips) ────────────
+(function() {
+  const tip = document.createElement('div');
+  tip.id = 'custom-tip';
+  tip.style.cssText = 'position:fixed;z-index:9999;pointer-events:none;display:none;max-width:320px;padding:5px 9px;background:#000;border:1px solid rgba(255,255,255,0.15);border-radius:6px;font-size:11px;color:#fff;word-break:break-all;line-height:1.5;box-shadow:0 4px 16px rgba(0,0,0,0.7);';
+  document.body.appendChild(tip);
+
+  const SELECTORS = '.card-id,.card-meta,.workflow-id,.flow-id';
+  let hideTimer;
+
+  document.addEventListener('mouseover', function(e) {
+    const el = e.target.closest(SELECTORS);
+    if (!el) { return; }
+    const text = el.getAttribute('title') || el.textContent || '';
+    if (!text.trim()) { return; }
+    clearTimeout(hideTimer);
+    tip.textContent = text;
+    tip.style.display = 'block';
+    positionTip(e);
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (tip.style.display === 'none') { return; }
+    positionTip(e);
+  });
+
+  document.addEventListener('mouseout', function(e) {
+    const el = e.target.closest(SELECTORS);
+    if (!el) { return; }
+    hideTimer = setTimeout(function() { tip.style.display = 'none'; }, 80);
+  });
+
+  function positionTip(e) {
+    const x = e.clientX + 14;
+    const y = e.clientY + 18;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    tip.style.left = (x + tip.offsetWidth > vw ? vw - tip.offsetWidth - 8 : x) + 'px';
+    tip.style.top  = (y + tip.offsetHeight > vh ? e.clientY - tip.offsetHeight - 8 : y) + 'px';
+  }
+})();
 
 post('ready');
 `;
