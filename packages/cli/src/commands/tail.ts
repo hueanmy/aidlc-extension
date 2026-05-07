@@ -51,9 +51,9 @@ export function registerTail(program: Command): void {
         awaitWriteFinish: { stabilityThreshold: 80, pollInterval: 30 },
       });
 
-      watcher.on('add',    (filePath) => onChange(root, filePath, seen, runId, 'add'));
-      watcher.on('change', (filePath) => onChange(root, filePath, seen, runId, 'change'));
-      watcher.on('unlink', (filePath) => onUnlink(filePath, seen));
+      watcher.on('add',    (filePath: string) => onChange(root, filePath, seen, runId, 'add'));
+      watcher.on('change', (filePath: string) => onChange(root, filePath, seen, runId, 'change'));
+      watcher.on('unlink', (filePath: string) => onUnlink(filePath, seen));
 
       process.on('SIGINT', () => {
         void watcher.close().then(() => process.exit(0));
