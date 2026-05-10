@@ -38,6 +38,7 @@ import { loadSdlcPreset } from './builtinPresets';
 import { startEpicCommand } from './epicWizard';
 import { insertDemoEpicCommand } from './demoEpic';
 import { loadDemoProjectCommand } from './demoProject';
+import { migrateEpicStateFiles } from './epicsList';
 import {
   startPipelineRunCommand,
   markStepDoneCommand,
@@ -161,6 +162,40 @@ export function registerV2WorkspaceCommands(
   const deletePresetCmd = vscode.commands.registerCommand(
     'aidlc.deletePreset',
     () => deletePresetCommand(presetStore),
+  );
+
+  const migrateEpicsCmd = vscode.commands.registerCommand(
+    'aidlc.migrateEpics',
+    async () => {
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!root) {
+        void vscode.window.showWarningMessage('AIDLC: open a project folder first.');
+        return;
+      }
+      const report = migrateEpicStateFiles(root);
+      const parts: string[] = [];
+      if (report.migrated.length > 0) {
+        parts.push(`migrated ${report.migrated.length}`);
+      }
+      if (report.skipped.length > 0) {
+        parts.push(`skipped ${report.skipped.length} (no run state)`);
+      }
+      if (report.errors.length > 0) {
+        parts.push(`${report.errors.length} error(s)`);
+      }
+      if (parts.length === 0) {
+        void vscode.window.showInformationMessage('AIDLC: no epics to migrate.');
+        return;
+      }
+      const summary = `AIDLC migration — ${parts.join(', ')}.`;
+      if (report.errors.length > 0) {
+        void vscode.window.showWarningMessage(
+          `${summary} First error: ${report.errors[0]?.epicId} — ${report.errors[0]?.reason}`,
+        );
+      } else {
+        void vscode.window.showInformationMessage(summary);
+      }
+    },
   );
 
   const startEpicCmd = vscode.commands.registerCommand(
@@ -384,6 +419,7 @@ export function registerV2WorkspaceCommands(
       savePresetInlineCmd,
       applyPresetCmd,
       deletePresetCmd,
+      migrateEpicsCmd,
       startEpicCmd,
       openEpicsListCmd,
       insertDemoEpicCmd,

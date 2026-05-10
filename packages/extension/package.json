@@ -108,6 +108,12 @@
         "category": "AIDLC"
       },
       {
+        "command": "aidlc.migrateEpics",
+        "title": "Migrate Epic State Files",
+        "icon": "$(sync)",
+        "category": "AIDLC"
+      },
+      {
         "command": "aidlc.startEpic",
         "title": "Start Epic",
         "icon": "$(rocket)",

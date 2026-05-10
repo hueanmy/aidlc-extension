@@ -357,3 +357,53 @@ function mapStepStatus(status: StepStatus): EpicStatus {
       return 'pending';
   }
 }
+
+export interface MigrationReport {
+  migrated: string[];
+  skipped: string[];
+  errors: Array<{ epicId: string; reason: string }>;
+}
+
+/**
+ * Walk every epic dir under <state.root> and, for each one that has a
+ * matching `.aidlc/runs/<id>.json`, rewrite its `state.json` via
+ * `mirrorRunStateToEpic`. Brings legacy state files (written before the
+ * `revision` / `runStatus` / `history` / `feedback` fields existed) up to
+ * the current schema in one pass.
+ *
+ * Idempotent — running twice is a no-op on already-migrated files.
+ * Epics without a matching runState (e.g. legacy "no run state" demos)
+ * are left alone since there's no live data to copy from.
+ */
+export function migrateEpicStateFiles(workspaceRoot: string): MigrationReport {
+  const report: MigrationReport = { migrated: [], skipped: [], errors: [] };
+  const doc = readYaml(workspaceRoot);
+  const dir = epicsRoot(workspaceRoot, doc);
+  if (!fs.existsSync(dir)) { return report; }
+
+  const folders = fs
+    .readdirSync(dir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name);
+
+  for (const epicId of folders) {
+    const stateFile = path.join(dir, epicId, 'state.json');
+    if (!fs.existsSync(stateFile)) { continue; }
+    try {
+      const runState = RunStateStore.load(workspaceRoot, epicId);
+      if (!runState) {
+        report.skipped.push(epicId);
+        continue;
+      }
+      mirrorRunStateToEpic(workspaceRoot, runState, doc);
+      report.migrated.push(epicId);
+    } catch (err) {
+      report.errors.push({
+        epicId,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return report;
+}
