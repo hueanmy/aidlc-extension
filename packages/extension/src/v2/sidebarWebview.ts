@@ -13,8 +13,11 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as os from 'os';
 
 import * as fs from 'fs';
+
+const DEMO_DIR_NAME = 'aidlc-demo-project';
 
 import { readYaml } from './yamlIO';
 import {
@@ -107,9 +110,14 @@ interface SidebarState {
   pipelines: PipelineRef[];
   /** All existing run ids (any status). */
   runIds: string[];
+  /** True when ~/aidlc-demo-project already exists — surfaced so the
+   * sidebar can pop an inline "re-seed / open-as-is / cancel" modal
+   * instead of letting the host show a VS Code notification. */
+  demoProjectExists: boolean;
 }
 
 function buildState(presetStore: PresetStore | null): SidebarState {
+  const demoProjectExists = fs.existsSync(path.join(os.homedir(), DEMO_DIR_NAME));
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (!folder) {
     return {
@@ -122,6 +130,7 @@ function buildState(presetStore: PresetStore | null): SidebarState {
       builtinTemplates: [], projectTemplates: [],
       activeRuns: [],
       pipelines: [], runIds: [],
+      demoProjectExists,
     };
   }
 
@@ -170,6 +179,7 @@ function buildState(presetStore: PresetStore | null): SidebarState {
       activeRuns,
       pipelines: [],
       runIds,
+      demoProjectExists,
     };
   }
 
@@ -206,6 +216,7 @@ function buildState(presetStore: PresetStore | null): SidebarState {
     activeRuns,
     pipelines,
     runIds,
+    demoProjectExists,
   };
 }
 
@@ -378,9 +389,15 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       case 'init':
         await vscode.commands.executeCommand('aidlc.initWorkspace');
         return;
-      case 'loadDemoProject':
-        await vscode.commands.executeCommand('aidlc.loadDemoProject');
+      case 'loadDemoProject': {
+        // mode is set by the React modal so the host skips the VS Code
+        // notification — undefined falls back to the legacy prompt.
+        const mode = msg.mode === 'reseed' || msg.mode === 'open-as-is'
+          ? msg.mode
+          : undefined;
+        await vscode.commands.executeCommand('aidlc.loadDemoProject', mode);
         return;
+      }
       case 'startEpic':
         await vscode.commands.executeCommand('aidlc.startEpic');
         return;

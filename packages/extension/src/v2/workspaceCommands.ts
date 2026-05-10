@@ -180,7 +180,10 @@ export function registerV2WorkspaceCommands(
 
   const loadDemoProjectCmd = vscode.commands.registerCommand(
     'aidlc.loadDemoProject',
-    () => loadDemoProjectCommand(),
+    (mode?: unknown) =>
+      loadDemoProjectCommand(
+        mode === 'reseed' || mode === 'open-as-is' ? mode : undefined,
+      ),
   );
 
   // Reuses an existing terminal if one is open so the user doesn't end up

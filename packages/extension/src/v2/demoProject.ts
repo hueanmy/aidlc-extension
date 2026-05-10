@@ -32,22 +32,41 @@ const STEPS = [
 ];
 const PIPELINE_ID = 'demo-pipeline';
 
-export async function loadDemoProjectCommand(): Promise<void> {
+/**
+ * `mode` lets a webview caller skip the VS Code warning notification when
+ * it has already collected the user's choice via an inline modal:
+ *
+ *   undefined  — default; show the notification when the demo dir exists.
+ *   'reseed'   — wipe and re-seed the demo dir, then open.
+ *   'open-as-is' — leave the existing demo dir alone, just open it.
+ */
+export async function loadDemoProjectCommand(
+  mode?: 'reseed' | 'open-as-is',
+): Promise<void> {
   const demoRoot = path.join(os.homedir(), DEMO_DIR_NAME);
+  const exists = fs.existsSync(demoRoot);
 
-  if (fs.existsSync(demoRoot)) {
-    const choice = await vscode.window.showWarningMessage(
-      `Demo project already exists at ~/${DEMO_DIR_NAME}. Re-seed (overwrites .aidlc/ + docs/epics/) or just open it as-is?`,
-      { modal: false },
-      'Re-seed and open',
-      'Open as-is',
-      'Cancel',
-    );
-    if (choice === 'Cancel' || !choice) { return; }
-    if (choice === 'Re-seed and open') {
+  if (exists) {
+    let action: 'reseed' | 'open-as-is';
+    if (mode) {
+      action = mode;
+    } else {
+      const choice = await vscode.window.showWarningMessage(
+        `Demo project already exists at ~/${DEMO_DIR_NAME}. Re-seed (overwrites .aidlc/ + docs/epics/) or just open it as-is?`,
+        { modal: false },
+        'Re-seed and open',
+        'Open as-is',
+        'Cancel',
+      );
+      if (choice === 'Cancel' || !choice) { return; }
+      action = choice === 'Re-seed and open' ? 'reseed' : 'open-as-is';
+    }
+    if (action === 'reseed') {
       try { wipeDemoData(demoRoot); }
       catch (err) {
-        void vscode.window.showErrorMessage(`Failed to clear demo data: ${err instanceof Error ? err.message : String(err)}`);
+        void vscode.window.showErrorMessage(
+          `Failed to clear demo data: ${err instanceof Error ? err.message : String(err)}`,
+        );
         return;
       }
       seedDemo(demoRoot);

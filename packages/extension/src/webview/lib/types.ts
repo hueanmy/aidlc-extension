@@ -95,6 +95,10 @@ export interface SidebarState {
   pipelines: PipelineRef[];
   /** All existing run ids (any status) — used by the modal to validate uniqueness. */
   runIds: string[];
+  /** True when ~/aidlc-demo-project already exists. The "Load Demo Project"
+   * button uses this to pop an inline modal asking re-seed vs open-as-is
+   * instead of letting the host show a VS Code notification. */
+  demoProjectExists: boolean;
 }
 
 export type AssetScope = 'project' | 'aidlc' | 'global';

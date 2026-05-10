@@ -34,6 +34,7 @@ import { StartRunModal } from './StartRunModal';
 import { RerunModal } from './RerunModal';
 import { RunWithFeedbackModal } from './RunWithFeedbackModal';
 import { SavePresetModal } from './SavePresetModal';
+import { LoadDemoModal } from './LoadDemoModal';
 import { ThemeToggle } from './ThemeToggle';
 import { postMessage, getPersistedUi, setPersistedUi } from '@/lib/bridge';
 
@@ -141,7 +142,7 @@ export function AppSidebar({ state }: { state: SidebarState | null }) {
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
         {!state.hasFolder ? (
-          <EmptyNoFolder />
+          <EmptyNoFolder demoProjectExists={state.demoProjectExists} />
         ) : (
           <>
             <ProjectBar workspaceName={state.workspaceName} configExists={state.configExists} />
@@ -294,7 +295,18 @@ function ProjectBar({
   );
 }
 
-function EmptyNoFolder() {
+function EmptyNoFolder({ demoProjectExists }: { demoProjectExists: boolean }) {
+  const [demoModalOpen, setDemoModalOpen] = useState(false);
+  const onLoadDemo = () => {
+    if (demoProjectExists) {
+      // Pop the inline picker — replaces the VS Code notification chrome
+      // that the host would otherwise show when the dir already exists.
+      setDemoModalOpen(true);
+    } else {
+      // Fresh install — just create + open. No prompt needed.
+      postMessage({ type: 'loadDemoProject' });
+    }
+  };
   return (
     <div className="rounded-md border border-dashed border-border bg-surface/50 p-4 text-center">
       <h3 className="mb-1.5 text-xs font-bold tracking-wide">No project open</h3>
@@ -312,12 +324,18 @@ function EmptyNoFolder() {
       </button>
       <button
         type="button"
-        onClick={() => postMessage({ type: 'loadDemoProject' })}
+        onClick={onLoadDemo}
         className="mt-2 flex w-full items-center gap-2 rounded-md border border-border bg-card/50 px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
         <Beaker className="h-3.5 w-3.5" />
         <span>Load Demo Project</span>
       </button>
+      {demoModalOpen && (
+        <LoadDemoModal
+          onChoose={(mode) => postMessage({ type: 'loadDemoProject', mode })}
+          onClose={() => setDemoModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
