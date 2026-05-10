@@ -148,6 +148,24 @@
         "title": "Refresh Claude Token Usage",
         "icon": "$(refresh)",
         "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.astGraph.openReport",
+        "title": "Open AST Graph Report",
+        "icon": "$(type-hierarchy)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.astGraph.rescan",
+        "title": "Rescan AST Graph (clean)",
+        "icon": "$(refresh)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.astGraph.reregisterMcp",
+        "title": "Re-register AST Graph MCP Server",
+        "icon": "$(plug)",
+        "category": "AIDLC"
       }
     ],
     "configuration": {
@@ -169,6 +187,17 @@
           "default": 30,
           "minimum": 1,
           "description": "Window the cost-suggestion engine scans (in days). Older logs are skipped — they don't reflect current habits."
+        },
+        "aidlc.astGraph.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-download the ast-graph CLI, scan the workspace in the background, and register it as a Claude MCP server so Claude can read structural code context cheaply."
+        },
+        "aidlc.astGraph.autoRescanDebounceSeconds": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "description": "Debounce window for incremental rescans after source files change (seconds)."
         }
       }
     },
@@ -188,6 +217,11 @@
           "command": "aidlc.openClaudeTerminal",
           "when": "view == aidlcSidebar",
           "group": "navigation@2"
+        },
+        {
+          "command": "aidlc.astGraph.openReport",
+          "when": "view == aidlcSidebar",
+          "group": "navigation@3"
         }
       ]
     },
