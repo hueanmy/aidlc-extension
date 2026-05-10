@@ -20,6 +20,7 @@ import { exec } from 'child_process';
 import { registerV2WorkspaceCommands } from './v2/workspaceCommands';
 import { SidebarWebviewProvider } from './v2/sidebarWebview';
 import { themeManager } from './v2/themeManager';
+import { registerTokenMonitor } from './v2/tokenMonitor';
 import { WORKSPACE_DIR, WORKSPACE_FILENAME } from '@aidlc/core';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -125,6 +126,10 @@ export function activate(context: vscode.ExtensionContext): void {
   status.command = 'aidlc.openBuilder';
   status.show();
   context.subscriptions.push(status);
+
+  // Token monitor — reads ~/.claude/projects/*.jsonl and shows today/month spend.
+  // Ported from claude-token-monitor (https://github.com/emtyty/claude-token-monitor).
+  registerTokenMonitor(context, output);
 
   output.appendLine('Activation complete.');
 }
