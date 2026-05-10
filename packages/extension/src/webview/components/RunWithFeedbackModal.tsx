@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { FileUp, Loader2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { Modal, ModalFooter, ModalCancelButton, ModalConfirmButton } from './Modal';
+import { pickAndReadFile } from '@/lib/pickFile';
 
 interface Props {
   agent: string;
@@ -22,6 +25,30 @@ export function RunWithFeedbackModal({
 }: Props) {
   const [feedback, setFeedback] = useState(carriedFeedback ?? '');
   const ref = useRef<HTMLTextAreaElement>(null);
+  const [loading, setLoading] = useState(false);
+  const [loadInfo, setLoadInfo] = useState<{ kind: 'loaded' | 'error'; text: string } | null>(
+    null,
+  );
+
+  const onLoadFromFile = async () => {
+    setLoading(true);
+    setLoadInfo(null);
+    try {
+      const result = await pickAndReadFile();
+      if (!result) { return; }
+      // Append (rather than overwrite) when there's already typed feedback —
+      // user is more often layering hints than swapping them.
+      setFeedback((cur) => (cur.trim() ? `${cur.trimEnd()}\n\n${result.content}` : result.content));
+      setLoadInfo({ kind: 'loaded', text: `Loaded ${result.fileName}` });
+    } catch (err) {
+      setLoadInfo({
+        kind: 'error',
+        text: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     ref.current?.focus();
@@ -71,17 +98,43 @@ export function RunWithFeedbackModal({
         </div>
       )}
 
-      <label className="mb-1 block text-[10.5px] font-bold uppercase tracking-wider text-muted-foreground">
-        Feedback for the agent <span className="font-normal normal-case tracking-normal">(optional)</span>
-      </label>
+      <div className="mb-1 flex items-baseline justify-between gap-2">
+        <label className="text-[10.5px] font-bold uppercase tracking-wider text-muted-foreground">
+          Feedback for the agent <span className="font-normal normal-case tracking-normal">(optional)</span>
+        </label>
+        <button
+          type="button"
+          onClick={onLoadFromFile}
+          disabled={loading}
+          className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+          title="Append the contents of a text/markdown file to the feedback"
+        >
+          {loading ? (
+            <Loader2 className="h-2.5 w-2.5 animate-spin" />
+          ) : (
+            <FileUp className="h-2.5 w-2.5" />
+          )}
+          <span>Load from file…</span>
+        </button>
+      </div>
       <textarea
         ref={ref}
         value={feedback}
         onChange={(e) => setFeedback(e.target.value)}
         placeholder="e.g. include rate-limit policy from PRD §4.2; format as a checklist"
-        rows={4}
-        className="w-full resize-none rounded-md border border-border bg-input/50 px-2.5 py-2 text-[12px] text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/40"
+        rows={5}
+        className="w-full resize-y rounded-md border border-border bg-input/50 px-2.5 py-2 text-[12px] text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/40"
       />
+      {loadInfo && (
+        <div
+          className={cn(
+            'mt-1 text-[10px]',
+            loadInfo.kind === 'loaded' ? 'text-muted-foreground' : 'text-destructive',
+          )}
+        >
+          {loadInfo.text}
+        </div>
+      )}
 
       <div className="mt-3">
         <div className="mb-1 text-[9.5px] font-bold uppercase tracking-wider text-muted-foreground">

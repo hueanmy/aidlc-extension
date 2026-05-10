@@ -50,6 +50,7 @@ import {
   requestStepUpdateInlineCommand,
   startPipelineRunInlineCommand,
 } from './runCommands';
+import { pickAndReadTextFile } from './pickAndReadTextFile';
 
 // ── Webview-side type shapes (must mirror src/webview/lib/types.ts) ───────
 
@@ -776,6 +777,13 @@ export class WorkspaceWebview {
         const draft = msg.draft;
         if (!draft || typeof draft !== 'object') { return; }
         await vscode.commands.executeCommand('aidlc.savePresetInline', draft);
+        return;
+      }
+      case 'pickAndReadFile': {
+        const requestId = String(msg.requestId ?? '');
+        if (!requestId) { return; }
+        const reply = await pickAndReadTextFile(requestId);
+        void this.panel.webview.postMessage({ type: 'pickAndReadFile:reply', ...reply });
         return;
       }
       case 'startPipelineRunForEpic': {

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ListOrdered, User, ChevronRight } from 'lucide-react';
+import { ListOrdered, User, ChevronRight, FileUp, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { AgentMeta, AgentSummary, PipelineSummary } from '@/lib/types';
 import { Modal, ModalFooter, ModalCancelButton, ModalConfirmButton } from './Modal';
+import { pickAndReadFile } from '@/lib/pickFile';
 
 const ID_PATTERN = /^[A-Z][A-Z0-9-]*$/;
 
@@ -61,6 +62,35 @@ export function StartEpicModal({
   const [description, setDescription] = useState('');
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const idInputRef = useRef<HTMLInputElement>(null);
+  // Load-from-file UX state for the description textarea — null when idle,
+  // loading shows a spinner, error/loaded surface a small line under the
+  // textarea so the user knows what landed.
+  const [descLoading, setDescLoading] = useState(false);
+  const [descLoadInfo, setDescLoadInfo] = useState<{
+    kind: 'loaded' | 'error';
+    text: string;
+  } | null>(null);
+
+  const onLoadDescriptionFromFile = async () => {
+    setDescLoading(true);
+    setDescLoadInfo(null);
+    try {
+      const result = await pickAndReadFile();
+      if (!result) { return; } // cancelled
+      setDescription(result.content);
+      setDescLoadInfo({
+        kind: 'loaded',
+        text: `Loaded ${result.fileName} (${formatBytes(result.byteLength)})`,
+      });
+    } catch (err) {
+      setDescLoadInfo({
+        kind: 'error',
+        text: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setDescLoading(false);
+    }
+  };
 
   useEffect(() => {
     idInputRef.current?.focus();
@@ -275,16 +305,44 @@ export function StartEpicModal({
         </div>
 
         <div>
-          <label className="mb-1 block text-[10.5px] font-bold uppercase tracking-wider text-muted-foreground">
-            Description <span className="font-normal normal-case tracking-normal text-muted-foreground/80">(optional)</span>
-          </label>
-          <input
-            type="text"
+          <div className="mb-1 flex items-baseline justify-between gap-2">
+            <label className="text-[10.5px] font-bold uppercase tracking-wider text-muted-foreground">
+              Description / requirement <span className="font-normal normal-case tracking-normal text-muted-foreground/80">(optional)</span>
+            </label>
+            <button
+              type="button"
+              onClick={onLoadDescriptionFromFile}
+              disabled={descLoading}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+              title="Load contents of a text/markdown file into the description"
+            >
+              {descLoading ? (
+                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              ) : (
+                <FileUp className="h-2.5 w-2.5" />
+              )}
+              <span>Load from file…</span>
+            </button>
+          </div>
+          <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="One-line summary of what this epic delivers"
-            className="w-full rounded-md border border-border bg-input/50 px-2.5 py-2 text-[12px] text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/40"
+            placeholder="Paste a requirement / PRD, or load it from a file. The text is snapshotted into the epic at submit time."
+            rows={5}
+            className="w-full resize-y rounded-md border border-border bg-input/50 px-2.5 py-2 text-[12px] text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/40"
           />
+          {descLoadInfo && (
+            <div
+              className={cn(
+                'mt-1 text-[10px]',
+                descLoadInfo.kind === 'loaded'
+                  ? 'text-muted-foreground'
+                  : 'text-destructive',
+              )}
+            >
+              {descLoadInfo.text}
+            </div>
+          )}
         </div>
 
         {capabilities.length > 0 && (
@@ -378,4 +436,10 @@ function Empty({ hint }: { hint: string }) {
       <span>{hint}</span>
     </div>
   );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) { return `${n} B`; }
+  if (n < 1024 * 1024) { return `${(n / 1024).toFixed(1)} KB`; }
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
 }

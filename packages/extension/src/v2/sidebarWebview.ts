@@ -33,6 +33,7 @@ import { listEpics } from './epicsList';
 import type { PresetStore } from './presetStore';
 import { themeManager } from './themeManager';
 import { loadMcpServers, type McpServerInfo } from './mcpServers';
+import { pickAndReadTextFile } from './pickAndReadTextFile';
 import {
   rejectStepInlineCommand,
   rerunStepInlineCommand,
@@ -596,6 +597,13 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       case 'refreshMcp':
         void this.loadMcp();
         return;
+      case 'pickAndReadFile': {
+        const requestId = String(msg.requestId ?? '');
+        if (!requestId) { return; }
+        const reply = await pickAndReadTextFile(requestId);
+        void this.view?.webview.postMessage({ type: 'pickAndReadFile:reply', ...reply });
+        return;
+      }
     }
   }
 
