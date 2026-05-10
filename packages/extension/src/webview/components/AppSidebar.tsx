@@ -41,6 +41,7 @@ import { RerunModal } from './RerunModal';
 import { RunWithFeedbackModal } from './RunWithFeedbackModal';
 import { SavePresetModal } from './SavePresetModal';
 import { LoadDemoModal } from './LoadDemoModal';
+import { Modal } from './Modal';
 import { ThemeToggle } from './ThemeToggle';
 import { postMessage, getPersistedUi, setPersistedUi } from '@/lib/bridge';
 
@@ -642,6 +643,10 @@ function CostSuggestionsSection({
   // tell at a glance whether anything is high-severity without expanding.
   const totalSavings = suggestions?.reduce((s, x) => s + x.estSavings, 0) ?? 0;
   const counts = countBySeverity(suggestions);
+  // Click a row to open the detail modal — the inline expand was too
+  // cramped in the narrow sidebar to read evidence + action comfortably.
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const selected = selectedIdx !== null && suggestions ? suggestions[selectedIdx] ?? null : null;
   return (
     <div>
       <SectionHeader
@@ -712,9 +717,27 @@ function CostSuggestionsSection({
             </div>
           )}
           {suggestions?.map((s, i) => (
-            <CostSuggestionRow key={`${s.rule}-${i}`} s={s} />
+            <CostSuggestionRow
+              key={`${s.rule}-${i}`}
+              s={s}
+              onOpen={() => setSelectedIdx(i)}
+            />
           ))}
         </div>
+      )}
+      {selected && suggestions && (
+        <CostSuggestionDetailModal
+          suggestion={selected}
+          index={selectedIdx ?? 0}
+          total={suggestions.length}
+          onPrev={selectedIdx !== null && selectedIdx > 0
+            ? () => setSelectedIdx(selectedIdx - 1)
+            : undefined}
+          onNext={selectedIdx !== null && selectedIdx < suggestions.length - 1
+            ? () => setSelectedIdx(selectedIdx + 1)
+            : undefined}
+          onClose={() => setSelectedIdx(null)}
+        />
       )}
     </div>
   );
@@ -735,12 +758,20 @@ const SEV_PILL: Record<CostSuggestion['severity'], string> = {
   low: 'bg-muted text-muted-foreground',
 };
 
-function CostSuggestionRow({ s }: { s: CostSuggestion }) {
-  const [expanded, setExpanded] = useState(false);
+function CostSuggestionRow({
+  s,
+  onOpen,
+}: {
+  s: CostSuggestion;
+  onOpen: () => void;
+}) {
   return (
-    <div
+    <button
+      type="button"
+      onClick={onOpen}
+      title="Open suggestion detail"
       className={cn(
-        'rounded-md border bg-card/50 px-2.5 py-1.5 text-[11px]',
+        'flex w-full items-center gap-2 rounded-md border bg-card/50 px-2.5 py-1.5 text-left text-[11px] transition-colors hover:bg-accent/40',
         s.severity === 'high'
           ? 'border-destructive/40'
           : s.severity === 'med'
@@ -748,46 +779,122 @@ function CostSuggestionRow({ s }: { s: CostSuggestion }) {
           : 'border-border',
       )}
     >
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 text-left"
-        title={expanded ? 'Collapse' : 'Show evidence + recommended action'}
-      >
-        <span
-          className={cn(
-            'shrink-0 rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wider',
-            SEV_PILL[s.severity],
-          )}
-        >
-          {s.severity}
-        </span>
-        <span className="font-mono text-[10px] font-semibold text-primary truncate">
-          {s.rule}
-        </span>
-        <span className="truncate text-[10px] text-muted-foreground">· {s.scope}</span>
-        {s.estSavings > 0 && (
-          <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-success">
-            ~{fmtUsd(s.estSavings)}
-          </span>
+      <span
+        className={cn(
+          'shrink-0 rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wider',
+          SEV_PILL[s.severity],
         )}
-      </button>
-      {expanded && (
-        <div className="mt-1.5 space-y-1 border-t border-border/50 pt-1.5 text-[10.5px]">
-          <div className="text-muted-foreground">
-            <span className="font-bold uppercase tracking-widest text-[9px] text-muted-foreground/80">
-              Evidence
-            </span>
-            <div className="mt-0.5">{s.evidence}</div>
-          </div>
-          <div>
-            <span className="font-bold uppercase tracking-widest text-[9px] text-muted-foreground/80">
-              Action
-            </span>
-            <div className="mt-0.5 text-foreground">{s.action}</div>
-          </div>
-        </div>
+      >
+        {s.severity}
+      </span>
+      <span className="font-mono text-[10px] font-semibold text-primary truncate">
+        {s.rule}
+      </span>
+      <span className="truncate text-[10px] text-muted-foreground">· {s.scope}</span>
+      {s.estSavings > 0 && (
+        <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-success">
+          ~{fmtUsd(s.estSavings)}
+        </span>
       )}
+    </button>
+  );
+}
+
+function CostSuggestionDetailModal({
+  suggestion,
+  index,
+  total,
+  onPrev,
+  onNext,
+  onClose,
+}: {
+  suggestion: CostSuggestion;
+  index: number;
+  total: number;
+  onPrev?: () => void;
+  onNext?: () => void;
+  onClose: () => void;
+}) {
+  // Modal lives at fixed inset-0 z-50, so it floats above the sidebar
+  // panel (which is constrained to the activity-bar column). Wider
+  // breakpoint than the default Modal so action text doesn't wrap awkwardly.
+  return (
+    <Modal
+      title="Cost suggestion"
+      subtitle={
+        <span className="flex items-center gap-2">
+          <span
+            className={cn(
+              'rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wider',
+              SEV_PILL[suggestion.severity],
+            )}
+          >
+            {suggestion.severity}
+          </span>
+          <span className="font-mono text-foreground/80">{suggestion.rule}</span>
+          <span className="text-muted-foreground/70">·</span>
+          <span>{index + 1} / {total}</span>
+        </span>
+      }
+      maxWidth="max-w-xl"
+      onClose={onClose}
+    >
+      <div className="space-y-3 text-[12px]">
+        <DetailField label="Scope">
+          <span className="font-mono text-[11.5px] text-foreground/90">{suggestion.scope}</span>
+        </DetailField>
+        <DetailField label="Evidence">
+          <span className="text-muted-foreground">{suggestion.evidence}</span>
+        </DetailField>
+        <DetailField label="Recommended action">
+          <span className="leading-relaxed text-foreground">{suggestion.action}</span>
+        </DetailField>
+        {suggestion.estSavings > 0 && (
+          <DetailField label="Estimated savings">
+            <span className="font-mono tabular-nums text-success">
+              ~{fmtUsd(suggestion.estSavings)} (heuristic)
+            </span>
+          </DetailField>
+        )}
+      </div>
+      <div className="mt-5 flex items-center justify-between gap-2">
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onPrev}
+            disabled={!onPrev}
+            className="rounded-md border border-border px-3 py-1.5 text-[11.5px] font-medium text-muted-foreground hover:border-border/80 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            ← Prev
+          </button>
+          <button
+            type="button"
+            onClick={onNext}
+            disabled={!onNext}
+            className="rounded-md border border-border px-3 py-1.5 text-[11.5px] font-medium text-muted-foreground hover:border-border/80 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Next →
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-md border border-primary/50 bg-primary/15 px-3 py-1.5 text-[11.5px] font-semibold text-primary hover:border-primary hover:bg-primary/25"
+        >
+          Close
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function DetailField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="mb-1 text-[9.5px] font-bold uppercase tracking-widest text-muted-foreground">
+        {label}
+      </div>
+      <div>{children}</div>
     </div>
   );
 }
