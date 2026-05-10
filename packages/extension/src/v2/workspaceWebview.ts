@@ -37,6 +37,7 @@ import type {
 import { promptStepConfig } from './wizards';
 import { listEpics, type EpicSummary as CoreEpicSummary } from './epicsList';
 import { themeManager } from './themeManager';
+import { rejectStepInlineCommand } from './runCommands';
 
 // ── Webview-side type shapes (must mirror src/webview/lib/types.ts) ───────
 
@@ -568,6 +569,14 @@ export class WorkspaceWebview {
         const runId = String(msg.runId ?? '');
         const cmd = `aidlc.${msg.type}`;
         await vscode.commands.executeCommand(cmd, runId || undefined);
+        return;
+      }
+      case 'rejectStepInline': {
+        const runId = String(msg.runId ?? '');
+        const reason = String(msg.reason ?? '');
+        const targetIdx = Number(msg.targetIdx);
+        if (!runId || !Number.isInteger(targetIdx)) { return; }
+        await rejectStepInlineCommand(runId, reason, targetIdx);
         return;
       }
       case 'startPipelineRunForEpic': {

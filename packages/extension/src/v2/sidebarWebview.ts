@@ -29,6 +29,7 @@ import type { PipelineConfig } from '@aidlc/core';
 import { listEpics } from './epicsList';
 import type { PresetStore } from './presetStore';
 import { themeManager } from './themeManager';
+import { rejectStepInlineCommand } from './runCommands';
 
 // VS Code reuses output channels by name, so this resolves to the same
 // channel created in extension.ts activate().
@@ -54,6 +55,9 @@ interface ActiveRun {
   currentStepIdx: number;
   totalSteps: number;
   currentAgent: string;
+  /** Agent ids of every step, in pipeline order — used by the inline reject
+   * modal to render the "send back to step N" picker without another roundtrip. */
+  stepAgents: string[];
   /** awaiting_work | awaiting_review | rejected */
   currentStepStatus: string;
   revision: number;
@@ -214,6 +218,7 @@ function listActiveRuns(root: string): ActiveRun[] {
           currentStepIdx: r.currentStepIdx,
           totalSteps: r.steps.length,
           currentAgent: agent,
+          stepAgents: r.steps.map((s) => s.agent),
           currentStepStatus: step?.status ?? '',
           revision: step?.revision ?? 1,
           rejectReason: step?.rejectReason,
@@ -378,6 +383,14 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
         const runId = String(msg.runId ?? '');
         const cmd = `aidlc.${msg.type}`;
         await vscode.commands.executeCommand(cmd, runId || undefined);
+        return;
+      }
+      case 'rejectStepInline': {
+        const runId = String(msg.runId ?? '');
+        const reason = String(msg.reason ?? '');
+        const targetIdx = Number(msg.targetIdx);
+        if (!runId || !Number.isInteger(targetIdx)) { return; }
+        await rejectStepInlineCommand(runId, reason, targetIdx);
         return;
       }
       case 'openArtifact': {

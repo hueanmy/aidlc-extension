@@ -28,6 +28,7 @@ import type {
   TemplateRef,
   ArtifactPath,
 } from '@/lib/types';
+import { RejectModal } from './RejectModal';
 import { ThemeToggle } from './ThemeToggle';
 import { postMessage, getPersistedUi, setPersistedUi } from '@/lib/bridge';
 
@@ -725,6 +726,7 @@ function ArtifactList({
 }
 
 function RunActions({ run }: { run: ActiveRun }) {
+  const [rejectOpen, setRejectOpen] = useState(false);
   return (
     <div className="mt-2 flex gap-1">
       {run.currentStepStatus === 'awaiting_work' && (
@@ -751,10 +753,7 @@ function RunActions({ run }: { run: ActiveRun }) {
           >
             Approve
           </ActionBtn>
-          <ActionBtn
-            variant="destructive"
-            onClick={() => postMessage({ type: 'rejectStep', runId: run.runId })}
-          >
+          <ActionBtn variant="destructive" onClick={() => setRejectOpen(true)}>
             Reject
           </ActionBtn>
         </>
@@ -775,6 +774,14 @@ function RunActions({ run }: { run: ActiveRun }) {
       >
         <X className="h-3 w-3" />
       </button>
+      {rejectOpen && (
+        <RejectModal
+          runId={run.runId}
+          currentStepIdx={run.currentStepIdx}
+          stepAgents={run.stepAgents}
+          onClose={() => setRejectOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -24,6 +24,7 @@ import type {
   UiStatus,
 } from '@/lib/types';
 import { StatusBadge } from './StatusBadge';
+import { RejectModal } from './RejectModal';
 import { postMessage } from '@/lib/bridge';
 
 function epicUiStatus(status: EpicSummary['status']): UiStatus {
@@ -405,6 +406,7 @@ function DetailValue({ children, empty }: { children: React.ReactNode; empty?: b
 }
 
 function RunGate({ epic, focused }: { epic: EpicSummary; focused: EpicStepDetailFull }) {
+  const [rejectOpen, setRejectOpen] = useState(false);
   if (!epic.runId || !focused.isCurrentRunStep) { return null; }
   const ui = runStatusUi(focused.runStatus);
   if (!ui) { return null; }
@@ -524,7 +526,7 @@ function RunGate({ epic, focused }: { epic: EpicSummary; focused: EpicStepDetail
             </GateButton>
             <GateButton
               variant="reject"
-              onClick={() => postMessage({ type: 'rejectStep', runId: epic.runId! })}
+              onClick={() => setRejectOpen(true)}
             >
               <X className="h-3 w-3" /> Reject
             </GateButton>
@@ -539,6 +541,15 @@ function RunGate({ epic, focused }: { epic: EpicSummary; focused: EpicStepDetail
           </GateButton>
         )}
       </div>
+
+      {rejectOpen && epic.runId && (
+        <RejectModal
+          runId={epic.runId}
+          currentStepIdx={epic.currentStep}
+          stepAgents={epic.stepDetails.map((d) => d.agent)}
+          onClose={() => setRejectOpen(false)}
+        />
+      )}
     </div>
   );
 }

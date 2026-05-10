@@ -36,6 +36,7 @@ export interface ActiveRun {
   currentStepIdx: number;
   totalSteps: number;
   currentAgent: string;
+  stepAgents: string[];
   currentStepStatus: StepStatus | string;
   revision: number;
   rejectReason?: string;
