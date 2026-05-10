@@ -187,6 +187,21 @@ export type StepHistoryEntry =
       revision: number;
     };
 
+export interface EpicStepTokenUsage {
+  cost: number;
+  totalTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  calls: number;
+}
+
+export interface EpicTokenUsage {
+  total: { cost: number; totalTokens: number; calls: number };
+  hasOverlap: boolean;
+}
+
 export interface EpicStepDetailFull {
   agent: string;
   status: 'pending' | 'in_progress' | 'done' | 'failed';
@@ -205,6 +220,8 @@ export interface EpicStepDetailFull {
   rejectCount?: number;
   /** Carried feedback (from cascade reject blame or manual rerun feedback). */
   feedback?: string;
+  /** Token usage attributed to this step's time window. */
+  tokenUsage?: EpicStepTokenUsage;
 }
 
 export interface EpicSummary {
@@ -223,6 +240,8 @@ export interface EpicSummary {
   epicDir: string;
   existingArtifacts: string[];
   createdAt: string;
+  /** Aggregate token usage for the epic (epic-level total + overlap flag). */
+  tokenUsage?: EpicTokenUsage;
 }
 
 export interface AgentMeta {

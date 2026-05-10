@@ -22,6 +22,11 @@ import type {
 } from '@aidlc/core';
 
 import { readYaml, type YamlDocument } from './yamlIO';
+import {
+  getOrComputeWorkspaceEpicUsage,
+  type EpicUsage,
+  type StepUsage,
+} from './epicTokenAttribution';
 
 export type EpicStatus = 'pending' | 'in_progress' | 'done' | 'failed';
 
@@ -66,7 +71,11 @@ export interface EpicSummary {
     rejectCount: number;
     /** Carried feedback (from cascade reject or manual rerun feedback). */
     feedback?: string;
+    /** Token usage attributed to this step (filled by `enrichEpicsWithUsage`). */
+    tokenUsage?: StepUsage;
   }>;
+  /** Aggregate token usage for the epic (filled by `enrichEpicsWithUsage`). */
+  tokenUsage?: EpicUsage;
   /**
    * runId of the matching run state, if any. Convention: runId === epic.id.
    * When set, the panel can dispatch `aidlc.markStepDone` etc. with this id.
@@ -252,6 +261,51 @@ export function listEpics(workspaceRoot: string, doc: YamlDocument | null): Epic
     return b.id.localeCompare(a.id);
   });
   return epics;
+}
+
+/**
+ * Mutate the given epics in-place to fill in `tokenUsage` (epic-level) and
+ * `stepDetails[].tokenUsage` (per-step) by attributing Claude jsonl records
+ * to each epic's run state windows. Cheap on cache hit; async so a slow
+ * jsonl walk doesn't block the sidebar refresh.
+ */
+export async function enrichEpicsWithUsage(
+  workspaceRoot: string,
+  epics: EpicSummary[],
+): Promise<void> {
+  const runs: RunState[] = [];
+  const mtimes: number[] = [];
+  for (const epic of epics) {
+    if (!epic.runId) continue;
+    const runFile = path.join(workspaceRoot, '.aidlc', 'runs', `${epic.runId}.json`);
+    let stat: fs.Stats;
+    try { stat = fs.statSync(runFile); } catch { continue; }
+    let runState: RunState | null = null;
+    try { runState = RunStateStore.load(workspaceRoot, epic.runId); }
+    catch { continue; }
+    if (!runState) continue;
+    runs.push(runState);
+    mtimes.push(stat.mtimeMs);
+  }
+  if (runs.length === 0) return;
+
+  const usageByRunId = await getOrComputeWorkspaceEpicUsage(workspaceRoot, runs, mtimes);
+
+  for (const epic of epics) {
+    if (!epic.runId) continue;
+    const u = usageByRunId.get(epic.runId);
+    if (!u) continue;
+    epic.tokenUsage = u;
+    // Match per-step usage onto stepDetails by agent id (in order, so reruns
+    // of the same agent map to the same step).
+    for (let i = 0; i < epic.stepDetails.length; i++) {
+      const sd = epic.stepDetails[i];
+      const su = u.steps[i];
+      if (su && su.agent === sd.agent) {
+        sd.tokenUsage = su;
+      }
+    }
+  }
 }
 
 function readInputs(epicDir: string): Record<string, string> {
