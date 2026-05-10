@@ -402,7 +402,12 @@ function StepDetail({
         )}
       </div>
 
-      <RunGate epic={epic} focused={focused} slashCommand={slashCommand} />
+      <RunGate
+        epic={epic}
+        focused={focused}
+        slashCommand={slashCommand}
+        artifactExists={artifactExists}
+      />
       <RequestUpdateAction epic={epic} focused={focused} focusedIdx={focusedIdx} />
       <StepHistory step={focused} />
     </div>
@@ -626,10 +631,12 @@ function RunGate({
   epic,
   focused,
   slashCommand,
+  artifactExists,
 }: {
   epic: EpicSummary;
   focused: EpicStepDetailFull;
   slashCommand: string | undefined;
+  artifactExists: boolean;
 }) {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rerunOpen, setRerunOpen] = useState(false);
@@ -737,7 +744,10 @@ function RunGate({
           <>
             {slashCommand && (
               <GateButton variant="approve" onClick={() => setRunOpen(true)}>
-                <Play className="h-3 w-3" /> Update with feedback
+                <Play className="h-3 w-3" />
+                {artifactExists || focused.feedback
+                  ? 'Update with feedback'
+                  : 'Run with Claude'}
               </GateButton>
             )}
             <GateButton
