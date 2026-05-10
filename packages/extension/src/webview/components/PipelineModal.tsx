@@ -286,13 +286,13 @@ function StepRow({
   onMoveDown,
   onChange,
 }: {
-  step: AddPipelineStepDraft;
+  step: PipelineStepDraft;
   idx: number;
   total: number;
   onRemove: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
-  onChange: (patch: Partial<AddPipelineStepDraft>) => void;
+  onChange: (patch: Partial<PipelineStepDraft>) => void;
 }) {
   return (
     <div className="rounded-md border border-border bg-secondary/30 p-2">

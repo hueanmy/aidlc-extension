@@ -262,6 +262,36 @@ export type StepHistoryEntry =
       revision: number;
     };
 
+/** Mirror of `epicTokenAttribution.HistoryEventUsage` — kept in sync by hand. */
+export interface HistoryEventUsage {
+  totalTokens: number;
+  cost: number;
+  calls: number;
+}
+
+/** Mirror of `epicTokenAttribution.StepUsage`. */
+export interface StepUsage {
+  agent: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  cost: number;
+  totalTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  calls: number;
+  history?: HistoryEventUsage[];
+}
+
+/** Mirror of `epicTokenAttribution.EpicUsage`. */
+export interface EpicUsage {
+  total: { cost: number; totalTokens: number; calls: number };
+  steps: StepUsage[];
+  hasOverlap: boolean;
+  computedAt: number;
+}
+
 export interface EpicStepDetailFull {
   agent: string;
   status: 'pending' | 'in_progress' | 'done' | 'failed';
@@ -280,6 +310,8 @@ export interface EpicStepDetailFull {
   rejectCount?: number;
   /** Carried feedback (from cascade reject blame or manual rerun feedback). */
   feedback?: string;
+  /** Token usage attributed to this step. */
+  tokenUsage?: StepUsage;
 }
 
 export interface EpicSummary {
@@ -298,6 +330,8 @@ export interface EpicSummary {
   epicDir: string;
   existingArtifacts: string[];
   createdAt: string;
+  /** Aggregate token usage for the epic. */
+  tokenUsage?: EpicUsage;
 }
 
 export interface AgentMeta {
