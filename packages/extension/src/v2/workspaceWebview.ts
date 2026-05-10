@@ -126,6 +126,8 @@ interface EpicStepTokenUsage {
   cacheReadTokens: number;
   cacheWriteTokens: number;
   calls: number;
+  /** Per history-entry usage, parallel to StepHistory entries. */
+  history?: Array<{ totalTokens: number; cost: number; calls: number }>;
 }
 
 interface EpicTokenUsage {
@@ -380,6 +382,9 @@ async function mergeEpicTokenUsageInto(state: WorkspaceState): Promise<void> {
         cacheReadTokens: su.cacheReadTokens,
         cacheWriteTokens: su.cacheWriteTokens,
         calls: su.calls,
+        history: su.history?.map((h) => ({
+          totalTokens: h.totalTokens, cost: h.cost, calls: h.calls,
+        })),
       };
     }
   }
@@ -427,6 +432,9 @@ function toEpicSummaryUi(e: CoreEpicSummary): EpicSummaryUi {
             cacheReadTokens: s.tokenUsage.cacheReadTokens,
             cacheWriteTokens: s.tokenUsage.cacheWriteTokens,
             calls: s.tokenUsage.calls,
+            history: s.tokenUsage.history?.map((h) => ({
+              totalTokens: h.totalTokens, cost: h.cost, calls: h.calls,
+            })),
           }
         : undefined,
     })),

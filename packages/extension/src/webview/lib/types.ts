@@ -187,6 +187,12 @@ export type StepHistoryEntry =
       revision: number;
     };
 
+export interface EpicHistoryEventUsage {
+  totalTokens: number;
+  cost: number;
+  calls: number;
+}
+
 export interface EpicStepTokenUsage {
   cost: number;
   totalTokens: number;
@@ -195,6 +201,8 @@ export interface EpicStepTokenUsage {
   cacheReadTokens: number;
   cacheWriteTokens: number;
   calls: number;
+  /** Parallel to step.history — usage in the segment leading up to each event. */
+  history?: EpicHistoryEventUsage[];
 }
 
 export interface EpicTokenUsage {

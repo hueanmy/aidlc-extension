@@ -576,23 +576,35 @@ function StepHistory({ step }: { step: EpicStepDetailFull }) {
 
       {open && (
         <ol className="border-t border-border/60 px-3 py-2 space-y-1.5 text-[10.5px]">
-          {entries.map((e, i) => (
-            <li key={i} className="flex items-start gap-2">
-              <HistoryIcon kind={e.kind} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-1.5">
-                  <HistoryLabel entry={e} />
-                  <span className="text-[9.5px] text-muted-foreground tabular-nums">
-                    rev {e.revision}
-                  </span>
-                  <span className="ml-auto text-[9.5px] text-muted-foreground/80">
-                    {fmtTime(e.at)}
-                  </span>
+          {entries.map((e, i) => {
+            const segUsage = step.tokenUsage?.history?.[i];
+            return (
+              <li key={i} className="flex items-start gap-2">
+                <HistoryIcon kind={e.kind} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline gap-1.5">
+                    <HistoryLabel entry={e} />
+                    <span className="text-[9.5px] text-muted-foreground tabular-nums">
+                      rev {e.revision}
+                    </span>
+                    {segUsage && segUsage.calls > 0 && (
+                      <span
+                        className="inline-flex items-center gap-0.5 text-[9.5px] tabular-nums text-muted-foreground"
+                        title={`${fmtTokens(segUsage.totalTokens)} tokens · ${segUsage.calls} calls · ${fmtCost(segUsage.cost)} API equiv — consumed in the segment leading to this event`}
+                      >
+                        <Zap className="h-2.5 w-2.5" />
+                        {fmtTokens(segUsage.totalTokens)}
+                      </span>
+                    )}
+                    <span className="ml-auto text-[9.5px] text-muted-foreground/80">
+                      {fmtTime(e.at)}
+                    </span>
+                  </div>
+                  <HistoryBody entry={e} />
                 </div>
-                <HistoryBody entry={e} />
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ol>
       )}
     </div>

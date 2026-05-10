@@ -42,6 +42,13 @@ function modelPrice(model: string): ModelPrice {
   return DEFAULT_PRICE;
 }
 
+export interface HistoryEventUsage {
+  /** Tokens consumed in the segment [prev event or step.startedAt, this event.at). */
+  totalTokens: number;
+  cost: number;
+  calls: number;
+}
+
 export interface StepUsage {
   agent: string;
   startedAt: string | null;
@@ -53,6 +60,8 @@ export interface StepUsage {
   cacheReadTokens: number;
   cacheWriteTokens: number;
   calls: number;
+  /** Parallel to step.history — usage in the segment leading up to each event. */
+  history?: HistoryEventUsage[];
 }
 
 export interface EpicUsage {
@@ -73,11 +82,20 @@ interface StepWindow {
   endedAt: string | null;
 }
 
-function emptyStep(agent: string, startedAt: string | null, endedAt: string | null): StepUsage {
+function emptyStep(
+  agent: string,
+  startedAt: string | null,
+  endedAt: string | null,
+  historyLen: number,
+): StepUsage {
+  const history: HistoryEventUsage[] | undefined = historyLen > 0
+    ? Array.from({ length: historyLen }, () => ({ totalTokens: 0, cost: 0, calls: 0 }))
+    : undefined;
   return {
     agent, startedAt, endedAt,
     cost: 0, totalTokens: 0, inputTokens: 0, outputTokens: 0,
     cacheReadTokens: 0, cacheWriteTokens: 0, calls: 0,
+    history,
   };
 }
 
@@ -112,6 +130,31 @@ function buildStepWindows(run: RunState): StepWindow[] {
     windows.push({ agent: step.agent, startMs, endMs, startedAt, endedAt });
   }
   return windows;
+}
+
+/**
+ * Sub-windows within a step, one per history entry. Entry i's window is
+ * `[prev_event.at, history[i].at)` — the segment leading up to that event.
+ * The first entry's window starts at step.startedAt.
+ *
+ * Returns NaN-tuples for entries that can't be resolved.
+ */
+function buildHistorySubWindows(
+  stepWindow: StepWindow,
+  history: StepRecord['history'],
+): Array<{ startMs: number; endMs: number }> {
+  const entries = history ?? [];
+  if (entries.length === 0 || !Number.isFinite(stepWindow.startMs)) return [];
+  let prevMs = stepWindow.startMs;
+  return entries.map((e) => {
+    const atMs = Date.parse(e.at);
+    if (!Number.isFinite(atMs) || atMs < prevMs) {
+      return { startMs: NaN, endMs: NaN };
+    }
+    const sub = { startMs: prevMs, endMs: atMs };
+    prevMs = atMs;
+    return sub;
+  });
 }
 
 function stepStartedAt(step: StepRecord): string | null {
@@ -173,20 +216,26 @@ export async function computeWorkspaceEpicUsage(
   interface RunCtx {
     run: RunState;
     windows: StepWindow[];
+    /** Per-step history sub-windows, parallel to `run.steps[i].history`. */
+    historyWindows: Array<Array<{ startMs: number; endMs: number }>>;
     steps: StepUsage[];
     earliestMs: number;
     latestMs: number;
   }
   const ctxByRun: RunCtx[] = runs.map((run) => {
     const windows = buildStepWindows(run);
-    const steps = windows.map((w) =>
-      emptyStep(w.agent, w.startedAt, w.endedAt),
+    const steps = windows.map((w, i) =>
+      emptyStep(w.agent, w.startedAt, w.endedAt, (run.steps[i].history ?? []).length),
+    );
+    const historyWindows = windows.map((w, i) =>
+      buildHistorySubWindows(w, run.steps[i].history),
     );
     const validStarts = windows.map((w) => w.startMs).filter(Number.isFinite);
     const validEnds = windows.map((w) => w.endMs).filter(Number.isFinite);
     return {
       run,
       windows,
+      historyWindows,
       steps,
       earliestMs: validStarts.length > 0 ? Math.min(...validStarts) : Infinity,
       latestMs: validEnds.length > 0 ? Math.max(...validEnds) : -Infinity,
@@ -284,6 +333,7 @@ export async function computeWorkspaceEpicUsage(
 interface RunCtxLike {
   run: RunState;
   windows: StepWindow[];
+  historyWindows: Array<Array<{ startMs: number; endMs: number }>>;
   steps: StepUsage[];
   earliestMs: number;
   latestMs: number;
@@ -353,6 +403,22 @@ async function processJsonl(
             s.cacheWriteTokens += cw;
             s.totalTokens += inp + out + cr + cw;
             s.calls += 1;
+            // Also attribute to the matching history sub-window, if any.
+            const subs = ctx.historyWindows[i];
+            const hist = s.history;
+            if (subs && hist) {
+              for (let k = 0; k < subs.length; k++) {
+                const sw = subs[k];
+                if (!Number.isFinite(sw.startMs) || sw.endMs <= sw.startMs) continue;
+                if (ts >= sw.startMs && ts < sw.endMs) {
+                  const h = hist[k];
+                  h.totalTokens += inp + out + cr + cw;
+                  h.cost += cost;
+                  h.calls += 1;
+                  break;
+                }
+              }
+            }
             break;
           }
         }
