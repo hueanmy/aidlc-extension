@@ -16,6 +16,8 @@ import {
   Play,
   History,
   RefreshCw,
+  Zap,
+  AlertTriangle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type {
@@ -32,6 +34,19 @@ import { RerunModal } from './RerunModal';
 import { RunWithFeedbackModal } from './RunWithFeedbackModal';
 import { RequestUpdateModal } from './RequestUpdateModal';
 import { postMessage } from '@/lib/bridge';
+
+function fmtCost(c: number): string {
+  if (c >= 100) return `$${c.toFixed(0)}`;
+  if (c >= 10) return `$${c.toFixed(1)}`;
+  return `$${c.toFixed(2)}`;
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
 
 function epicUiStatus(status: EpicSummary['status']): UiStatus {
   switch (status) {
@@ -108,6 +123,21 @@ export function EpicCard({ epic, agentMeta, slashCommandsByAgent }: Props) {
               {epic.progress}%
             </span>
           </div>
+          {epic.tokenUsage && epic.tokenUsage.total.calls > 0 && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground"
+              title={
+                `${fmtTokens(epic.tokenUsage.total.totalTokens)} tokens · ${epic.tokenUsage.total.calls} calls · ${fmtCost(epic.tokenUsage.total.cost)} API equiv` +
+                (epic.tokenUsage.hasOverlap ? ' · ⚠ overlaps with another run in this project — totals may double-count' : '')
+              }
+            >
+              <Zap className="h-3 w-3" />
+              {fmtTokens(epic.tokenUsage.total.totalTokens)}
+              {epic.tokenUsage.hasOverlap && (
+                <AlertTriangle className="h-3 w-3 text-warning" aria-label="Overlap warning" />
+              )}
+            </span>
+          )}
           <StatusBadge status={ui} />
           <button
             type="button"
@@ -345,6 +375,31 @@ function StepDetail({
         </p>
       )}
 
+      {focused.tokenUsage && focused.tokenUsage.calls > 0 && (
+        <div
+          className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
+          title={`${fmtCost(focused.tokenUsage.cost)} API equivalent (subscription users don't pay this)`}
+        >
+          <span className="inline-flex items-center gap-1 font-medium tabular-nums text-foreground">
+            <Zap className="h-3 w-3" />
+            {fmtTokens(focused.tokenUsage.totalTokens)} tok
+          </span>
+          <span>· {focused.tokenUsage.calls} calls</span>
+          <span>
+            · in <strong className="text-foreground">{fmtTokens(focused.tokenUsage.inputTokens)}</strong>
+          </span>
+          <span>
+            · out <strong className="text-foreground">{fmtTokens(focused.tokenUsage.outputTokens)}</strong>
+          </span>
+          <span>
+            · cache rd <strong className="text-foreground">{fmtTokens(focused.tokenUsage.cacheReadTokens)}</strong>
+          </span>
+          <span>
+            · cache wr <strong className="text-foreground">{fmtTokens(focused.tokenUsage.cacheWriteTokens)}</strong>
+          </span>
+        </div>
+      )}
+
       <div className="mt-3 grid grid-cols-[110px_1fr] gap-x-4 gap-y-1.5 text-[11.5px]">
         <DetailLabel icon={<Inbox className="h-3 w-3" />} text="Input" />
         <DetailValue empty={!m.inputs}>{m.inputs || '—'}</DetailValue>
@@ -521,23 +576,35 @@ function StepHistory({ step }: { step: EpicStepDetailFull }) {
 
       {open && (
         <ol className="border-t border-border/60 px-3 py-2 space-y-1.5 text-[10.5px]">
-          {entries.map((e, i) => (
-            <li key={i} className="flex items-start gap-2">
-              <HistoryIcon kind={e.kind} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-1.5">
-                  <HistoryLabel entry={e} />
-                  <span className="text-[9.5px] text-muted-foreground tabular-nums">
-                    rev {e.revision}
-                  </span>
-                  <span className="ml-auto text-[9.5px] text-muted-foreground/80">
-                    {fmtTime(e.at)}
-                  </span>
+          {entries.map((e, i) => {
+            const segUsage = step.tokenUsage?.history?.[i];
+            return (
+              <li key={i} className="flex items-start gap-2">
+                <HistoryIcon kind={e.kind} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-baseline gap-1.5">
+                    <HistoryLabel entry={e} />
+                    <span className="text-[9.5px] text-muted-foreground tabular-nums">
+                      rev {e.revision}
+                    </span>
+                    {segUsage && segUsage.calls > 0 && (
+                      <span
+                        className="inline-flex items-center gap-0.5 text-[9.5px] tabular-nums text-muted-foreground"
+                        title={`${fmtTokens(segUsage.totalTokens)} tokens · ${segUsage.calls} calls · ${fmtCost(segUsage.cost)} API equiv — consumed in the segment leading to this event`}
+                      >
+                        <Zap className="h-2.5 w-2.5" />
+                        {fmtTokens(segUsage.totalTokens)}
+                      </span>
+                    )}
+                    <span className="ml-auto text-[9.5px] text-muted-foreground/80">
+                      {fmtTime(e.at)}
+                    </span>
+                  </div>
+                  <HistoryBody entry={e} />
                 </div>
-                <HistoryBody entry={e} />
-              </div>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ol>
       )}
     </div>

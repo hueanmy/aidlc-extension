@@ -40,6 +40,7 @@ import type {
 import { promptStepConfig } from './wizards';
 import {
   listEpics,
+  enrichEpicsWithUsage,
   mirrorRunStateToEpic,
   type EpicSummary as CoreEpicSummary,
 } from './epicsList';
@@ -113,6 +114,25 @@ interface EpicStepDetailFull {
   history?: StepHistoryEntry[];
   rejectCount?: number;
   feedback?: string;
+  /** Token usage attributed to this step (cost + token totals). */
+  tokenUsage?: EpicStepTokenUsage;
+}
+
+interface EpicStepTokenUsage {
+  cost: number;
+  totalTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  calls: number;
+  /** Per history-entry usage, parallel to StepHistory entries. */
+  history?: Array<{ totalTokens: number; cost: number; calls: number }>;
+}
+
+interface EpicTokenUsage {
+  total: { cost: number; totalTokens: number; calls: number };
+  hasOverlap: boolean;
 }
 
 interface EpicSummaryUi {
@@ -131,6 +151,8 @@ interface EpicSummaryUi {
   epicDir: string;
   existingArtifacts: string[];
   createdAt: string;
+  /** Aggregate token usage for the epic. */
+  tokenUsage?: EpicTokenUsage;
 }
 
 interface SkillTemplateRef {
@@ -325,6 +347,49 @@ function suggestNextEpicId(existing: string[]): string {
   return `EPIC-${String(next).padStart(3, '0')}`;
 }
 
+/**
+ * Mutates `state.epics` to fill in `tokenUsage` (epic + per-step) using
+ * `enrichEpicsWithUsage` against the current workspace's run states. Cheap
+ * on cache hit; safe to fire on every refresh.
+ */
+async function mergeEpicTokenUsageInto(state: WorkspaceState): Promise<void> {
+  if (!state.epics || state.epics.length === 0) return;
+  const folder = vscode.workspace.workspaceFolders?.[0];
+  if (!folder) return;
+  const root = folder.uri.fsPath;
+  let summaries: CoreEpicSummary[];
+  try {
+    summaries = listEpics(root, readYaml(root));
+  } catch { return; }
+  try {
+    await enrichEpicsWithUsage(root, summaries);
+  } catch { return; }
+  const byId = new Map(summaries.map((s) => [s.id, s]));
+  for (const epic of state.epics) {
+    const e = byId.get(epic.id);
+    if (!e) continue;
+    if (e.tokenUsage) {
+      epic.tokenUsage = { total: e.tokenUsage.total, hasOverlap: e.tokenUsage.hasOverlap };
+    }
+    for (let i = 0; i < epic.stepDetails.length && i < e.stepDetails.length; i++) {
+      const su = e.stepDetails[i].tokenUsage;
+      if (!su) continue;
+      epic.stepDetails[i].tokenUsage = {
+        cost: su.cost,
+        totalTokens: su.totalTokens,
+        inputTokens: su.inputTokens,
+        outputTokens: su.outputTokens,
+        cacheReadTokens: su.cacheReadTokens,
+        cacheWriteTokens: su.cacheWriteTokens,
+        calls: su.calls,
+        history: su.history?.map((h) => ({
+          totalTokens: h.totalTokens, cost: h.cost, calls: h.calls,
+        })),
+      };
+    }
+  }
+}
+
 function toEpicSummaryUi(e: CoreEpicSummary): EpicSummaryUi {
   const total = e.stepDetails.length || 1;
   const done = e.stepDetails.filter((s) => s.status === 'done').length;
@@ -358,6 +423,20 @@ function toEpicSummaryUi(e: CoreEpicSummary): EpicSummaryUi {
       history: s.history,
       rejectCount: s.rejectCount,
       feedback: s.feedback,
+      tokenUsage: s.tokenUsage
+        ? {
+            cost: s.tokenUsage.cost,
+            totalTokens: s.tokenUsage.totalTokens,
+            inputTokens: s.tokenUsage.inputTokens,
+            outputTokens: s.tokenUsage.outputTokens,
+            cacheReadTokens: s.tokenUsage.cacheReadTokens,
+            cacheWriteTokens: s.tokenUsage.cacheWriteTokens,
+            calls: s.tokenUsage.calls,
+            history: s.tokenUsage.history?.map((h) => ({
+              totalTokens: h.totalTokens, cost: h.cost, calls: h.calls,
+            })),
+          }
+        : undefined,
     })),
     currentStep: e.currentStep,
     pipeline: e.pipeline,
@@ -367,6 +446,9 @@ function toEpicSummaryUi(e: CoreEpicSummary): EpicSummaryUi {
     epicDir,
     existingArtifacts,
     createdAt: e.createdAt,
+    tokenUsage: e.tokenUsage
+      ? { total: e.tokenUsage.total, hasOverlap: e.tokenUsage.hasOverlap }
+      : undefined,
   };
 }
 
@@ -535,7 +617,13 @@ export class WorkspaceWebview {
   }
 
   refresh(): void {
-    void this.panel.webview.postMessage({ type: 'state', state: buildState(this.currentView) });
+    void this.refreshAsync();
+  }
+
+  private async refreshAsync(): Promise<void> {
+    const state = buildState(this.currentView);
+    await mergeEpicTokenUsageInto(state);
+    void this.panel.webview.postMessage({ type: 'state', state });
   }
 
   setView(view: WorkspaceView): void {
