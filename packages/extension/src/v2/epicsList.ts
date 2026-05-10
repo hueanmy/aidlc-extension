@@ -64,6 +64,8 @@ export interface EpicSummary {
     history?: StepHistoryEntry[];
     /** Cached count of `reject` entries in `history` — for compact display. */
     rejectCount: number;
+    /** Carried feedback (from cascade reject or manual rerun feedback). */
+    feedback?: string;
   }>;
   /**
    * runId of the matching run state, if any. Convention: runId === epic.id.
@@ -134,6 +136,7 @@ export function listEpics(workspaceRoot: string, doc: YamlDocument | null): Epic
     const runRejectByAgent = new Map<string, string>();
     const runVerdictByAgent = new Map<string, AutoReviewVerdict>();
     const runHistoryByAgent = new Map<string, StepHistoryEntry[]>();
+    const runFeedbackByAgent = new Map<string, string>();
     if (runState) {
       for (const sr of runState.steps) {
         runStepByAgent.set(sr.agent, sr.status);
@@ -142,6 +145,7 @@ export function listEpics(workspaceRoot: string, doc: YamlDocument | null): Epic
         if (sr.history && sr.history.length > 0) {
           runHistoryByAgent.set(sr.agent, sr.history);
         }
+        if (sr.feedback) { runFeedbackByAgent.set(sr.agent, sr.feedback); }
       }
     }
     const runCurrentAgent = runState
@@ -200,6 +204,7 @@ export function listEpics(workspaceRoot: string, doc: YamlDocument | null): Epic
         stepHasHumanReview: gate.human,
         history,
         rejectCount,
+        feedback: runFeedbackByAgent.get(agent),
       };
     });
 

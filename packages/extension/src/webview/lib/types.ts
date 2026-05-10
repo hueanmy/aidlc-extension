@@ -180,6 +180,8 @@ export interface EpicStepDetailFull {
   history?: StepHistoryEntry[];
   /** Number of times this step has been rejected (cached count for display). */
   rejectCount?: number;
+  /** Carried feedback (from cascade reject blame or manual rerun feedback). */
+  feedback?: string;
 }
 
 export interface EpicSummary {

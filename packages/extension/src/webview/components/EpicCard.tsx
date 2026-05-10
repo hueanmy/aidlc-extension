@@ -387,7 +387,7 @@ function StepDetail({
         )}
       </div>
 
-      <RunGate epic={epic} focused={focused} />
+      <RunGate epic={epic} focused={focused} slashCommand={slashCommand} />
       <StepHistory step={focused} />
     </div>
   );
@@ -550,7 +550,15 @@ function DetailValue({ children, empty }: { children: React.ReactNode; empty?: b
   );
 }
 
-function RunGate({ epic, focused }: { epic: EpicSummary; focused: EpicStepDetailFull }) {
+function RunGate({
+  epic,
+  focused,
+  slashCommand,
+}: {
+  epic: EpicSummary;
+  focused: EpicStepDetailFull;
+  slashCommand: string | undefined;
+}) {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rerunOpen, setRerunOpen] = useState(false);
   if (!epic.runId || !focused.isCurrentRunStep) { return null; }
@@ -604,6 +612,12 @@ function RunGate({ epic, focused }: { epic: EpicSummary; focused: EpicStepDetail
         </div>
       )}
 
+      {status === 'awaiting_work' && focused.feedback && (
+        <div className="rounded border border-warning/40 bg-warning/10 px-2 py-1 font-mono text-[10.5px] text-warning">
+          ↳ {focused.feedback}
+        </div>
+      )}
+
       {focused.autoReviewVerdict && (
         <div
           className={cn(
@@ -647,12 +661,29 @@ function RunGate({ epic, focused }: { epic: EpicSummary; focused: EpicStepDetail
 
       <div className="flex flex-wrap gap-2">
         {status === 'awaiting_work' && (
-          <GateButton
-            variant="primary"
-            onClick={() => postMessage({ type: 'markStepDone', runId: epic.runId! })}
-          >
-            Mark step done
-          </GateButton>
+          <>
+            <GateButton
+              variant="primary"
+              onClick={() => postMessage({ type: 'markStepDone', runId: epic.runId! })}
+            >
+              Mark step done
+            </GateButton>
+            {focused.feedback && slashCommand && (
+              <GateButton
+                variant="approve"
+                onClick={() =>
+                  postMessage({
+                    type: 'runStepWithFeedback',
+                    runId: epic.runId!,
+                    slashCommand,
+                    feedback: focused.feedback,
+                  })
+                }
+              >
+                <RefreshCw className="h-3 w-3" /> Update with feedback
+              </GateButton>
+            )}
+          </>
         )}
         {status === 'awaiting_auto_review' && (
           <GateButton

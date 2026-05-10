@@ -110,6 +110,7 @@ interface EpicStepDetailFull {
   finishedAt?: string;
   history?: StepHistoryEntry[];
   rejectCount?: number;
+  feedback?: string;
 }
 
 interface EpicSummaryUi {
@@ -354,6 +355,7 @@ function toEpicSummaryUi(e: CoreEpicSummary): EpicSummaryUi {
       finishedAt: s.finishedAt ?? undefined,
       history: s.history,
       rejectCount: s.rejectCount,
+      feedback: s.feedback,
     })),
     currentStep: e.currentStep,
     pipeline: e.pipeline,
@@ -733,6 +735,19 @@ export class WorkspaceWebview {
         const feedback = String(msg.feedback ?? '');
         if (!runId) { return; }
         await rerunStepInlineCommand(runId, feedback);
+        return;
+      }
+      case 'runStepWithFeedback': {
+        const slash = String(msg.slashCommand ?? '');
+        const runId = String(msg.runId ?? '');
+        const feedback = String(msg.feedback ?? '');
+        if (!slash || !runId) { return; }
+        await vscode.commands.executeCommand(
+          'aidlc.runStepWithFeedback',
+          slash,
+          runId,
+          feedback,
+        );
         return;
       }
       case 'savePresetInline': {

@@ -425,6 +425,19 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
         await rerunStepInlineCommand(runId, feedback);
         return;
       }
+      case 'runStepWithFeedback': {
+        const slash = String(msg.slashCommand ?? '');
+        const runId = String(msg.runId ?? '');
+        const feedback = String(msg.feedback ?? '');
+        if (!slash || !runId) { return; }
+        await vscode.commands.executeCommand(
+          'aidlc.runStepWithFeedback',
+          slash,
+          runId,
+          feedback,
+        );
+        return;
+      }
       case 'startPipelineRun':
         await vscode.commands.executeCommand('aidlc.startPipelineRun');
         return;

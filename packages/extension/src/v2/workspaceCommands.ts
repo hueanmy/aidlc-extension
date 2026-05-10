@@ -193,6 +193,46 @@ export function registerV2WorkspaceCommands(
   // actually runs, leaving the user staring at the rc-script prompt
   // wondering what happened. Shell integration's onDidChange fires
   // exactly when the prompt is ready, so executeCommand lands cleanly.
+  /**
+   * Open the Claude terminal AND pre-type a slash command tagged with the
+   * step's carried feedback, so the user can hit Enter to send the agent
+   * an update prompt without manually composing it. Used by the "Update
+   * with feedback" button on awaiting_work steps that have a non-empty
+   * `feedback` field (cascade reject blame OR rerun feedback).
+   *
+   * Does NOT auto-execute (no trailing newline) — the user reviews and
+   * presses Enter, keeping them in control of what the agent receives.
+   */
+  const runWithFeedbackCmd = vscode.commands.registerCommand(
+    'aidlc.runStepWithFeedback',
+    async (slashCommand?: unknown, runId?: unknown, feedback?: unknown) => {
+      const slash = typeof slashCommand === 'string' ? slashCommand.trim() : '';
+      const id = typeof runId === 'string' ? runId.trim() : '';
+      const fb = typeof feedback === 'string' ? feedback.trim() : '';
+      if (!slash || !id) { return; }
+      // Reuse the openClaudeTerminal command so the terminal is created /
+      // revealed + `claude` is launched the same way as the standalone
+      // entry point. After it returns, the terminal is in scope.
+      await vscode.commands.executeCommand('aidlc.openClaudeTerminal');
+      const TERMINAL_NAME = 'AIDLC · Claude';
+      const terminal = vscode.window.terminals.find((t) => t.name === TERMINAL_NAME);
+      if (!terminal) { return; }
+      const prompt = fb
+        ? `${slash} ${id} — Update artifact per feedback: "${fb.replace(/"/g, '\\"')}"`
+        : `${slash} ${id}`;
+      // Tiny delay so the prompt lands after `claude` has booted (the
+      // openClaudeTerminal command kicks off `claude` via shell-integration
+      // or a 2s timeout fallback). 2.2s is enough for both paths in
+      // practice; if claude isn't ready yet the terminal just buffers.
+      setTimeout(() => {
+        terminal.show(false);
+        // addNewLine=false — let the user press Enter so they can edit
+        // the prompt before sending.
+        terminal.sendText(prompt, false);
+      }, 2200);
+    },
+  );
+
   const openClaudeTerminalCmd = vscode.commands.registerCommand(
     'aidlc.openClaudeTerminal',
     () => {
@@ -293,6 +333,7 @@ export function registerV2WorkspaceCommands(
       addPipelineCmd,
       openBuilderCmd,
       openClaudeTerminalCmd,
+      runWithFeedbackCmd,
       savePresetCmd,
       savePresetInlineCmd,
       applyPresetCmd,
