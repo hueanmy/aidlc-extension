@@ -378,11 +378,19 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       case 'rejectStep':
       case 'rerunStep':
       case 'runAutoReview':
-      case 'openRunState':
-      case 'deleteRun': {
+      case 'openRunState': {
         const runId = String(msg.runId ?? '');
         const cmd = `aidlc.${msg.type}`;
         await vscode.commands.executeCommand(cmd, runId || undefined);
+        return;
+      }
+      case 'deleteRun': {
+        const runId = String(msg.runId ?? '');
+        await vscode.commands.executeCommand(
+          'aidlc.deleteRun',
+          runId || undefined,
+          msg.confirmed === true,
+        );
         return;
       }
       case 'rejectStepInline': {

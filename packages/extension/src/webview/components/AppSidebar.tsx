@@ -29,6 +29,7 @@ import type {
   ArtifactPath,
 } from '@/lib/types';
 import { RejectModal } from './RejectModal';
+import { ConfirmModal } from './ConfirmModal';
 import { ThemeToggle } from './ThemeToggle';
 import { postMessage, getPersistedUi, setPersistedUi } from '@/lib/bridge';
 
@@ -727,6 +728,7 @@ function ArtifactList({
 
 function RunActions({ run }: { run: ActiveRun }) {
   const [rejectOpen, setRejectOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   return (
     <div className="mt-2 flex gap-1">
       {run.currentStepStatus === 'awaiting_work' && (
@@ -768,7 +770,7 @@ function RunActions({ run }: { run: ActiveRun }) {
       )}
       <button
         type="button"
-        onClick={() => postMessage({ type: 'deleteRun', runId: run.runId })}
+        onClick={() => setDeleteOpen(true)}
         title="Delete run"
         className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground hover:border-destructive hover:text-destructive"
       >
@@ -780,6 +782,23 @@ function RunActions({ run }: { run: ActiveRun }) {
           currentStepIdx={run.currentStepIdx}
           stepAgents={run.stepAgents}
           onClose={() => setRejectOpen(false)}
+        />
+      )}
+      {deleteOpen && (
+        <ConfirmModal
+          title="Delete run"
+          danger
+          confirmLabel="Delete"
+          message={
+            <>
+              Delete run <span className="font-mono">{run.runId}</span>? The run state
+              file is removed; produced artifacts on disk are kept.
+            </>
+          }
+          onConfirm={() =>
+            postMessage({ type: 'deleteRun', runId: run.runId, confirmed: true })
+          }
+          onClose={() => setDeleteOpen(false)}
         />
       )}
     </div>

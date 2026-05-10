@@ -4,6 +4,8 @@ import { cn } from '@/lib/utils';
 import type { WorkspaceState, AgentSummary, SkillSummary, AssetScope } from '@/lib/types';
 import { AgentCard, KebabMenu } from './AgentCard';
 import { PipelineCard } from './PipelineCard';
+import { RenameModal } from './RenameModal';
+import { ConfirmModal } from './ConfirmModal';
 import { postMessage } from '@/lib/bridge';
 
 type BuilderTab = 'workflows' | 'agents' | 'skills' | 'epics';
@@ -102,6 +104,12 @@ export function BuilderView({ state }: { state: WorkspaceState }) {
 
 function AgentsByScope({ agents }: { agents: AgentSummary[] }) {
   const grouped = useMemo(() => groupByScope(agents), [agents]);
+  // Rename uniqueness is checked against the workspace.yaml `agents:` list,
+  // which is exactly the AIDLC-scope subset.
+  const aidlcIds = useMemo(
+    () => agents.filter((a) => a.scope === 'aidlc').map((a) => a.id),
+    [agents],
+  );
   return (
     <>
       {SCOPE_ORDER.map((scope) => {
@@ -112,7 +120,7 @@ function AgentsByScope({ agents }: { agents: AgentSummary[] }) {
             <ScopeHeader scope={scope} count={list.length} />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {list.map((a) => (
-                <AgentCard key={`${a.scope}/${a.id}`} agent={a} />
+                <AgentCard key={`${a.scope}/${a.id}`} agent={a} allAgentIds={aidlcIds} />
               ))}
             </div>
           </section>
@@ -125,6 +133,10 @@ function AgentsByScope({ agents }: { agents: AgentSummary[] }) {
 
 function SkillsByScope({ skills }: { skills: SkillSummary[] }) {
   const grouped = useMemo(() => groupByScope(skills), [skills]);
+  const aidlcIds = useMemo(
+    () => skills.filter((s) => s.scope === 'aidlc').map((s) => s.id),
+    [skills],
+  );
   return (
     <>
       {SCOPE_ORDER.map((scope) => {
@@ -135,7 +147,7 @@ function SkillsByScope({ skills }: { skills: SkillSummary[] }) {
             <ScopeHeader scope={scope} count={list.length} />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {list.map((s) => (
-                <SkillCard key={`${s.scope}/${s.id}`} skill={s} />
+                <SkillCard key={`${s.scope}/${s.id}`} skill={s} allSkillIds={aidlcIds} />
               ))}
             </div>
           </section>
@@ -146,8 +158,10 @@ function SkillsByScope({ skills }: { skills: SkillSummary[] }) {
   );
 }
 
-function SkillCard({ skill }: { skill: SkillSummary }) {
+function SkillCard({ skill, allSkillIds }: { skill: SkillSummary; allSkillIds: string[] }) {
   const isAidlc = skill.scope === 'aidlc';
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const onClick = () => {
     if (skill.filePath) { postMessage({ type: 'openSkill', filePath: skill.filePath }); }
     else if (isAidlc) { postMessage({ type: 'openYaml' }); }
@@ -175,11 +189,53 @@ function SkillCard({ skill }: { skill: SkillSummary }) {
       {isAidlc && (
         <KebabMenu
           items={[
-            { label: 'Rename', icon: <Pencil className="h-3 w-3" />, action: 'renameSkill' },
-            { label: 'Duplicate', icon: <Copy className="h-3 w-3" />, action: 'duplicateSkill' },
-            { label: 'Delete', icon: <Trash2 className="h-3 w-3" />, action: 'deleteSkill', danger: true },
+            {
+              label: 'Rename',
+              icon: <Pencil className="h-3 w-3" />,
+              onSelect: () => setRenameOpen(true),
+            },
+            {
+              label: 'Duplicate',
+              icon: <Copy className="h-3 w-3" />,
+              action: 'duplicateSkill',
+            },
+            {
+              label: 'Delete',
+              icon: <Trash2 className="h-3 w-3" />,
+              onSelect: () => setDeleteOpen(true),
+              danger: true,
+            },
           ]}
           payload={{ id: skill.id }}
+        />
+      )}
+
+      {renameOpen && (
+        <RenameModal
+          kind="skill"
+          currentId={skill.id}
+          existingIds={allSkillIds}
+          onRename={(newId) =>
+            postMessage({ type: 'renameSkill', id: skill.id, newId })
+          }
+          onClose={() => setRenameOpen(false)}
+        />
+      )}
+      {deleteOpen && (
+        <ConfirmModal
+          title="Delete skill"
+          danger
+          confirmLabel="Delete"
+          message={
+            <>
+              Delete skill <span className="font-mono">{skill.id}</span> from{' '}
+              <span className="font-mono">workspace.yaml</span>? File on disk is kept.
+            </>
+          }
+          onConfirm={() =>
+            postMessage({ type: 'deleteSkill', id: skill.id, confirmed: true })
+          }
+          onClose={() => setDeleteOpen(false)}
         />
       )}
     </div>
@@ -188,10 +244,11 @@ function SkillCard({ skill }: { skill: SkillSummary }) {
 
 function PipelinesGrid({ state }: { state: WorkspaceState }) {
   if (state.pipelines.length === 0) { return <EmptyHint kind="pipelines" />; }
+  const aidlcAgents = state.agents.filter((a) => a.scope === 'aidlc');
   return (
     <div className="space-y-3">
       {state.pipelines.map((p) => (
-        <PipelineCard key={p.id} pipeline={p} />
+        <PipelineCard key={p.id} pipeline={p} agents={aidlcAgents} />
       ))}
     </div>
   );

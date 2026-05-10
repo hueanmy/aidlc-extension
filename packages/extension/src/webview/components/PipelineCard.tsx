@@ -10,13 +10,23 @@ import {
   User,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { PipelineSummary, PipelineStepSummary } from '@/lib/types';
+import type { PipelineSummary, PipelineStepSummary, AgentSummary } from '@/lib/types';
 import { postMessage } from '@/lib/bridge';
+import { ConfirmModal } from './ConfirmModal';
+import { StepPickerModal } from './StepPickerModal';
 
-export function PipelineCard({ pipeline }: { pipeline: PipelineSummary }) {
+export function PipelineCard({
+  pipeline,
+  agents,
+}: {
+  pipeline: PipelineSummary;
+  agents: AgentSummary[];
+}) {
   const total = pipeline.steps.length;
   const [dragSrc, setDragSrc] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   return (
     <div className="rounded-lg border border-border bg-card p-3">
       <div className="flex items-center gap-2 border-b border-border pb-2">
@@ -47,7 +57,7 @@ export function PipelineCard({ pipeline }: { pipeline: PipelineSummary }) {
         </button>
         <button
           type="button"
-          onClick={() => postMessage({ type: 'deletePipeline', id: pipeline.id })}
+          onClick={() => setDeleteOpen(true)}
           title="Delete workflow"
           className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
         >
@@ -89,13 +99,42 @@ export function PipelineCard({ pipeline }: { pipeline: PipelineSummary }) {
         ))}
         <button
           type="button"
-          onClick={() => postMessage({ type: 'addStepToPipeline', pipelineId: pipeline.id })}
+          onClick={() => setPickerOpen(true)}
           title="Append a step to this workflow"
           className="ml-1 grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 border-dashed border-primary/40 bg-primary/5 text-primary transition-all hover:scale-110 hover:border-primary/70 hover:border-solid hover:bg-primary/15"
         >
           <Plus className="h-4 w-4" />
         </button>
       </div>
+
+      {deleteOpen && (
+        <ConfirmModal
+          title="Delete workflow"
+          danger
+          confirmLabel="Delete"
+          message={
+            <>
+              Delete workflow <span className="font-mono">{pipeline.id}</span> from{' '}
+              <span className="font-mono">workspace.yaml</span>? Existing runs are kept.
+            </>
+          }
+          onConfirm={() =>
+            postMessage({ type: 'deletePipeline', id: pipeline.id, confirmed: true })
+          }
+          onClose={() => setDeleteOpen(false)}
+        />
+      )}
+      {pickerOpen && (
+        <StepPickerModal
+          pipelineId={pipeline.id}
+          agents={agents}
+          existingAgentIds={pipeline.steps.map((s) => s.agent)}
+          onPick={(agentId) =>
+            postMessage({ type: 'addStepToPipeline', pipelineId: pipeline.id, agentId })
+          }
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
     </div>
   );
 }

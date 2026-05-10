@@ -564,11 +564,21 @@ export class WorkspaceWebview {
       case 'approveStep':
       case 'rejectStep':
       case 'rerunStep':
-      case 'deleteRun':
       case 'openRunState': {
         const runId = String(msg.runId ?? '');
         const cmd = `aidlc.${msg.type}`;
         await vscode.commands.executeCommand(cmd, runId || undefined);
+        return;
+      }
+      case 'deleteRun': {
+        const runId = String(msg.runId ?? '');
+        // confirmed: webview already showed an inline ConfirmModal, skip the
+        // VS Code warning dialog. Falsy for command-palette invocations.
+        await vscode.commands.executeCommand(
+          'aidlc.deleteRun',
+          runId || undefined,
+          msg.confirmed === true,
+        );
         return;
       }
       case 'rejectStepInline': {
@@ -595,20 +605,41 @@ export class WorkspaceWebview {
           Number(msg.toIdx ?? -1),
         );
         return;
-      case 'addStepToPipeline':
-        await this.addStepToPipeline(String(msg.pipelineId ?? ''));
+      case 'addStepToPipeline': {
+        const pipelineId = String(msg.pipelineId ?? '');
+        const agentId = typeof msg.agentId === 'string' ? msg.agentId : undefined;
+        await this.addStepToPipeline(pipelineId, agentId);
         return;
+      }
       case 'deleteStep':
         await this.deleteStep(String(msg.pipelineId ?? ''), Number(msg.idx ?? -1));
         return;
       case 'editStepConfig':
         await this.editStepConfig(String(msg.pipelineId ?? ''), Number(msg.idx ?? -1));
         return;
-      case 'deleteAgent':    await this.deleteItem('agents',   String(msg.id ?? '')); return;
-      case 'deleteSkill':    await this.deleteItem('skills',   String(msg.id ?? '')); return;
-      case 'deletePipeline': await this.deleteItem('pipelines', String(msg.id ?? '')); return;
-      case 'renameAgent':    await this.renameItem('agents', String(msg.id ?? '')); return;
-      case 'renameSkill':    await this.renameItem('skills', String(msg.id ?? '')); return;
+      case 'deleteAgent':
+        await this.deleteItem('agents', String(msg.id ?? ''), msg.confirmed === true);
+        return;
+      case 'deleteSkill':
+        await this.deleteItem('skills', String(msg.id ?? ''), msg.confirmed === true);
+        return;
+      case 'deletePipeline':
+        await this.deleteItem('pipelines', String(msg.id ?? ''), msg.confirmed === true);
+        return;
+      case 'renameAgent':
+        await this.renameItem(
+          'agents',
+          String(msg.id ?? ''),
+          typeof msg.newId === 'string' ? msg.newId : undefined,
+        );
+        return;
+      case 'renameSkill':
+        await this.renameItem(
+          'skills',
+          String(msg.id ?? ''),
+          typeof msg.newId === 'string' ? msg.newId : undefined,
+        );
+        return;
       case 'duplicateAgent': await this.duplicateItem('agents', String(msg.id ?? '')); return;
       case 'duplicateSkill': await this.duplicateItem('skills', String(msg.id ?? '')); return;
       case 'togglePipelineFailure':
@@ -734,7 +765,7 @@ export class WorkspaceWebview {
     });
   }
 
-  private async addStepToPipeline(pipelineId: string): Promise<void> {
+  private async addStepToPipeline(pipelineId: string, agentIdArg?: string): Promise<void> {
     if (!pipelineId) { return; }
     const root = this.getRootOrWarn();
     if (!root) { return; }
@@ -752,40 +783,58 @@ export class WorkspaceWebview {
     }
     const pipeline = doc.pipelines.find((x) => x.id === pipelineId);
     if (!pipeline) { return; }
-    const currentSteps = Array.isArray(pipeline.steps)
-      ? pipeline.steps.map(stepAgentId)
-      : [];
-    const picked = await vscode.window.showQuickPick(
-      doc.agents.map((a) => {
-        const id = String(a.id);
-        const name = typeof a.name === 'string' ? a.name : id;
-        const inPipeline = currentSteps.includes(id);
-        return {
-          label: id,
-          description: name,
-          detail: inPipeline ? '· already in pipeline (will duplicate)' : '',
-          id,
-        };
-      }),
-      { placeHolder: `Append a step to \`${pipelineId}\``, ignoreFocusOut: true, matchOnDetail: true },
-    );
-    if (!picked) { return; }
+
+    let chosenId: string | undefined;
+    if (agentIdArg) {
+      // Webview already showed an inline StepPickerModal — trust the choice
+      // but verify the agent still exists in workspace.yaml.
+      if (doc.agents.some((a) => String(a.id) === agentIdArg)) {
+        chosenId = agentIdArg;
+      }
+    } else {
+      const currentSteps = Array.isArray(pipeline.steps)
+        ? pipeline.steps.map(stepAgentId)
+        : [];
+      const picked = await vscode.window.showQuickPick(
+        doc.agents.map((a) => {
+          const id = String(a.id);
+          const name = typeof a.name === 'string' ? a.name : id;
+          const inPipeline = currentSteps.includes(id);
+          return {
+            label: id,
+            description: name,
+            detail: inPipeline ? '· already in pipeline (will duplicate)' : '',
+            id,
+          };
+        }),
+        { placeHolder: `Append a step to \`${pipelineId}\``, ignoreFocusOut: true, matchOnDetail: true },
+      );
+      chosenId = picked?.id;
+    }
+    if (!chosenId) { return; }
     this.mutateYaml((d) => {
       const p = d.pipelines.find((x) => x.id === pipelineId);
       if (!p) { return false; }
       const steps = Array.isArray(p.steps) ? (p.steps as PipelineStepConfig[]) : [];
-      steps.push(picked.id);
+      steps.push(chosenId!);
       p.steps = steps;
     });
   }
 
-  private async deleteItem(field: 'agents' | 'skills' | 'pipelines', id: string): Promise<void> {
+  private async deleteItem(
+    field: 'agents' | 'skills' | 'pipelines',
+    id: string,
+    /** Webview already confirmed via inline modal — skip the VS Code dialog. */
+    skipConfirm = false,
+  ): Promise<void> {
     if (!id) { return; }
-    const confirm = await vscode.window.showWarningMessage(
-      `Delete ${field.replace(/s$/, '')} \`${id}\`?`,
-      { modal: true }, 'Delete', 'Cancel',
-    );
-    if (confirm !== 'Delete') { return; }
+    if (!skipConfirm) {
+      const confirm = await vscode.window.showWarningMessage(
+        `Delete ${field.replace(/s$/, '')} \`${id}\`?`,
+        { modal: true }, 'Delete', 'Cancel',
+      );
+      if (confirm !== 'Delete') { return; }
+    }
     this.mutateYaml((doc) => {
       const arr = doc[field];
       if (!Array.isArray(arr)) { return false; }
@@ -795,21 +844,31 @@ export class WorkspaceWebview {
     });
   }
 
-  private async renameItem(field: 'agents' | 'skills', id: string): Promise<void> {
+  private async renameItem(
+    field: 'agents' | 'skills',
+    id: string,
+    /** Webview already prompted via inline RenameModal — use this directly
+     * and skip the VS Code input box. Falsy for command-palette flows. */
+    newIdArg?: string,
+  ): Promise<void> {
     if (!id) { return; }
-    const newId = await vscode.window.showInputBox({
-      prompt: `New ID for ${field.replace(/s$/, '')} \`${id}\``,
-      value: id,
-      validateInput: (v) => v && v.trim() ? null : 'ID cannot be empty',
-    });
-    if (!newId || newId.trim() === id) { return; }
+    let newId = newIdArg;
+    if (!newId) {
+      newId = await vscode.window.showInputBox({
+        prompt: `New ID for ${field.replace(/s$/, '')} \`${id}\``,
+        value: id,
+        validateInput: (v) => v && v.trim() ? null : 'ID cannot be empty',
+      });
+    }
+    const trimmed = newId?.trim();
+    if (!trimmed || trimmed === id) { return; }
     this.mutateYaml((doc) => {
       const arr = doc[field];
       if (!Array.isArray(arr)) { return false; }
       const item = arr.find((x) => x.id === id);
       if (!item) { return false; }
-      if (arr.some((x) => x.id === newId.trim())) { return false; }
-      item.id = newId.trim();
+      if (arr.some((x) => x.id === trimmed)) { return false; }
+      item.id = trimmed;
     });
   }
 

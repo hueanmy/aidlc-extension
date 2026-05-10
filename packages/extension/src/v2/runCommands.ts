@@ -472,17 +472,24 @@ export async function openRunStateCommand(runIdArg?: string): Promise<void> {
 
 // ── deleteRun ────────────────────────────────────────────────────────────
 
-export async function deleteRunCommand(runIdArg?: string): Promise<void> {
+export async function deleteRunCommand(
+  runIdArg?: string,
+  /** When true, skip the VS Code confirm dialog (the webview already showed an
+   * inline ConfirmModal). Always false for command-palette invocations. */
+  skipConfirm = false,
+): Promise<void> {
   const root = requireRoot('Delete Run');
   if (!root) { return; }
   const runId = await resolveRunId(root, runIdArg);
   if (!runId) { return; }
-  const choice = await vscode.window.showWarningMessage(
-    `Delete run "${runId}"? The state JSON is removed; produced artifacts on disk are kept.`,
-    { modal: false },
-    'Delete', 'Cancel',
-  );
-  if (choice !== 'Delete') { return; }
+  if (!skipConfirm) {
+    const choice = await vscode.window.showWarningMessage(
+      `Delete run "${runId}"? The state JSON is removed; produced artifacts on disk are kept.`,
+      { modal: false },
+      'Delete', 'Cancel',
+    );
+    if (choice !== 'Delete') { return; }
+  }
   RunStateStore.delete(root, runId);
   void vscode.window.showInformationMessage(`Deleted run "${runId}".`);
 }

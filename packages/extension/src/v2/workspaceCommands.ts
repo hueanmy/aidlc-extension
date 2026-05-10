@@ -262,7 +262,11 @@ export function registerV2WorkspaceCommands(
   );
   const deleteRunCmd = vscode.commands.registerCommand(
     'aidlc.deleteRun',
-    (runId?: unknown) => deleteRunCommand(typeof runId === 'string' ? runId : undefined),
+    (runId?: unknown, skipConfirm?: unknown) =>
+      deleteRunCommand(
+        typeof runId === 'string' ? runId : undefined,
+        skipConfirm === true,
+      ),
   );
 
   return {
