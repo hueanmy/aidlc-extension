@@ -17,6 +17,7 @@ import * as os from 'os';
 import * as readline from 'readline';
 
 import { calcCost, type Usage } from './tokenPricing';
+import { TokenReportWebview } from './tokenReportWebview';
 
 interface Totals extends Usage {
   cost: number;
@@ -190,15 +191,6 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
-function totalTokens(t: Totals): number {
-  return (
-    t.input_tokens +
-    t.output_tokens +
-    t.cache_read_input_tokens +
-    t.cache_creation_input_tokens
-  );
-}
-
 function buildTooltip(snap: Snapshot): vscode.MarkdownString {
   const md = new vscode.MarkdownString();
   md.isTrusted = true;
@@ -221,6 +213,7 @@ const REFRESH_COMMAND = 'aidlc.refreshTokenUsage';
 export function registerTokenMonitor(
   context: vscode.ExtensionContext,
   output: vscode.OutputChannel,
+  extensionUri: vscode.Uri,
 ): void {
   const cfg = () => vscode.workspace.getConfiguration('aidlc.tokenMonitor');
   if (!cfg().get<boolean>('enabled', true)) {
@@ -235,7 +228,6 @@ export function registerTokenMonitor(
   item.show();
   context.subscriptions.push(item);
 
-  let last: Snapshot | null = null;
   let inFlight = false;
 
   const refresh = async () => {
@@ -243,7 +235,6 @@ export function registerTokenMonitor(
     inFlight = true;
     try {
       const snap = await readSnapshot();
-      last = snap;
       item.text = `$(graph) ${fmtCost(snap.today.cost)} today · ${fmtCost(snap.month.cost)} mo`;
       item.tooltip = buildTooltip(snap);
     } catch (err) {
@@ -277,24 +268,11 @@ export function registerTokenMonitor(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(SHOW_DETAILS_COMMAND, async () => {
-      if (!last) await refresh();
-      const snap = last;
-      if (!snap) return;
-      const lines = [
-        `Today  ${fmtCost(snap.today.cost).padEnd(8)} ${snap.today.calls} calls  in ${fmtTokens(snap.today.input_tokens)}  out ${fmtTokens(snap.today.output_tokens)}  cache rd ${fmtTokens(snap.today.cache_read_input_tokens)}  cache wr ${fmtTokens(snap.today.cache_creation_input_tokens)}`,
-        `Month  ${fmtCost(snap.month.cost).padEnd(8)} ${snap.month.calls} calls  in ${fmtTokens(snap.month.input_tokens)}  out ${fmtTokens(snap.month.output_tokens)}  cache rd ${fmtTokens(snap.month.cache_read_input_tokens)}  cache wr ${fmtTokens(snap.month.cache_creation_input_tokens)}`,
-        '',
-        `Total tokens today: ${fmtTokens(totalTokens(snap.today))}`,
-        `Total tokens month: ${fmtTokens(totalTokens(snap.month))}`,
-        `Files scanned: ${snap.scannedFiles}`,
-      ];
-      const pick = await vscode.window.showInformationMessage(
-        lines.join('\n'),
-        { modal: true },
-        'Refresh now',
-      );
-      if (pick === 'Refresh now') await refresh();
+    vscode.commands.registerCommand(SHOW_DETAILS_COMMAND, () => {
+      // Click on the status-bar item opens the full-dashboard report panel
+      // (Overview / By Model / Daily / Top Projects / Heatmap / Suggestions).
+      // The panel reuses an existing instance if already open.
+      TokenReportWebview.show(extensionUri);
     }),
   );
 

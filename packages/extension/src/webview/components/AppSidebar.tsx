@@ -20,8 +20,6 @@ import {
   RefreshCw,
   Plug,
   Loader2,
-  Lightbulb,
-  TrendingDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type {
@@ -32,7 +30,6 @@ import type {
   TemplateRef,
   ArtifactPath,
   McpServerInfo,
-  CostSuggestion,
 } from '@/lib/types';
 import { RejectModal } from './RejectModal';
 import { ConfirmModal } from './ConfirmModal';
@@ -41,7 +38,6 @@ import { RerunModal } from './RerunModal';
 import { RunWithFeedbackModal } from './RunWithFeedbackModal';
 import { SavePresetModal } from './SavePresetModal';
 import { LoadDemoModal } from './LoadDemoModal';
-import { Modal } from './Modal';
 import { ThemeToggle } from './ThemeToggle';
 import { postMessage, getPersistedUi, setPersistedUi } from '@/lib/bridge';
 
@@ -51,7 +47,6 @@ interface CollapseState {
   workflows: boolean;
   pipelineRuns: boolean;
   mcpServers: boolean;
-  costSuggestions: boolean;
 }
 
 interface PersistedUi {
@@ -65,7 +60,6 @@ const DEFAULT_COLLAPSED: CollapseState = {
   workflows: false,
   pipelineRuns: false,
   mcpServers: true,
-  costSuggestions: false,
 };
 
 function isRunCollapsed(
@@ -232,15 +226,6 @@ export function AppSidebar({ state }: { state: SidebarState | null }) {
               error={state.mcpError}
               collapsed={collapsed.mcpServers}
               onToggle={() => toggleSection('mcpServers')}
-            />
-
-            <CostSuggestionsSection
-              suggestions={state.costSuggestions}
-              loading={state.costSuggestionsLoading}
-              error={state.costSuggestionsError}
-              windowDays={state.costSuggestionsWindowDays}
-              collapsed={collapsed.costSuggestions}
-              onToggle={() => toggleSection('costSuggestions')}
             />
           </>
         )}
@@ -623,387 +608,6 @@ function McpRow({ server }: { server: McpServerInfo }) {
   );
 }
 
-function CostSuggestionsSection({
-  suggestions,
-  loading,
-  error,
-  windowDays,
-  collapsed,
-  onToggle,
-}: {
-  suggestions: CostSuggestion[] | null;
-  loading: boolean;
-  error: string | null;
-  windowDays: number;
-  collapsed: boolean;
-  onToggle: () => void;
-}) {
-  // Header surfaces the most actionable summary: total estimated savings
-  // across all surfaced rules, plus a sev-count breakdown so users can
-  // tell at a glance whether anything is high-severity without expanding.
-  const totalSavings = suggestions?.reduce((s, x) => s + x.estSavings, 0) ?? 0;
-  const counts = countBySeverity(suggestions);
-  // Whole list lives in a modal so the sidebar stays compact — even with
-  // internal scroll, 48+ rows in a 220-px column is hard to skim. The
-  // section just shows a summary CTA; click → modal.
-  const [listOpen, setListOpen] = useState(false);
-  const total = suggestions?.length ?? 0;
-  const hasItems = total > 0;
-  return (
-    <div>
-      <SectionHeader
-        label="Cost suggestions"
-        collapsed={collapsed}
-        onToggle={onToggle}
-        trailing={
-          <div className="flex items-center gap-1.5">
-            {suggestions && suggestions.length > 0 && (
-              <span className="flex items-center gap-1 text-[10px] tabular-nums">
-                {counts.high > 0 && (
-                  <span className="text-destructive">{counts.high}h</span>
-                )}
-                {counts.med > 0 && (
-                  <span className="text-warning">{counts.med}m</span>
-                )}
-                {counts.low > 0 && (
-                  <span className="text-muted-foreground">{counts.low}l</span>
-                )}
-                {totalSavings > 0 && (
-                  <span className="text-success">· save ~{fmtUsd(totalSavings)}</span>
-                )}
-              </span>
-            )}
-            {suggestions && suggestions.length === 0 && !loading && !error && (
-              <span className="text-[10px] text-success">all clean</span>
-            )}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                postMessage({ type: 'refreshCostSuggestions' });
-              }}
-              title={`Re-scan last ${windowDays} day(s) of Claude logs`}
-              className="grid h-5 w-5 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
-              disabled={loading}
-            >
-              {loading ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <RefreshCw className="h-3 w-3" />
-              )}
-            </button>
-          </div>
-        }
-      />
-      {!collapsed && (
-        <div className="mt-1.5 space-y-1.5">
-          <div className="flex items-center gap-1.5 px-1 text-[10px] text-muted-foreground">
-            <Lightbulb className="h-2.5 w-2.5" />
-            <span>Heuristic scan of last {windowDays}d · ported from claude-token-monitor</span>
-          </div>
-          {error && (
-            <div className="rounded border-l-2 border-destructive bg-destructive/5 px-2 py-1.5 text-[10px] text-muted-foreground">
-              {error}
-            </div>
-          )}
-          {suggestions === null && !error && (
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              <span>Scanning Claude logs…</span>
-            </div>
-          )}
-          {suggestions && suggestions.length === 0 && !error && (
-            <div className="flex items-center gap-1.5 rounded-md border border-success/30 bg-success/5 px-2.5 py-1.5 text-[11px] text-success">
-              <TrendingDown className="h-3 w-3" />
-              <span>No efficiency issues detected — looking clean.</span>
-            </div>
-          )}
-          {hasItems && (
-            <button
-              type="button"
-              onClick={() => setListOpen(true)}
-              className="flex w-full items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-2.5 py-2 text-[11px] text-primary hover:border-primary/50 hover:bg-primary/15"
-            >
-              <Lightbulb className="h-3 w-3" />
-              <span className="font-semibold">View {total} suggestion{total === 1 ? '' : 's'}</span>
-              {totalSavings > 0 && (
-                <span className="font-mono text-[10px] tabular-nums text-success">
-                  · save ~{fmtUsd(totalSavings)}
-                </span>
-              )}
-              <ChevronRight className="ml-auto h-3 w-3 opacity-70" />
-            </button>
-          )}
-        </div>
-      )}
-      {listOpen && suggestions && (
-        <CostSuggestionsListModal
-          suggestions={suggestions}
-          windowDays={windowDays}
-          totalSavings={totalSavings}
-          counts={counts}
-          onClose={() => setListOpen(false)}
-        />
-      )}
-    </div>
-  );
-}
-
-function countBySeverity(
-  suggestions: CostSuggestion[] | null,
-): { high: number; med: number; low: number } {
-  const out = { high: 0, med: 0, low: 0 };
-  if (!suggestions) { return out; }
-  for (const s of suggestions) { out[s.severity]++; }
-  return out;
-}
-
-const SEV_PILL: Record<CostSuggestion['severity'], string> = {
-  high: 'bg-destructive/15 text-destructive',
-  med: 'bg-warning/15 text-warning',
-  low: 'bg-muted text-muted-foreground',
-};
-
-function CostSuggestionsListModal({
-  suggestions,
-  windowDays,
-  totalSavings,
-  counts,
-  onClose,
-}: {
-  suggestions: CostSuggestion[];
-  windowDays: number;
-  totalSavings: number;
-  counts: { high: number; med: number; low: number };
-  onClose: () => void;
-}) {
-  // List + detail are two stacked modals: list stays mounted underneath,
-  // detail floats on top when a row is clicked. List is marked `inactive`
-  // while detail is open so Esc / backdrop-click on detail doesn't also
-  // dismiss the list.
-  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
-  const selected = selectedIdx !== null ? suggestions[selectedIdx] ?? null : null;
-  return (
-    <>
-      <Modal
-        title={`Cost suggestions (${suggestions.length})`}
-        subtitle={
-          <span className="flex items-center gap-2">
-            <span>Heuristic scan of last {windowDays}d</span>
-            <span className="text-muted-foreground/70">·</span>
-            {counts.high > 0 && (
-              <span className="text-destructive">{counts.high} high</span>
-            )}
-            {counts.med > 0 && (
-              <span className="text-warning">{counts.med} med</span>
-            )}
-            {counts.low > 0 && (
-              <span className="text-muted-foreground">{counts.low} low</span>
-            )}
-            {totalSavings > 0 && (
-              <>
-                <span className="text-muted-foreground/70">·</span>
-                <span className="font-mono tabular-nums text-success">
-                  save ~{fmtUsd(totalSavings)}
-                </span>
-              </>
-            )}
-          </span>
-        }
-        maxWidth="max-w-3xl"
-        onClose={onClose}
-        inactive={selected !== null}
-      >
-        <div className="max-h-[60vh] space-y-1 overflow-y-auto pr-1">
-          {suggestions.map((s, i) => (
-            <CostSuggestionRow
-              key={`${s.rule}-${i}`}
-              s={s}
-              onOpen={() => setSelectedIdx(i)}
-            />
-          ))}
-        </div>
-      </Modal>
-      {selected !== null && selectedIdx !== null && (
-        <CostSuggestionDetailModal
-          suggestion={selected}
-          index={selectedIdx}
-          total={suggestions.length}
-          onPrev={selectedIdx > 0 ? () => setSelectedIdx(selectedIdx - 1) : undefined}
-          onNext={
-            selectedIdx < suggestions.length - 1
-              ? () => setSelectedIdx(selectedIdx + 1)
-              : undefined
-          }
-          onClose={() => setSelectedIdx(null)}
-        />
-      )}
-    </>
-  );
-}
-
-function CostSuggestionRow({
-  s,
-  onOpen,
-}: {
-  s: CostSuggestion;
-  onOpen: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      title="Open suggestion detail"
-      className={cn(
-        'flex w-full items-center gap-1.5 rounded border bg-card/50 px-2 py-1 text-left text-[11px] transition-colors hover:bg-accent/40',
-        s.severity === 'high'
-          ? 'border-destructive/40'
-          : s.severity === 'med'
-          ? 'border-warning/40'
-          : 'border-border',
-      )}
-    >
-      <span
-        className={cn(
-          'shrink-0 rounded-full px-1 py-px text-[8.5px] font-bold uppercase tracking-wider',
-          SEV_PILL[s.severity],
-        )}
-      >
-        {s.severity}
-      </span>
-      <span className="font-mono text-[10px] font-semibold text-primary truncate">
-        {s.rule}
-      </span>
-      <span className="truncate text-[10px] text-muted-foreground">· {s.scope}</span>
-      {s.estSavings > 0 && (
-        <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-success">
-          ~{fmtUsd(s.estSavings)}
-        </span>
-      )}
-    </button>
-  );
-}
-
-function CostSuggestionDetailModal({
-  suggestion,
-  index,
-  total,
-  onPrev,
-  onNext,
-  onBack,
-  onClose,
-}: {
-  suggestion: CostSuggestion;
-  index: number;
-  total: number;
-  onPrev?: () => void;
-  onNext?: () => void;
-  /** Optional "back to list" handler — present when the detail view is
-   * embedded inside the list modal. Independent of onClose so users can
-   * return to the list without closing the whole popup. */
-  onBack?: () => void;
-  onClose: () => void;
-}) {
-  // Modal lives at fixed inset-0 z-50, so it floats above the sidebar
-  // panel (which is constrained to the activity-bar column). Wider
-  // breakpoint than the default Modal so action text doesn't wrap awkwardly.
-  return (
-    <Modal
-      title="Cost suggestion"
-      subtitle={
-        <span className="flex items-center gap-2">
-          <span
-            className={cn(
-              'rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wider',
-              SEV_PILL[suggestion.severity],
-            )}
-          >
-            {suggestion.severity}
-          </span>
-          <span className="font-mono text-foreground/80">{suggestion.rule}</span>
-          <span className="text-muted-foreground/70">·</span>
-          <span>{index + 1} / {total}</span>
-        </span>
-      }
-      maxWidth="max-w-xl"
-      onClose={onClose}
-    >
-      <div className="space-y-3 text-[12px]">
-        <DetailField label="Scope">
-          <span className="font-mono text-[11.5px] text-foreground/90">{suggestion.scope}</span>
-        </DetailField>
-        <DetailField label="Evidence">
-          <span className="text-muted-foreground">{suggestion.evidence}</span>
-        </DetailField>
-        <DetailField label="Recommended action">
-          <span className="leading-relaxed text-foreground">{suggestion.action}</span>
-        </DetailField>
-        {suggestion.estSavings > 0 && (
-          <DetailField label="Estimated savings">
-            <span className="font-mono tabular-nums text-success">
-              ~{fmtUsd(suggestion.estSavings)} (heuristic)
-            </span>
-          </DetailField>
-        )}
-      </div>
-      <div className="mt-5 flex items-center justify-between gap-2">
-        <div className="flex gap-2">
-          {onBack && (
-            <button
-              type="button"
-              onClick={onBack}
-              className="rounded-md border border-border px-3 py-1.5 text-[11.5px] font-medium text-muted-foreground hover:border-border/80 hover:bg-accent hover:text-foreground"
-              title="Back to list"
-            >
-              ← List
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={onPrev}
-            disabled={!onPrev}
-            className="rounded-md border border-border px-3 py-1.5 text-[11.5px] font-medium text-muted-foreground hover:border-border/80 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            ← Prev
-          </button>
-          <button
-            type="button"
-            onClick={onNext}
-            disabled={!onNext}
-            className="rounded-md border border-border px-3 py-1.5 text-[11.5px] font-medium text-muted-foreground hover:border-border/80 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Next →
-          </button>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-md border border-primary/50 bg-primary/15 px-3 py-1.5 text-[11.5px] font-semibold text-primary hover:border-primary hover:bg-primary/25"
-        >
-          Close
-        </button>
-      </div>
-    </Modal>
-  );
-}
-
-function DetailField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="mb-1 text-[9.5px] font-bold uppercase tracking-widest text-muted-foreground">
-        {label}
-      </div>
-      <div>{children}</div>
-    </div>
-  );
-}
-
-function fmtUsd(n: number): string {
-  if (n >= 100) { return `$${n.toFixed(0)}`; }
-  if (n >= 10) { return `$${n.toFixed(1)}`; }
-  if (n >= 1) { return `$${n.toFixed(2)}`; }
-  return `$${n.toFixed(3)}`;
-}
 
 function WorkflowsSection({
   builtins,

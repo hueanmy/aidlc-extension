@@ -129,7 +129,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Token monitor — reads ~/.claude/projects/*.jsonl and shows today/month spend.
   // Ported from claude-token-monitor (https://github.com/emtyty/claude-token-monitor).
-  registerTokenMonitor(context, output);
+  registerTokenMonitor(context, output, context.extensionUri);
 
   output.appendLine('Activation complete.');
 }
