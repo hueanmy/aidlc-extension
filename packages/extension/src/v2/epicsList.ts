@@ -151,12 +151,23 @@ export function listEpics(workspaceRoot: string, doc: YamlDocument | null): Epic
       const agent = typeof s.agent === 'string' ? s.agent : '';
       const gate = stepGateByIdx.get(i) ?? { auto: false, human: false };
       const runStatus = runStepByAgent.get(agent) ?? null;
-      // The state.json's per-step status doesn't track rejection — it
-      // stays at `in_progress` until rerun + advance. When the run-state
-      // machine has rejected the step, surface that as `failed` for
-      // display so the badge / pipeline circle render red instead of
-      // the misleading yellow "in_progress".
-      const displayStatus = runStatus === 'rejected' ? 'failed' as const : asStatus(s.status);
+      // The state.json's per-step status doesn't sync from the run-state
+      // machine, so prefer the run status when it's present. Mapping:
+      //   approved                                  → done
+      //   rejected                                  → failed
+      //   awaiting_work | awaiting_auto_review |
+      //   awaiting_review                           → in_progress
+      //   pending / no run                          → fall back to state.json
+      const displayStatus =
+        runStatus === 'approved'
+          ? ('done' as const)
+          : runStatus === 'rejected'
+          ? ('failed' as const)
+          : runStatus === 'awaiting_work'
+          || runStatus === 'awaiting_auto_review'
+          || runStatus === 'awaiting_review'
+          ? ('in_progress' as const)
+          : asStatus(s.status);
       return {
         agent,
         status: displayStatus,
@@ -173,16 +184,31 @@ export function listEpics(workspaceRoot: string, doc: YamlDocument | null): Epic
 
     const inputs = readInputs(epicDir);
 
+    // The state.json's overall status doesn't sync from the run-state
+    // machine either, so when a runState is present, derive epic status
+    // from it (completed → done; any rejected step → failed; otherwise
+    // in_progress). Falls back to state.json when no runState exists.
+    const epicStatus = runState
+      ? runState.status === 'completed'
+        ? 'done' as const
+        : runState.steps.some((sr) => sr.status === 'rejected')
+        ? 'failed' as const
+        : 'in_progress' as const
+      : asStatus(parsed.status);
+    const currentStep = runState
+      ? runState.currentStepIdx
+      : (typeof parsed.currentStep === 'number' ? parsed.currentStep : 0);
+
     epics.push({
       id: epicId,
       title: typeof parsed.title === 'string' ? parsed.title : '',
       description: typeof parsed.description === 'string' ? parsed.description : '',
-      status: asStatus(parsed.status),
+      status: epicStatus,
       createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : '',
       pipeline: typeof parsed.pipeline === 'string' ? parsed.pipeline : null,
       agent: typeof parsed.agent === 'string' ? parsed.agent : null,
       agents: Array.isArray(parsed.agents) ? (parsed.agents as unknown[]).map(String) : [],
-      currentStep: typeof parsed.currentStep === 'number' ? parsed.currentStep : 0,
+      currentStep,
       stepStatuses: stepDetails.map((s) => s.status),
       stepDetails,
       inputs,
