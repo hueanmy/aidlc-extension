@@ -127,12 +127,12 @@ export function EpicCard({ epic, agentMeta, slashCommandsByAgent }: Props) {
             <span
               className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground"
               title={
-                `${fmtCost(epic.tokenUsage.total.cost)} · ${fmtTokens(epic.tokenUsage.total.totalTokens)} tokens · ${epic.tokenUsage.total.calls} calls` +
+                `${fmtTokens(epic.tokenUsage.total.totalTokens)} tokens · ${epic.tokenUsage.total.calls} calls · ${fmtCost(epic.tokenUsage.total.cost)} API equiv` +
                 (epic.tokenUsage.hasOverlap ? ' · ⚠ overlaps with another run in this project — totals may double-count' : '')
               }
             >
               <Zap className="h-3 w-3" />
-              {fmtCost(epic.tokenUsage.total.cost)}
+              {fmtTokens(epic.tokenUsage.total.totalTokens)}
               {epic.tokenUsage.hasOverlap && (
                 <AlertTriangle className="h-3 w-3 text-warning" aria-label="Overlap warning" />
               )}
@@ -376,10 +376,13 @@ function StepDetail({
       )}
 
       {focused.tokenUsage && focused.tokenUsage.calls > 0 && (
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+        <div
+          className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground"
+          title={`${fmtCost(focused.tokenUsage.cost)} API equivalent (subscription users don't pay this)`}
+        >
           <span className="inline-flex items-center gap-1 font-medium tabular-nums text-foreground">
             <Zap className="h-3 w-3" />
-            {fmtCost(focused.tokenUsage.cost)}
+            {fmtTokens(focused.tokenUsage.totalTokens)} tok
           </span>
           <span>· {focused.tokenUsage.calls} calls</span>
           <span>

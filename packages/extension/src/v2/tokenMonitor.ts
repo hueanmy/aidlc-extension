@@ -247,13 +247,14 @@ function buildTooltip(snap: Snapshot): vscode.MarkdownString {
   md.isTrusted = true;
   md.supportThemeIcons = true;
   const row = (label: string, t: Totals) =>
-    `| **${label}** | ${fmtCost(t.cost)} | ${fmtTokens(t.input_tokens)} | ${fmtTokens(t.output_tokens)} | ${fmtTokens(t.cache_read_input_tokens)} | ${fmtTokens(t.cache_creation_input_tokens)} | ${t.calls} |`;
+    `| **${label}** | ${fmtTokens(totalTokens(t))} | ${fmtTokens(t.input_tokens)} | ${fmtTokens(t.output_tokens)} | ${fmtTokens(t.cache_read_input_tokens)} | ${fmtTokens(t.cache_creation_input_tokens)} | ${t.calls} | ${fmtCost(t.cost)} |`;
   md.appendMarkdown('### Claude Code token usage\n\n');
-  md.appendMarkdown('| | Cost | In | Out | Cache rd | Cache wr | Calls |\n');
-  md.appendMarkdown('|---|---|---|---|---|---|---|\n');
+  md.appendMarkdown('| | Total | In | Out | Cache rd | Cache wr | Calls | API $ |\n');
+  md.appendMarkdown('|---|---|---|---|---|---|---|---|\n');
   md.appendMarkdown(row('Today', snap.today) + '\n');
   md.appendMarkdown(row('Month', snap.month) + '\n\n');
-  md.appendMarkdown(`_${snap.scannedFiles} log file(s) scanned · click for breakdown_\n\n`);
+  md.appendMarkdown(`_${snap.scannedFiles} log file(s) scanned · click for breakdown_\n`);
+  md.appendMarkdown('_API $ = pay-as-you-go API equivalent; not what subscription users actually pay._\n\n');
   md.appendMarkdown('Source: [claude-token-monitor](https://github.com/emtyty/claude-token-monitor)');
   return md;
 }
@@ -287,7 +288,7 @@ export function registerTokenMonitor(
     try {
       const snap = await readSnapshot();
       last = snap;
-      item.text = `$(graph) ${fmtCost(snap.today.cost)} today · ${fmtCost(snap.month.cost)} mo`;
+      item.text = `$(graph) ${fmtTokens(totalTokens(snap.today))} today · ${fmtTokens(totalTokens(snap.month))} mo`;
       item.tooltip = buildTooltip(snap);
     } catch (err) {
       output.appendLine(`Token monitor refresh failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -325,11 +326,10 @@ export function registerTokenMonitor(
       const snap = last;
       if (!snap) return;
       const lines = [
-        `Today  ${fmtCost(snap.today.cost).padEnd(8)} ${snap.today.calls} calls  in ${fmtTokens(snap.today.input_tokens)}  out ${fmtTokens(snap.today.output_tokens)}  cache rd ${fmtTokens(snap.today.cache_read_input_tokens)}  cache wr ${fmtTokens(snap.today.cache_creation_input_tokens)}`,
-        `Month  ${fmtCost(snap.month.cost).padEnd(8)} ${snap.month.calls} calls  in ${fmtTokens(snap.month.input_tokens)}  out ${fmtTokens(snap.month.output_tokens)}  cache rd ${fmtTokens(snap.month.cache_read_input_tokens)}  cache wr ${fmtTokens(snap.month.cache_creation_input_tokens)}`,
+        `Today  ${fmtTokens(totalTokens(snap.today)).padEnd(7)}  ${snap.today.calls} calls  in ${fmtTokens(snap.today.input_tokens)}  out ${fmtTokens(snap.today.output_tokens)}  cache rd ${fmtTokens(snap.today.cache_read_input_tokens)}  cache wr ${fmtTokens(snap.today.cache_creation_input_tokens)}`,
+        `Month  ${fmtTokens(totalTokens(snap.month)).padEnd(7)}  ${snap.month.calls} calls  in ${fmtTokens(snap.month.input_tokens)}  out ${fmtTokens(snap.month.output_tokens)}  cache rd ${fmtTokens(snap.month.cache_read_input_tokens)}  cache wr ${fmtTokens(snap.month.cache_creation_input_tokens)}`,
         '',
-        `Total tokens today: ${fmtTokens(totalTokens(snap.today))}`,
-        `Total tokens month: ${fmtTokens(totalTokens(snap.month))}`,
+        `API equivalent  today ${fmtCost(snap.today.cost)}  ·  month ${fmtCost(snap.month.cost)}`,
         `Files scanned: ${snap.scannedFiles}`,
       ];
       const pick = await vscode.window.showInformationMessage(
