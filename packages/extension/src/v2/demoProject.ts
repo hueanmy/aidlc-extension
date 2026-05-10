@@ -475,6 +475,17 @@ function seedRichEpic(root: string, epicId: string, opts: SeedRichEpicOpts): voi
   };
   writeJson(path.join(root, '.aidlc', 'runs', `${epicId}.json`), runState);
 
+  // Synthetic token-usage sidecar — lets the demo epic render the ⚡
+  // badge + per-step + per-history breakdown without requiring real
+  // Claude logs to match the demo's cwd & time windows. Plausible
+  // numbers (~$0.10–2/step varying by phase) so users get a feel for
+  // the UI; the EpicTokenAttribution module reads this sidecar
+  // verbatim when present (`<runId>.usage.json` next to `<runId>.json`).
+  writeJson(
+    path.join(root, '.aidlc', 'runs', `${epicId}.usage.json`),
+    buildRichEpicSyntheticUsage(steps),
+  );
+
   // Mirror into state.json so a teammate who only pulls the repo (and
   // therefore lacks the gitignored .aidlc/runs/) can still read the
   // history. Mirrors the shape produced by `mirrorRunStateToEpic`.
@@ -530,6 +541,106 @@ function seedRichEpic(root: string, epicId: string, opts: SeedRichEpicOpts): voi
       artifactStub(epicId, opts.artifactProducedAt),
     );
   }
+}
+
+// Per-agent synthetic usage for a single attempt — deliberately small so
+// the demo doesn't make new users panic about cost on day one. Cache-heavy
+// because that's the norm for short Claude Code sessions. Full pipeline
+// sums to roughly $1 (Opus API equivalent) for a clean run; reruns scale.
+const SYNTHETIC_USAGE_BY_AGENT: Record<string, {
+  cost: number; in: number; out: number; cr: number; cw: number; calls: number;
+}> = {
+  'demo-plan':      { cost: 0.05, in:  400, out:  300, cr:  22_000, cw:  900, calls: 3 },
+  'demo-design':    { cost: 0.12, in:  600, out:  700, cr:  55_000, cw: 1_800, calls: 5 },
+  'demo-implement': { cost: 0.38, in:  900, out: 1400, cr: 180_000, cw: 4_400, calls: 9 },
+  'demo-review':    { cost: 0.18, in:  700, out:  900, cr:  85_000, cw: 2_200, calls: 6 },
+  'demo-release':   { cost: 0.06, in:  400, out:  300, cr:  27_000, cw:  900, calls: 3 },
+};
+
+const DEFAULT_SYNTHETIC_USAGE = {
+  cost: 0.10, in: 500, out: 400, cr: 40_000, cw: 1_200, calls: 4,
+};
+
+/**
+ * Build a `<runId>.usage.json` payload for a rich-history demo epic.
+ *
+ * Each step gets a base "typical Opus 4.x" cost looked up by agent id; if
+ * the step has been rerun N times, the cost is multiplied (rough proxy
+ * for "did the work N times"). History sub-windows split the step total
+ * across the events: reject rows carry the rejected revision's cost,
+ * rerun rows carry ~0 (just the button click), auto_review + approve rows
+ * carry the cost of the work between events.
+ */
+function buildRichEpicSyntheticUsage(
+  steps: Array<Record<string, unknown>>,
+): Record<string, unknown> {
+  let totalCost = 0, totalTokens = 0, totalCalls = 0;
+  const stepPayloads = steps.map((s) => {
+    const agent = String(s.agent);
+    const base = SYNTHETIC_USAGE_BY_AGENT[agent] ?? DEFAULT_SYNTHETIC_USAGE;
+    const status = String(s.status);
+    // No work yet → no usage on this step.
+    const isInactive = status === 'pending';
+    const rev = Number(s.revision) || 1;
+    const multiplier = isInactive ? 0 : rev;  // rerun = redo full work
+    const tokens = (base.in + base.out + base.cr + base.cw) * multiplier;
+    const stepCost = base.cost * multiplier;
+    const stepCalls = base.calls * multiplier;
+
+    totalCost += stepCost;
+    totalTokens += tokens;
+    totalCalls += stepCalls;
+
+    // Distribute across history sub-windows. Reject rows take revision N's
+    // cost (the rejected attempt); rerun rows take ~0; auto_review/approve
+    // take the cost between previous event and this event.
+    const history = Array.isArray(s.history) ? s.history as Array<Record<string, unknown>> : [];
+    const historyUsage = history.map((h, _idx) => {
+      const kind = String(h.kind);
+      // Cost-bearing kinds: reject (work that was rejected),
+      // auto_review (work that was just reviewed), approve (any final work).
+      // Rerun and the first auto_review of revision 1 carry ~0/small.
+      if (isInactive) {
+        return { totalTokens: 0, cost: 0, calls: 0 };
+      }
+      if (kind === 'reject' || kind === 'auto_review' || kind === 'approve') {
+        // Each work-bearing event carries roughly base cost (one attempt's worth).
+        return {
+          totalTokens: Math.round((base.in + base.out + base.cr + base.cw) * 0.9),
+          cost: +(base.cost * 0.9).toFixed(2),
+          calls: Math.max(1, Math.round(base.calls * 0.9)),
+        };
+      }
+      // rerun row — user clicked, ~0 work until next event
+      return { totalTokens: 0, cost: 0, calls: 0 };
+    });
+
+    return {
+      agent,
+      startedAt: s.startedAt ?? null,
+      endedAt: s.finishedAt ?? null,
+      cost: +stepCost.toFixed(2),
+      totalTokens: tokens,
+      inputTokens: base.in * multiplier,
+      outputTokens: base.out * multiplier,
+      cacheReadTokens: base.cr * multiplier,
+      cacheWriteTokens: base.cw * multiplier,
+      calls: stepCalls,
+      history: historyUsage.length > 0 ? historyUsage : undefined,
+    };
+  });
+
+  return {
+    total: {
+      cost: +totalCost.toFixed(2),
+      totalTokens,
+      calls: totalCalls,
+    },
+    steps: stepPayloads,
+    hasOverlap: false,
+    synthetic: true,
+    note: 'Demo-only synthetic usage. Real epics compute from ~/.claude/projects/*.jsonl.',
+  };
 }
 
 /**
@@ -731,6 +842,52 @@ function seedRunState(root: string, epicId: string, opts: SeedRunStateOpts): voi
   };
 
   writeJson(path.join(root, '.aidlc', 'runs', `${epicId}.json`), runState);
+
+  // Synthetic usage sidecar so the simple gate-state demos (DEMO-001..005)
+  // also light up the ⚡ badge. Each step uses its base "typical Opus 4.x"
+  // cost; pending steps contribute zero (no work done yet).
+  writeJson(
+    path.join(root, '.aidlc', 'runs', `${epicId}.usage.json`),
+    buildSimpleSyntheticUsage(steps),
+  );
+}
+
+function buildSimpleSyntheticUsage(
+  steps: Array<Record<string, unknown>>,
+): Record<string, unknown> {
+  let totalCost = 0, totalTokens = 0, totalCalls = 0;
+  const stepPayloads = steps.map((s) => {
+    const agent = String(s.agent);
+    const base = SYNTHETIC_USAGE_BY_AGENT[agent] ?? DEFAULT_SYNTHETIC_USAGE;
+    const status = String(s.status);
+    const isInactive = status === 'pending';
+    const multiplier = isInactive ? 0 : 1;
+    const tokens = (base.in + base.out + base.cr + base.cw) * multiplier;
+    const stepCost = base.cost * multiplier;
+    const stepCalls = base.calls * multiplier;
+    totalCost += stepCost;
+    totalTokens += tokens;
+    totalCalls += stepCalls;
+    return {
+      agent,
+      startedAt: s.startedAt ?? null,
+      endedAt: s.finishedAt ?? null,
+      cost: +stepCost.toFixed(2),
+      totalTokens: tokens,
+      inputTokens: base.in * multiplier,
+      outputTokens: base.out * multiplier,
+      cacheReadTokens: base.cr * multiplier,
+      cacheWriteTokens: base.cw * multiplier,
+      calls: stepCalls,
+    };
+  });
+  return {
+    total: { cost: +totalCost.toFixed(2), totalTokens, calls: totalCalls },
+    steps: stepPayloads,
+    hasOverlap: false,
+    synthetic: true,
+    note: 'Demo-only synthetic usage. Real epics compute from ~/.claude/projects/*.jsonl.',
+  };
 }
 
 function artifactStub(epicId: string, stepIdx: number): string {
