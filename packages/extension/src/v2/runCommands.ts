@@ -32,6 +32,7 @@ import {
   approveStep,
   rejectStep,
   rerunStep,
+  requestStepUpdate,
   submitAutoReviewVerdict,
   runAutoReview,
   PipelineRunError,
@@ -550,6 +551,45 @@ export async function rerunStepInlineCommand(
     saveRun(root, next);
     void vscode.window.showInformationMessage(
       `Step "${step.agent}" reset (revision ${next.steps[state.currentStepIdx].revision}). Run the slash command again, then "Mark step done".`,
+    );
+  } catch (err) {
+    surfaceRunError(err);
+  }
+}
+
+/**
+ * Webview-driven update request: rewind an already-approved step (and
+ * downstream steps) so the user can re-do them after a requirement change.
+ * Carries the supplied feedback to the rewound step. Mirrors run state
+ * into the epic's state.json via `saveRun`.
+ */
+export async function requestStepUpdateInlineCommand(
+  runId: string,
+  stepIdx: number,
+  feedback: string,
+): Promise<void> {
+  const root = requireRoot('Request Step Update');
+  if (!root) { return; }
+  const state = RunStateStore.load(root, runId);
+  if (!state) { return; }
+  const pipeline = loadPipeline(root, state.pipelineId);
+  if (!pipeline) {
+    void vscode.window.showErrorMessage(
+      `Run "${runId}" references pipeline "${state.pipelineId}" which is no longer in workspace.yaml.`,
+    );
+    return;
+  }
+  try {
+    const next = requestStepUpdate({
+      state,
+      pipeline,
+      stepIdx,
+      feedback: feedback.trim() || undefined,
+    });
+    saveRun(root, next);
+    const target = next.steps[stepIdx];
+    void vscode.window.showInformationMessage(
+      `Step "${target.agent}" reopened (revision ${target.revision}). Downstream steps reset to pending — work them again after this one.`,
     );
   } catch (err) {
     surfaceRunError(err);

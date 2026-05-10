@@ -47,6 +47,7 @@ import { themeManager } from './themeManager';
 import {
   rejectStepInlineCommand,
   rerunStepInlineCommand,
+  requestStepUpdateInlineCommand,
   startPipelineRunInlineCommand,
 } from './runCommands';
 
@@ -761,6 +762,14 @@ export class WorkspaceWebview {
           runId,
           feedback,
         );
+        return;
+      }
+      case 'requestStepUpdate': {
+        const runId = String(msg.runId ?? '');
+        const stepIdx = Number(msg.stepIdx);
+        const feedback = String(msg.feedback ?? '');
+        if (!runId || !Number.isInteger(stepIdx)) { return; }
+        await requestStepUpdateInlineCommand(runId, stepIdx, feedback);
         return;
       }
       case 'savePresetInline': {

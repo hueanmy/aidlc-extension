@@ -26,6 +26,10 @@ const statusConfig: Record<UiStatus, { label: string; className: string }> = {
     label: 'AWAITING WORK',
     className: 'bg-primary/15 text-primary border-primary/30',
   },
+  awaiting_update: {
+    label: 'AWAITING UPDATE',
+    className: 'bg-warning/15 text-warning border-warning/30',
+  },
 };
 
 export function StatusBadge({ status }: { status: UiStatus }) {

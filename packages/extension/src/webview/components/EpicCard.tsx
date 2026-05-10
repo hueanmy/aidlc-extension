@@ -30,6 +30,7 @@ import { StatusBadge } from './StatusBadge';
 import { RejectModal } from './RejectModal';
 import { RerunModal } from './RerunModal';
 import { RunWithFeedbackModal } from './RunWithFeedbackModal';
+import { RequestUpdateModal } from './RequestUpdateModal';
 import { postMessage } from '@/lib/bridge';
 
 function epicUiStatus(status: EpicSummary['status']): UiStatus {
@@ -219,6 +220,11 @@ function Stepper({
         {steps.map((step, i) => {
           const isCurrent = i === currentStep;
           const isFocused = i === focusedIdx;
+          // Pending step that carries history was previously approved and
+          // got reset by a downstream Request-Update — surface that as
+          // a warning-tinted state separate from never-touched pending.
+          const isAwaitingUpdate =
+            step.status === 'pending' && (step.history ?? []).length > 0;
           const inner =
             step.status === 'done'
               ? <Check className="h-3.5 w-3.5" />
@@ -241,7 +247,9 @@ function Stepper({
                 type="button"
                 onClick={() => onFocus(i)}
                 className="group flex flex-col items-center gap-1 px-1"
-                title={`${step.agent} — ${STEP_LABEL[step.status]}`}
+                title={`${step.agent} — ${
+                  isAwaitingUpdate ? 'awaiting update' : STEP_LABEL[step.status]
+                }`}
               >
                 <div
                   className={cn(
@@ -250,8 +258,10 @@ function Stepper({
                     step.status === 'in_progress' &&
                       'bg-warning text-warning-foreground shadow-[0_0_14px_color-mix(in_oklab,var(--color-warning)_40%,transparent)]',
                     step.status === 'failed' && 'bg-destructive text-destructive-foreground',
-                    step.status === 'pending' &&
+                    step.status === 'pending' && !isAwaitingUpdate &&
                       'border-2 border-border bg-card text-muted-foreground',
+                    isAwaitingUpdate &&
+                      'border-2 border-warning/60 bg-warning/10 text-warning',
                     isCurrent && 'scale-110',
                     isFocused && 'ring-4 ring-primary/30',
                   )}
@@ -297,6 +307,10 @@ function StepDetail({
     if (focused.status === 'done') { return 'done' as const; }
     if (focused.status === 'in_progress') { return 'in_progress' as const; }
     if (focused.status === 'failed') { return 'rejected' as const; }
+    // Pending step that carries history was previously approved and got
+    // reset by a downstream Request-Update — flag it so the user can tell
+    // it apart from a never-touched step.
+    if ((focused.history ?? []).length > 0) { return 'awaiting_update' as const; }
     return 'pending' as const;
   })();
   const m = meta ?? { name: focused.agent, description: '', inputs: '', outputs: '', artifact: '' };
@@ -389,6 +403,7 @@ function StepDetail({
       </div>
 
       <RunGate epic={epic} focused={focused} slashCommand={slashCommand} />
+      <RequestUpdateAction epic={epic} focused={focused} focusedIdx={focusedIdx} />
       <StepHistory step={focused} />
     </div>
   );
@@ -399,6 +414,62 @@ function DetailLabel({ icon, text }: { icon: React.ReactNode; text: string }) {
     <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
       {icon}
       <span>{text}</span>
+    </div>
+  );
+}
+
+function RequestUpdateAction({
+  epic,
+  focused,
+  focusedIdx,
+}: {
+  epic: EpicSummary;
+  focused: EpicStepDetailFull;
+  focusedIdx: number;
+}) {
+  const [open, setOpen] = useState(false);
+  // Only show for steps the run-state machine considers "approved" — that's
+  // what `requestStepUpdate` accepts. A done-from-state.json with no
+  // matching run record can't be rewound by the runner.
+  if (!epic.runId || focused.runStatus !== 'approved') { return null; }
+  // Count downstream approved + in-flight steps so the modal can show the
+  // blast radius accurately.
+  const downstreamCount = epic.stepDetails
+    .slice(focusedIdx + 1)
+    .filter((s) => s.runStatus === 'approved' || s.isCurrentRunStep).length;
+  return (
+    <div className="mt-3 flex items-center justify-between rounded-md border border-dashed border-warning/40 bg-warning/5 px-3 py-2 text-[11px]">
+      <div className="text-muted-foreground">
+        Requirements changed?{' '}
+        <span className="text-foreground/80">Reopen this step</span> to redo it
+        {downstreamCount > 0 && (
+          <> + reset {downstreamCount} downstream</>
+        )}.
+      </div>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex shrink-0 items-center gap-1 rounded-md border border-warning/50 bg-warning/15 px-2 py-1 text-[10.5px] font-semibold text-warning hover:border-warning hover:bg-warning/25"
+      >
+        <RefreshCw className="h-2.5 w-2.5" /> Request update
+      </button>
+      {open && (
+        <RequestUpdateModal
+          agent={focused.agent}
+          runId={epic.runId}
+          stepIdx={focusedIdx}
+          downstreamCount={downstreamCount}
+          onSubmit={(feedback) =>
+            postMessage({
+              type: 'requestStepUpdate',
+              runId: epic.runId!,
+              stepIdx: focusedIdx,
+              feedback,
+            })
+          }
+          onClose={() => setOpen(false)}
+        />
+      )}
     </div>
   );
 }

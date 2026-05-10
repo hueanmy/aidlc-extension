@@ -23,7 +23,10 @@ export type UiStatus =
   | 'rejected'
   | 'pending'
   | 'awaiting_review'
-  | 'awaiting_work';
+  | 'awaiting_work'
+  /** Step was previously approved but a downstream `requestStepUpdate`
+   * reset it to pending — its history is intact, just needs to be redone. */
+  | 'awaiting_update';
 
 export interface ArtifactPath {
   path: string;

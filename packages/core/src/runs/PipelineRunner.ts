@@ -443,6 +443,95 @@ export function rerunStep(args: {
   return next;
 }
 
+/**
+ * Request an update on a previously-approved step. Triggered by the user
+ * outside the awaiting_review flow when requirements change after the step
+ * was approved (or after the run already moved past it). Behaves like a
+ * cascade reject but is callable from any current state:
+ *
+ *   - The targeted step rewinds to `awaiting_work` with revision++ and the
+ *     supplied feedback carried forward (so the next agent run sees what
+ *     changed).
+ *   - All steps downstream of the target up to the current step (or end of
+ *     pipeline if the run already completed) are reset to `pending`,
+ *     losing their artifactsProduced / verdicts. Their history is
+ *     preserved — UI can show "previously done, awaiting update".
+ *   - currentStepIdx rewinds to the target step.
+ *   - The whole run flips to `running` if it was completed.
+ *
+ * History on the target step records both a `rerun` entry (since revision
+ * bumps) for symmetry with the regular rerun flow, so the audit trail
+ * answers the question "why did this step get redone?".
+ */
+export function requestStepUpdate(args: {
+  state: RunState;
+  pipeline: PipelineConfig;
+  stepIdx: number;
+  feedback?: string;
+}): RunState {
+  const { state, pipeline, stepIdx, feedback } = args;
+  if (
+    !Number.isInteger(stepIdx) ||
+    stepIdx < 0 ||
+    stepIdx >= state.steps.length
+  ) {
+    throw new PipelineRunError(`Invalid stepIdx ${stepIdx}`);
+  }
+  const target = state.steps[stepIdx];
+  if (target.status !== 'approved') {
+    throw new PipelineRunError(
+      `Cannot request update on step "${target.agent}": status is "${target.status}", expected "approved"`,
+    );
+  }
+
+  const now = new Date().toISOString();
+  const next = clone(state);
+  // upper bound for the reset range — the current step (inclusive). If the
+  // run already completed we still go through the very last step.
+  const upper = state.status === 'completed'
+    ? pipeline.steps.length - 1
+    : state.currentStepIdx;
+
+  for (let i = stepIdx; i <= upper; i++) {
+    const s = next.steps[i];
+    if (i === stepIdx) {
+      const newRev = s.revision + 1;
+      next.steps[i] = {
+        ...s,
+        status: 'awaiting_work',
+        revision: newRev,
+        feedback: feedback ?? s.feedback,
+        rejectReason: undefined,
+        autoReviewVerdict: undefined,
+        artifactsProduced: [],
+        finishedAt: undefined,
+        startedAt: now,
+        history: pushHistory(s.history, {
+          kind: 'rerun',
+          at: now,
+          revision: newRev,
+          feedback: feedback ?? s.feedback,
+        }),
+      };
+    } else {
+      // Downstream step — reset to pending, KEEP history so the UI can
+      // distinguish "previously done, awaiting update" from "never reached".
+      next.steps[i] = {
+        ...s,
+        status: 'pending',
+        rejectReason: undefined,
+        autoReviewVerdict: undefined,
+        artifactsProduced: [],
+        startedAt: undefined,
+        finishedAt: undefined,
+      };
+    }
+  }
+  next.currentStepIdx = stepIdx;
+  next.status = 'running';
+  return next;
+}
+
 /** Mark the current step approved + open the next step (or complete the run). */
 function advance(next: RunState, idx: number, pipeline: PipelineConfig): RunState {
   const finishedAt = new Date().toISOString();

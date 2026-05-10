@@ -32,6 +32,7 @@ import { themeManager } from './themeManager';
 import {
   rejectStepInlineCommand,
   rerunStepInlineCommand,
+  requestStepUpdateInlineCommand,
   startPipelineRunInlineCommand,
 } from './runCommands';
 import { WorkspaceWebview } from './workspaceWebview';
@@ -438,6 +439,14 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
           runId,
           feedback,
         );
+        return;
+      }
+      case 'requestStepUpdate': {
+        const runId = String(msg.runId ?? '');
+        const stepIdx = Number(msg.stepIdx);
+        const feedback = String(msg.feedback ?? '');
+        if (!runId || !Number.isInteger(stepIdx)) { return; }
+        await requestStepUpdateInlineCommand(runId, stepIdx, feedback);
         return;
       }
       case 'startPipelineRun':

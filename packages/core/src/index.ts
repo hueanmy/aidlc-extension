@@ -87,6 +87,7 @@ export {
   approveStep,
   rejectStep,
   rerunStep,
+  requestStepUpdate,
   submitAutoReviewVerdict,
   PipelineRunError,
 } from './runs/PipelineRunner';
