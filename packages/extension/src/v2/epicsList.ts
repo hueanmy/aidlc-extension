@@ -11,7 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { RunStateStore, normalizeStep } from '@aidlc/core';
+import { RunStateStore, normalizeStep, resolvePath } from '@aidlc/core';
 import type {
   RunState,
   StepStatus,
@@ -360,23 +360,32 @@ function mapStepStatus(status: StepStatus): EpicStatus {
 
 export interface MigrationReport {
   migrated: string[];
+  backfilled: string[];
   skipped: string[];
   errors: Array<{ epicId: string; reason: string }>;
 }
 
 /**
- * Walk every epic dir under <state.root> and, for each one that has a
- * matching `.aidlc/runs/<id>.json`, rewrite its `state.json` via
- * `mirrorRunStateToEpic`. Brings legacy state files (written before the
- * `revision` / `runStatus` / `history` / `feedback` fields existed) up to
- * the current schema in one pass.
+ * Walk every epic dir under <state.root>:
  *
- * Idempotent — running twice is a no-op on already-migrated files.
- * Epics without a matching runState (e.g. legacy "no run state" demos)
- * are left alone since there's no live data to copy from.
+ *   - Has a matching `.aidlc/runs/<id>.json`         → mirror it back
+ *     into state.json so the on-disk schema picks up
+ *     `revision` / `runStatus` / `history` / `feedback` /
+ *     `autoReviewVerdict` / `artifactsProduced` and the epic-level
+ *     `updatedAt`.
+ *   - No runState but state.json exists (legacy flow)   → reconstruct a
+ *     runState from state.json (per-step status mapping + inputs.json
+ *     context + artifacts dir scan), persist it, then mirror back so
+ *     the epic gets a full live run-state machine going forward.
+ *   - Pipeline missing from workspace.yaml or unparseable state.json
+ *     → record as an error and continue.
+ *
+ * Idempotent — re-running on a fully-migrated workspace is a no-op
+ * since `mirrorRunStateToEpic` writes the same fields again and the
+ * backfill branch only fires when no runState exists.
  */
 export function migrateEpicStateFiles(workspaceRoot: string): MigrationReport {
-  const report: MigrationReport = { migrated: [], skipped: [], errors: [] };
+  const report: MigrationReport = { migrated: [], backfilled: [], skipped: [], errors: [] };
   const doc = readYaml(workspaceRoot);
   const dir = epicsRoot(workspaceRoot, doc);
   if (!fs.existsSync(dir)) { return report; }
@@ -390,13 +399,24 @@ export function migrateEpicStateFiles(workspaceRoot: string): MigrationReport {
     const stateFile = path.join(dir, epicId, 'state.json');
     if (!fs.existsSync(stateFile)) { continue; }
     try {
-      const runState = RunStateStore.load(workspaceRoot, epicId);
+      let runState = RunStateStore.load(workspaceRoot, epicId);
+      let didBackfill = false;
       if (!runState) {
-        report.skipped.push(epicId);
-        continue;
+        const built = backfillRunStateFromEpic(workspaceRoot, epicId, doc);
+        if (!built.ok) {
+          report.skipped.push(epicId);
+          continue;
+        }
+        RunStateStore.save(workspaceRoot, built.runState);
+        runState = built.runState;
+        didBackfill = true;
       }
       mirrorRunStateToEpic(workspaceRoot, runState, doc);
-      report.migrated.push(epicId);
+      if (didBackfill) {
+        report.backfilled.push(epicId);
+      } else {
+        report.migrated.push(epicId);
+      }
     } catch (err) {
       report.errors.push({
         epicId,
@@ -406,4 +426,128 @@ export function migrateEpicStateFiles(workspaceRoot: string): MigrationReport {
   }
 
   return report;
+}
+
+/**
+ * Reconstruct a runtime `RunState` from a legacy epic's `state.json`.
+ *
+ * Used when the user pulls a project that was created before the v2
+ * runner existed (so docs/epics/ has rich state.json but no runs/*.json).
+ * We can't recover what happened before the upgrade — there's no audit
+ * trail to mine — but we CAN materialize a usable starting point so the
+ * UI's gate panel + slash-command + Mark-step-done flow lights up.
+ *
+ * Mapping rules:
+ *   stepStates[i].status === 'done'         → 'approved'
+ *   stepStates[i].status === 'in_progress'  → 'awaiting_work'
+ *   stepStates[i].status === 'failed'       → 'rejected'
+ *   stepStates[i].status === 'pending'/_    → 'pending'
+ *
+ *   epic.status === 'done'                  → run.status 'completed'
+ *   any step rejected                       → run.status 'running'
+ *   else                                    → run.status 'running'
+ *
+ *   step.artifactsProduced                  → derived from the pipeline's
+ *                                             `produces` paths if the file
+ *                                             actually exists on disk.
+ *
+ * `context` reuses the epic's inputs.json (capability bindings) plus
+ * `epic = epicId` so produces-path placeholders resolve.
+ *
+ * Returns `{ ok: false, reason }` when the epic's pipeline is no longer
+ * declared in workspace.yaml (we can't know step requires/produces) or
+ * state.json is unparseable.
+ */
+function backfillRunStateFromEpic(
+  workspaceRoot: string,
+  epicId: string,
+  doc: YamlDocument | null,
+): { ok: true; runState: RunState } | { ok: false; reason: string } {
+  const stateFile = path.join(epicsRoot(workspaceRoot, doc), epicId, 'state.json');
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(fs.readFileSync(stateFile, 'utf8')) ?? {};
+    if (typeof parsed !== 'object' || parsed === null) { return { ok: false, reason: 'state.json malformed' }; }
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+  }
+
+  const pipelineId = typeof parsed.pipeline === 'string' ? parsed.pipeline : '';
+  if (!pipelineId) {
+    return { ok: false, reason: 'epic has no pipeline binding' };
+  }
+  const pipelineCfg = (doc?.pipelines as PipelineConfig[] | undefined)?.find(
+    (p) => p.id === pipelineId,
+  );
+  if (!pipelineCfg || !Array.isArray(pipelineCfg.steps)) {
+    return { ok: false, reason: `pipeline "${pipelineId}" not found in workspace.yaml` };
+  }
+
+  const inputsFile = path.join(epicsRoot(workspaceRoot, doc), epicId, 'inputs.json');
+  const inputs = fs.existsSync(inputsFile) ? readInputs(path.dirname(inputsFile)) : {};
+  const context: Record<string, string> = { epic: epicId, ...inputs };
+
+  const stepStatesRaw = Array.isArray(parsed.stepStates)
+    ? (parsed.stepStates as Array<Record<string, unknown>>)
+    : [];
+
+  const epicStatus = asStatus(parsed.status);
+  const epicCurrentStep = typeof parsed.currentStep === 'number'
+    ? parsed.currentStep
+    : 0;
+
+  const artifactsDir = path.join(epicsRoot(workspaceRoot, doc), epicId, 'artifacts');
+  const existingArtifacts = fs.existsSync(artifactsDir)
+    ? new Set(fs.readdirSync(artifactsDir).filter((n) => !n.startsWith('.')))
+    : new Set<string>();
+
+  const steps = pipelineCfg.steps.map((raw, i) => {
+    const norm = normalizeStep(raw as PipelineStepConfig);
+    const legacy = stepStatesRaw[i] ?? {};
+    const legacyStatus = asStatus(legacy.status);
+    const status: StepStatus =
+      legacyStatus === 'done'
+        ? 'approved'
+        : legacyStatus === 'in_progress'
+        ? 'awaiting_work'
+        : legacyStatus === 'failed'
+        ? 'rejected'
+        : 'pending';
+    // Resolve produces against the epic context, then check disk for any
+    // file whose basename matches an existing artifact.
+    const produces = norm.produces.map((p) => resolvePath(p, context));
+    const artifactsProduced = produces.filter((p) => {
+      const base = path.basename(p);
+      return existingArtifacts.has(base);
+    });
+    return {
+      stepIdx: i,
+      agent: norm.agent,
+      revision: 1,
+      status,
+      startedAt: typeof legacy.startedAt === 'string' ? legacy.startedAt : undefined,
+      finishedAt: typeof legacy.finishedAt === 'string' ? legacy.finishedAt : undefined,
+      artifactsProduced,
+      history: [],
+    };
+  });
+
+  const runStatus: RunState['status'] =
+    epicStatus === 'done' && steps.every((s) => s.status === 'approved')
+      ? 'completed'
+      : 'running';
+
+  const runState: RunState = {
+    schemaVersion: 1,
+    runId: epicId,
+    pipelineId,
+    context,
+    startedAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    currentStepIdx: Math.min(Math.max(epicCurrentStep, 0), Math.max(0, steps.length - 1)),
+    status: runStatus,
+    steps,
+  };
+
+  return { ok: true, runState };
 }

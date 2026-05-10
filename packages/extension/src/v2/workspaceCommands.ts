@@ -177,8 +177,11 @@ export function registerV2WorkspaceCommands(
       if (report.migrated.length > 0) {
         parts.push(`migrated ${report.migrated.length}`);
       }
+      if (report.backfilled.length > 0) {
+        parts.push(`backfilled ${report.backfilled.length}`);
+      }
       if (report.skipped.length > 0) {
-        parts.push(`skipped ${report.skipped.length} (no run state)`);
+        parts.push(`skipped ${report.skipped.length}`);
       }
       if (report.errors.length > 0) {
         parts.push(`${report.errors.length} error(s)`);
