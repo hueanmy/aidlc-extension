@@ -742,14 +742,35 @@ function RunGate({
       <div className="flex flex-wrap gap-2">
         {status === 'awaiting_work' && (
           <>
-            {slashCommand && (
-              <GateButton variant="approve" onClick={() => setRunOpen(true)}>
-                <Play className="h-3 w-3" />
-                {artifactExists || focused.feedback
-                  ? 'Update with feedback'
-                  : 'Run with Claude'}
-              </GateButton>
-            )}
+            {slashCommand && (() => {
+              const isUpdate = artifactExists || !!focused.feedback;
+              return (
+                <GateButton
+                  variant="approve"
+                  onClick={() => {
+                    if (isUpdate) {
+                      // Already-touched step → open modal so the user can
+                      // attach feedback before re-running the agent.
+                      setRunOpen(true);
+                    } else {
+                      // First run on this step (no artifact + no carried
+                      // feedback) — just launch claude with the bare slash
+                      // command. No modal needed; runStepWithFeedback
+                      // produces `${slash} ${id}` when feedback is empty.
+                      postMessage({
+                        type: 'runStepWithFeedback',
+                        runId: epic.runId!,
+                        slashCommand,
+                        feedback: '',
+                      });
+                    }
+                  }}
+                >
+                  <Play className="h-3 w-3" />
+                  {isUpdate ? 'Update with feedback' : 'Run with Claude'}
+                </GateButton>
+              );
+            })()}
             <GateButton
               variant="primary"
               onClick={() => postMessage({ type: 'markStepDone', runId: epic.runId! })}
