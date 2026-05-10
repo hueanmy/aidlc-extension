@@ -29,7 +29,11 @@ import type { PipelineConfig } from '@aidlc/core';
 import { listEpics } from './epicsList';
 import type { PresetStore } from './presetStore';
 import { themeManager } from './themeManager';
-import { rejectStepInlineCommand, startPipelineRunInlineCommand } from './runCommands';
+import {
+  rejectStepInlineCommand,
+  rerunStepInlineCommand,
+  startPipelineRunInlineCommand,
+} from './runCommands';
 import { WorkspaceWebview } from './workspaceWebview';
 
 // VS Code reuses output channels by name, so this resolves to the same
@@ -401,7 +405,24 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       case 'applyTemplate': {
         const id = String(msg.id ?? '');
         if (!id) { return; }
-        await vscode.commands.executeCommand('aidlc.applyPreset', id);
+        await vscode.commands.executeCommand(
+          'aidlc.applyPreset',
+          id,
+          msg.skipConfirm === true,
+        );
+        return;
+      }
+      case 'savePresetInline': {
+        const draft = msg.draft;
+        if (!draft || typeof draft !== 'object') { return; }
+        await vscode.commands.executeCommand('aidlc.savePresetInline', draft);
+        return;
+      }
+      case 'rerunStepInline': {
+        const runId = String(msg.runId ?? '');
+        const feedback = String(msg.feedback ?? '');
+        if (!runId) { return; }
+        await rerunStepInlineCommand(runId, feedback);
         return;
       }
       case 'startPipelineRun':

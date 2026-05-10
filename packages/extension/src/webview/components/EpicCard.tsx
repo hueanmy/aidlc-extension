@@ -25,6 +25,7 @@ import type {
 } from '@/lib/types';
 import { StatusBadge } from './StatusBadge';
 import { RejectModal } from './RejectModal';
+import { RerunModal } from './RerunModal';
 import { postMessage } from '@/lib/bridge';
 
 function epicUiStatus(status: EpicSummary['status']): UiStatus {
@@ -407,6 +408,7 @@ function DetailValue({ children, empty }: { children: React.ReactNode; empty?: b
 
 function RunGate({ epic, focused }: { epic: EpicSummary; focused: EpicStepDetailFull }) {
   const [rejectOpen, setRejectOpen] = useState(false);
+  const [rerunOpen, setRerunOpen] = useState(false);
   if (!epic.runId || !focused.isCurrentRunStep) { return null; }
   const ui = runStatusUi(focused.runStatus);
   if (!ui) { return null; }
@@ -533,10 +535,7 @@ function RunGate({ epic, focused }: { epic: EpicSummary; focused: EpicStepDetail
           </>
         )}
         {status === 'rejected' && (
-          <GateButton
-            variant="primary"
-            onClick={() => postMessage({ type: 'rerunStep', runId: epic.runId! })}
-          >
+          <GateButton variant="primary" onClick={() => setRerunOpen(true)}>
             Rerun
           </GateButton>
         )}
@@ -548,6 +547,17 @@ function RunGate({ epic, focused }: { epic: EpicSummary; focused: EpicStepDetail
           currentStepIdx={epic.currentStep}
           stepAgents={epic.stepDetails.map((d) => d.agent)}
           onClose={() => setRejectOpen(false)}
+        />
+      )}
+      {rerunOpen && epic.runId && (
+        <RerunModal
+          runId={epic.runId}
+          agent={focused.agent}
+          rejectReason={focused.rejectReason}
+          onSubmit={(feedback) =>
+            postMessage({ type: 'rerunStepInline', runId: epic.runId!, feedback })
+          }
+          onClose={() => setRerunOpen(false)}
         />
       )}
     </div>

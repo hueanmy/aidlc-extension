@@ -31,6 +31,8 @@ import type {
 import { RejectModal } from './RejectModal';
 import { ConfirmModal } from './ConfirmModal';
 import { StartRunModal } from './StartRunModal';
+import { RerunModal } from './RerunModal';
+import { SavePresetModal } from './SavePresetModal';
 import { ThemeToggle } from './ThemeToggle';
 import { postMessage, getPersistedUi, setPersistedUi } from '@/lib/bridge';
 
@@ -205,6 +207,8 @@ export function AppSidebar({ state }: { state: SidebarState | null }) {
             <WorkflowsSection
               builtins={state.builtinTemplates}
               project={state.projectTemplates}
+              configExists={state.configExists}
+              workspaceName={state.workspaceName}
               collapsed={collapsed.workflows}
               onToggle={() => toggleSection('workflows')}
             />
@@ -475,27 +479,53 @@ function SlashCommandsSection({
 function WorkflowsSection({
   builtins,
   project,
+  configExists,
+  workspaceName,
   collapsed,
   onToggle,
 }: {
   builtins: TemplateRef[];
   project: TemplateRef[];
+  configExists: boolean;
+  workspaceName: string;
   collapsed: boolean;
   onToggle: () => void;
 }) {
-  if (builtins.length === 0 && project.length === 0) { return null; }
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [pendingApply, setPendingApply] = useState<TemplateRef | null>(null);
+
+  if (builtins.length === 0 && project.length === 0 && !configExists) { return null; }
+
+  const onApplyClick = (template: TemplateRef) => {
+    if (configExists) {
+      setPendingApply(template);
+    } else {
+      postMessage({ type: 'applyTemplate', id: template.id, skipConfirm: true });
+    }
+  };
+
   return (
     <div>
       <SectionHeader label="Workflows" collapsed={collapsed} onToggle={onToggle} />
       {!collapsed && (
         <div className="mt-1.5 space-y-1.5">
+          {configExists && (
+            <button
+              type="button"
+              onClick={() => setSaveOpen(true)}
+              className="flex w-full items-center gap-2 rounded-md border border-dashed border-border px-2.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+            >
+              <Diamond className="h-3 w-3" />
+              <span>Save current as template</span>
+            </button>
+          )}
           {builtins.length > 0 && (
             <>
               <div className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">
                 Common
               </div>
               {builtins.map((t) => (
-                <TemplateRow key={t.id} template={t} builtin />
+                <TemplateRow key={t.id} template={t} builtin onApply={onApplyClick} />
               ))}
             </>
           )}
@@ -505,27 +535,63 @@ function WorkflowsSection({
                 Custom
               </div>
               {project.map((t) => (
-                <TemplateRow key={t.id} template={t} builtin={false} />
+                <TemplateRow key={t.id} template={t} builtin={false} onApply={onApplyClick} />
               ))}
             </>
           )}
         </div>
       )}
+
+      {saveOpen && (
+        <SavePresetModal
+          existingProjectIds={project.map((p) => p.id)}
+          builtinIds={builtins.map((b) => b.id)}
+          defaultId={workspaceName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '')}
+          defaultName={workspaceName}
+          onSubmit={(draft) => postMessage({ type: 'savePresetInline', draft })}
+          onClose={() => setSaveOpen(false)}
+        />
+      )}
+      {pendingApply && (
+        <ConfirmModal
+          title="Apply template"
+          danger
+          confirmLabel="Overwrite & apply"
+          message={
+            <>
+              This project already has <span className="font-mono">.aidlc/workspace.yaml</span>.
+              Overwrite with template <span className="font-mono">{pendingApply.id}</span>?
+            </>
+          }
+          onConfirm={() =>
+            postMessage({ type: 'applyTemplate', id: pendingApply.id, skipConfirm: true })
+          }
+          onClose={() => setPendingApply(null)}
+        />
+      )}
     </div>
   );
 }
 
-function TemplateRow({ template, builtin }: { template: TemplateRef; builtin: boolean }) {
+function TemplateRow({
+  template,
+  builtin,
+  onApply,
+}: {
+  template: TemplateRef;
+  builtin: boolean;
+  onApply: (template: TemplateRef) => void;
+}) {
   const Icon = builtin ? Sparkles : Diamond;
   return (
     <div
       role="button"
       tabIndex={0}
-      onClick={() => postMessage({ type: 'applyTemplate', id: template.id })}
+      onClick={() => onApply(template)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          postMessage({ type: 'applyTemplate', id: template.id });
+          onApply(template);
         }
       }}
       title={`Apply template ${template.id}`}
@@ -744,6 +810,7 @@ function ArtifactList({
 function RunActions({ run }: { run: ActiveRun }) {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [rerunOpen, setRerunOpen] = useState(false);
   return (
     <div className="mt-2 flex gap-1">
       {run.currentStepStatus === 'awaiting_work' && (
@@ -776,10 +843,7 @@ function RunActions({ run }: { run: ActiveRun }) {
         </>
       )}
       {run.currentStepStatus === 'rejected' && (
-        <ActionBtn
-          variant="primary"
-          onClick={() => postMessage({ type: 'rerunStep', runId: run.runId })}
-        >
+        <ActionBtn variant="primary" onClick={() => setRerunOpen(true)}>
           Rerun
         </ActionBtn>
       )}
@@ -814,6 +878,17 @@ function RunActions({ run }: { run: ActiveRun }) {
             postMessage({ type: 'deleteRun', runId: run.runId, confirmed: true })
           }
           onClose={() => setDeleteOpen(false)}
+        />
+      )}
+      {rerunOpen && (
+        <RerunModal
+          runId={run.runId}
+          agent={run.currentAgent}
+          rejectReason={run.rejectReason}
+          onSubmit={(feedback) =>
+            postMessage({ type: 'rerunStepInline', runId: run.runId, feedback })
+          }
+          onClose={() => setRerunOpen(false)}
         />
       )}
     </div>

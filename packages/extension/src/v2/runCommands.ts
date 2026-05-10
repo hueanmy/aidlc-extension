@@ -511,6 +511,32 @@ export async function rerunStepCommand(runIdArg?: string): Promise<void> {
   }
 }
 
+/**
+ * Webview-driven rerun: caller (the React RerunModal) supplies the optional
+ * feedback string directly so we skip the showInputBox dialog.
+ */
+export async function rerunStepInlineCommand(
+  runId: string,
+  feedback: string,
+): Promise<void> {
+  const root = requireRoot('Rerun Step');
+  if (!root) { return; }
+  const state = RunStateStore.load(root, runId);
+  if (!state) { return; }
+  const step = state.steps[state.currentStepIdx];
+  if (!step) { return; }
+
+  try {
+    const next = rerunStep({ state, feedback: feedback.trim() || undefined });
+    RunStateStore.save(root, next);
+    void vscode.window.showInformationMessage(
+      `Step "${step.agent}" reset (revision ${next.steps[state.currentStepIdx].revision}). Run the slash command again, then "Mark step done".`,
+    );
+  } catch (err) {
+    surfaceRunError(err);
+  }
+}
+
 // ── openRunState ─────────────────────────────────────────────────────────
 
 export async function openRunStateCommand(runIdArg?: string): Promise<void> {

@@ -30,6 +30,7 @@ import { WorkspaceWebview } from './workspaceWebview';
 import { PresetStore } from './presetStore';
 import {
   savePresetCommand,
+  savePresetInlineCommand,
   applyPresetCommand,
   deletePresetCommand,
 } from './presetWizards';
@@ -134,12 +135,26 @@ export function registerV2WorkspaceCommands(
     () => savePresetCommand(presetStore),
   );
 
+  const savePresetInlineCmd = vscode.commands.registerCommand(
+    'aidlc.savePresetInline',
+    (draft?: unknown) => {
+      if (!draft || typeof draft !== 'object') { return; }
+      const d = draft as Record<string, unknown>;
+      void savePresetInlineCommand(presetStore, {
+        id: typeof d.id === 'string' ? d.id : '',
+        name: typeof d.name === 'string' ? d.name : '',
+        description: typeof d.description === 'string' ? d.description : '',
+      });
+    },
+  );
+
   const applyPresetCmd = vscode.commands.registerCommand(
     'aidlc.applyPreset',
-    (presetId?: unknown) =>
+    (presetId?: unknown, skipConfirm?: unknown) =>
       applyPresetCommand(
         presetStore,
         typeof presetId === 'string' ? presetId : undefined,
+        skipConfirm === true,
       ),
   );
 
@@ -279,6 +294,7 @@ export function registerV2WorkspaceCommands(
       openBuilderCmd,
       openClaudeTerminalCmd,
       savePresetCmd,
+      savePresetInlineCmd,
       applyPresetCmd,
       deletePresetCmd,
       startEpicCmd,

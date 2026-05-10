@@ -39,7 +39,11 @@ import type {
 import { promptStepConfig } from './wizards';
 import { listEpics, type EpicSummary as CoreEpicSummary } from './epicsList';
 import { themeManager } from './themeManager';
-import { rejectStepInlineCommand, startPipelineRunInlineCommand } from './runCommands';
+import {
+  rejectStepInlineCommand,
+  rerunStepInlineCommand,
+  startPipelineRunInlineCommand,
+} from './runCommands';
 
 // ── Webview-side type shapes (must mirror src/webview/lib/types.ts) ───────
 
@@ -713,6 +717,19 @@ export class WorkspaceWebview {
         const draft = msg.draft;
         if (!draft || typeof draft !== 'object') { return; }
         await this.startEpicInline(draft as Record<string, unknown>);
+        return;
+      }
+      case 'rerunStepInline': {
+        const runId = String(msg.runId ?? '');
+        const feedback = String(msg.feedback ?? '');
+        if (!runId) { return; }
+        await rerunStepInlineCommand(runId, feedback);
+        return;
+      }
+      case 'savePresetInline': {
+        const draft = msg.draft;
+        if (!draft || typeof draft !== 'object') { return; }
+        await vscode.commands.executeCommand('aidlc.savePresetInline', draft);
         return;
       }
       case 'startPipelineRunForEpic': {
