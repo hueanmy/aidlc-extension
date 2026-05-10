@@ -69,6 +69,11 @@ export interface PipelineRef {
   onFailure: 'stop' | 'continue';
 }
 
+export interface SkillTemplateRef {
+  id: string;
+  description: string;
+}
+
 export interface SidebarState {
   hasFolder: boolean;
   workspaceName: string;
@@ -189,6 +194,8 @@ export interface WorkspaceState {
   epicsCount: number;
   /** All existing run ids (any status) — for inline Start-Run modal uniqueness check. */
   runIds: string[];
+  /** Built-in skill templates surfaced for the inline AddSkill modal. */
+  skillTemplates: SkillTemplateRef[];
   /** Initial view to render when the panel first opens. */
   initialView?: WorkspaceView;
 }

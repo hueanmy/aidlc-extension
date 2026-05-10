@@ -7,6 +7,8 @@ import { PipelineCard } from './PipelineCard';
 import { RenameModal } from './RenameModal';
 import { ConfirmModal } from './ConfirmModal';
 import { PipelineModal } from './PipelineModal';
+import { AddSkillModal } from './AddSkillModal';
+import { AddAgentModal } from './AddAgentModal';
 import { postMessage } from '@/lib/bridge';
 
 type BuilderTab = 'workflows' | 'agents' | 'skills' | 'epics';
@@ -22,6 +24,8 @@ const SCOPE_LABEL: Record<AssetScope, string> = {
 export function BuilderView({ state }: { state: WorkspaceState }) {
   const [tab, setTab] = useState<BuilderTab>('agents');
   const [addPipelineOpen, setAddPipelineOpen] = useState(false);
+  const [addSkillOpen, setAddSkillOpen] = useState(false);
+  const [addAgentOpen, setAddAgentOpen] = useState(false);
 
   const tabs: { id: BuilderTab; label: string; count: number }[] = [
     { id: 'workflows', label: 'Workflows', count: state.pipelines.length },
@@ -45,10 +49,13 @@ export function BuilderView({ state }: { state: WorkspaceState }) {
 
   const onAdd = () => {
     if (tab === 'workflows') { setAddPipelineOpen(true); }
-    else if (tab === 'agents') { postMessage({ type: 'addAgent' }); }
-    else if (tab === 'skills') { postMessage({ type: 'addSkill' }); }
+    else if (tab === 'agents') { setAddAgentOpen(true); }
+    else if (tab === 'skills') { setAddSkillOpen(true); }
     else { postMessage({ type: 'startEpic' }); }
   };
+
+  const allSkillIds = useMemo(() => state.skills.map((s) => s.id), [state.skills]);
+  const allAgentIds = useMemo(() => state.agents.map((a) => a.id), [state.agents]);
 
   return (
     <div className="space-y-8">
@@ -115,6 +122,22 @@ export function BuilderView({ state }: { state: WorkspaceState }) {
             postMessage({ type: 'addPipelineInline', draft })
           }
           onClose={() => setAddPipelineOpen(false)}
+        />
+      )}
+      {addSkillOpen && (
+        <AddSkillModal
+          takenIds={allSkillIds}
+          templates={state.skillTemplates}
+          onSubmit={(draft) => postMessage({ type: 'addSkillInline', draft })}
+          onClose={() => setAddSkillOpen(false)}
+        />
+      )}
+      {addAgentOpen && (
+        <AddAgentModal
+          takenIds={allAgentIds}
+          skills={state.skills}
+          onSubmit={(draft) => postMessage({ type: 'addAgentInline', draft })}
+          onClose={() => setAddAgentOpen(false)}
         />
       )}
     </div>

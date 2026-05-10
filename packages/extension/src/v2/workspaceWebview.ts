@@ -25,7 +25,9 @@ import {
   discoverAssets,
   RunStateStore,
   startRun,
+  targetPath,
 } from '@aidlc/core';
+import { SKILL_TEMPLATES } from './skillTemplates';
 import type {
   PipelineStepConfig,
   AssetScope,
@@ -116,6 +118,11 @@ interface EpicSummaryUi {
   createdAt: string;
 }
 
+interface SkillTemplateRef {
+  id: string;
+  description: string;
+}
+
 interface WorkspaceState {
   hasFolder: boolean;
   workspaceName: string;
@@ -132,8 +139,15 @@ interface WorkspaceState {
   epicsCount: number;
   /** All existing run ids (any status) — for inline Start-Run modal uniqueness check. */
   runIds: string[];
+  /** Built-in skill templates surfaced for the inline AddSkill modal. */
+  skillTemplates: SkillTemplateRef[];
   initialView?: WorkspaceView;
 }
+
+const SKILL_TEMPLATE_REFS: SkillTemplateRef[] = SKILL_TEMPLATES.map((t) => ({
+  id: t.id,
+  description: t.description,
+}));
 
 // ── State builders ────────────────────────────────────────────────────────
 
@@ -148,6 +162,7 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
       agentMeta: {}, slashCommandsByAgent: {},
       agentsCount: 0, skillsCount: 0, pipelinesCount: 0, epicsCount: 0,
       runIds: [],
+      skillTemplates: SKILL_TEMPLATE_REFS,
       initialView,
     };
   }
@@ -197,6 +212,7 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
       pipelinesCount: 0,
       epicsCount: epics.length,
       runIds: listRunIds(root),
+      skillTemplates: SKILL_TEMPLATE_REFS,
       initialView,
     };
   }
@@ -234,6 +250,7 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
     pipelinesCount: pipelines.length,
     epicsCount: epics.length,
     runIds: listRunIds(root),
+    skillTemplates: SKILL_TEMPLATE_REFS,
     initialView,
   };
 }
@@ -622,6 +639,18 @@ export class WorkspaceWebview {
         await this.editPipelineInline(id, draft as Record<string, unknown>);
         return;
       }
+      case 'addSkillInline': {
+        const draft = msg.draft;
+        if (!draft || typeof draft !== 'object') { return; }
+        await this.addSkillInline(draft as Record<string, unknown>);
+        return;
+      }
+      case 'addAgentInline': {
+        const draft = msg.draft;
+        if (!draft || typeof draft !== 'object') { return; }
+        await this.addAgentInline(draft as Record<string, unknown>);
+        return;
+      }
       case 'startPipelineRunForEpic': {
         const epicId = String(msg.epicId ?? '').trim();
         const pipelineId = String(msg.pipelineId ?? '').trim();
@@ -835,6 +864,180 @@ export class WorkspaceWebview {
       }
       p.steps[idx] = obj;
     });
+  }
+
+  /**
+   * Apply the AddSkillModal draft: write the .md file at the scope-target
+   * path and (for aidlc) register it in workspace.yaml. No overwrite — if
+   * the file already exists we surface a warning and abort. Webview's
+   * `takenIds` should prevent collisions in normal use.
+   */
+  private async addSkillInline(draft: Record<string, unknown>): Promise<void> {
+    const root = this.getRootOrWarn();
+    if (!root) { return; }
+    const doc = readYaml(root);
+    if (!doc) {
+      void vscode.window.showWarningMessage('AIDLC: no workspace.yaml — initialize first.');
+      return;
+    }
+
+    const scope = draft.scope as AssetScope;
+    const id = String(draft.id ?? '').trim();
+    const sourceRaw = draft.source as Record<string, unknown> | undefined;
+    if (!id || !sourceRaw) { return; }
+    if (scope !== 'project' && scope !== 'aidlc' && scope !== 'global') { return; }
+
+    let content = '';
+    let openInEditor = false;
+    const kind = String(sourceRaw.kind ?? '');
+    if (kind === 'template') {
+      const tplId = String(sourceRaw.templateId ?? '');
+      const tpl = SKILL_TEMPLATES.find((t) => t.id === tplId);
+      if (!tpl) {
+        void vscode.window.showWarningMessage(`Skill template "${tplId}" not found.`);
+        return;
+      }
+      content = tpl.content;
+    } else if (kind === 'paste') {
+      content = String(sourceRaw.content ?? '');
+      if (!content.trim()) { return; }
+    } else if (kind === 'blank') {
+      content = `# ${id}\n\n<!-- Write the system prompt for this skill here. -->\n`;
+      openInEditor = true;
+    } else {
+      return;
+    }
+
+    const skillPath = targetPath(root, scope, 'skill', id);
+    if (fs.existsSync(skillPath)) {
+      void vscode.window.showWarningMessage(
+        `Skill file already exists at ${path.relative(root, skillPath) || skillPath}. Delete it first.`,
+      );
+      return;
+    }
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, content, 'utf8');
+
+    if (scope === 'aidlc') {
+      this.mutateYaml((d) => {
+        d.skills.push({ id, path: `./.aidlc/skills/${id}.md` });
+      });
+    }
+
+    if (openInEditor || kind === 'template') {
+      const docOpen = await vscode.workspace.openTextDocument(skillPath);
+      await vscode.window.showTextDocument(docOpen, { preview: false });
+    }
+
+    const yamlNote = scope === 'aidlc' ? ' + workspace.yaml' : '';
+    void vscode.window.showInformationMessage(
+      `Skill "${id}" added (${scope})${yamlNote}.`,
+    );
+  }
+
+  /**
+   * Apply the AddAgentModal draft. AIDLC scope appends to workspace.yaml
+   * `agents:`. Project / global scopes write a Claude Code-native .md file
+   * with frontmatter + the picked skills inlined as a starter prompt.
+   */
+  private async addAgentInline(draft: Record<string, unknown>): Promise<void> {
+    const root = this.getRootOrWarn();
+    if (!root) { return; }
+    const doc = readYaml(root);
+    if (!doc) {
+      void vscode.window.showWarningMessage('AIDLC: no workspace.yaml — initialize first.');
+      return;
+    }
+
+    const scope = draft.scope as AssetScope;
+    const id = String(draft.id ?? '').trim();
+    const name = String(draft.name ?? '').trim();
+    const skillsRaw = Array.isArray(draft.skills) ? (draft.skills as unknown[]) : [];
+    const skills = skillsRaw.map(String).filter((s) => s);
+    if (!id || !name || skills.length === 0) { return; }
+    if (scope !== 'project' && scope !== 'aidlc' && scope !== 'global') { return; }
+
+    const yamlSkillIds = new Set(doc.skills.map((s) => String(s.id)));
+    for (const s of skills) {
+      if (!yamlSkillIds.has(s)) {
+        void vscode.window.showWarningMessage(
+          `Skill "${s}" not declared in workspace.yaml.`,
+        );
+        return;
+      }
+    }
+
+    if (scope === 'aidlc') {
+      const model = String(draft.model ?? '').trim();
+      if (!model) { return; }
+      const envObj = draft.env && typeof draft.env === 'object'
+        ? (draft.env as Record<string, unknown>)
+        : {};
+      const env: Record<string, string> = {};
+      for (const [k, v] of Object.entries(envObj)) { env[k] = String(v); }
+      const capsRaw = Array.isArray(draft.capabilities) ? (draft.capabilities as unknown[]) : [];
+      const capabilities = capsRaw.map(String).filter((c) => c);
+
+      const agent: Record<string, unknown> = { id, name, skills, model };
+      if (Object.keys(env).length > 0) { agent.env = env; }
+      if (capabilities.length > 0) { agent.capabilities = capabilities; }
+
+      this.mutateYaml((d) => {
+        d.agents.push(agent);
+      });
+
+      void vscode.window.showInformationMessage(
+        `Agent "${id}" added (aidlc · skills: ${skills.join(', ')}, model: ${model}).`,
+      );
+      return;
+    }
+
+    // project / global: write Claude-native .md
+    const description = String(draft.description ?? '').trim() || `${name} agent.`;
+    const agentPath = targetPath(root, scope, 'agent', id);
+    if (fs.existsSync(agentPath)) {
+      void vscode.window.showWarningMessage(
+        `Agent file already exists at ${path.relative(root, agentPath) || agentPath}. Delete it first.`,
+      );
+      return;
+    }
+
+    const sections: string[] = [];
+    for (const skillId of skills) {
+      sections.push(`<!-- ── Skill: ${skillId} ── -->`);
+      const decl = doc.skills.find((s) => String(s.id) === skillId);
+      const declPath = decl && typeof decl.path === 'string' ? decl.path : '';
+      let inlined: string | null = null;
+      if (declPath) {
+        const resolved = path.isAbsolute(declPath) ? declPath : path.resolve(root, declPath);
+        if (fs.existsSync(resolved)) {
+          const raw = fs.readFileSync(resolved, 'utf8');
+          inlined = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim();
+        }
+      }
+      sections.push(
+        inlined ?? `<!-- TODO: paste content for skill "${skillId}" — file not found -->`,
+      );
+      sections.push('');
+    }
+
+    const content = `---
+name: ${name}
+description: ${description}
+---
+
+${sections.join('\n').trimEnd()}
+`;
+
+    fs.mkdirSync(path.dirname(agentPath), { recursive: true });
+    fs.writeFileSync(agentPath, content, 'utf8');
+
+    const docOpen = await vscode.workspace.openTextDocument(agentPath);
+    await vscode.window.showTextDocument(docOpen, { preview: false });
+
+    void vscode.window.showInformationMessage(
+      `Agent "${id}" added (${scope} · skills: ${skills.join(', ')}).`,
+    );
   }
 
   /**
