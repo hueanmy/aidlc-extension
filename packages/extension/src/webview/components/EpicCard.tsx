@@ -662,13 +662,7 @@ function RunGate({
       <div className="flex flex-wrap gap-2">
         {status === 'awaiting_work' && (
           <>
-            <GateButton
-              variant="primary"
-              onClick={() => postMessage({ type: 'markStepDone', runId: epic.runId! })}
-            >
-              Mark step done
-            </GateButton>
-            {focused.feedback && slashCommand && (
+            {slashCommand && (
               <GateButton
                 variant="approve"
                 onClick={() =>
@@ -676,13 +670,20 @@ function RunGate({
                     type: 'runStepWithFeedback',
                     runId: epic.runId!,
                     slashCommand,
-                    feedback: focused.feedback,
+                    feedback: focused.feedback ?? '',
                   })
                 }
               >
-                <RefreshCw className="h-3 w-3" /> Update with feedback
+                <Play className="h-3 w-3" />
+                {focused.feedback ? 'Update with feedback' : 'Run in Claude'}
               </GateButton>
             )}
+            <GateButton
+              variant="primary"
+              onClick={() => postMessage({ type: 'markStepDone', runId: epic.runId! })}
+            >
+              Mark step done
+            </GateButton>
           </>
         )}
         {status === 'awaiting_auto_review' && (

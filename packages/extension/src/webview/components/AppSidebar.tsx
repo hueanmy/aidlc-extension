@@ -731,17 +731,40 @@ function RunCard({
           </div>
 
           {run.currentSlashCommand && (
-            <button
-              type="button"
-              onClick={() =>
-                postMessage({ type: 'copyCommand', command: run.currentSlashCommand })
-              }
-              title="Click to copy — paste into Claude to run this step"
-              className="mt-1.5 flex w-full items-center gap-1.5 rounded bg-primary/10 px-1.5 py-1 font-mono text-[10px] text-primary hover:bg-primary/20"
-            >
-              <span className="flex-1 truncate text-left">{run.currentSlashCommand}</span>
-              <Copy className="h-2.5 w-2.5 opacity-70" />
-            </button>
+            <div className="mt-1.5 flex items-stretch gap-1">
+              <button
+                type="button"
+                onClick={() =>
+                  postMessage({ type: 'copyCommand', command: run.currentSlashCommand })
+                }
+                title="Click to copy — paste into Claude manually if you prefer"
+                className="flex flex-1 items-center gap-1.5 rounded bg-primary/10 px-1.5 py-1 font-mono text-[10px] text-primary hover:bg-primary/20"
+              >
+                <span className="flex-1 truncate text-left">{run.currentSlashCommand}</span>
+                <Copy className="h-2.5 w-2.5 opacity-70" />
+              </button>
+              {run.currentStepStatus === 'awaiting_work' && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    postMessage({
+                      type: 'runStepWithFeedback',
+                      runId: run.runId,
+                      slashCommand: run.currentSlashCommand,
+                      feedback: run.feedback ?? '',
+                    })
+                  }
+                  title={
+                    run.feedback
+                      ? 'Run in Claude with the carried feedback'
+                      : 'Run in Claude — opens the AIDLC · Claude terminal and launches the slash command'
+                  }
+                  className="flex shrink-0 items-center justify-center rounded bg-primary px-2 text-primary-foreground hover:bg-primary/90"
+                >
+                  <Play className="h-3 w-3" />
+                </button>
+              )}
+            </div>
           )}
 
           {run.currentStepStatus === 'rejected' && run.rejectReason && (

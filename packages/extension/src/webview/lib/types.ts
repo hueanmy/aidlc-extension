@@ -40,6 +40,7 @@ export interface ActiveRun {
   currentStepStatus: StepStatus | string;
   revision: number;
   rejectReason?: string;
+  feedback?: string;
   produces: ArtifactPath[];
   requires: ArtifactPath[];
   currentSlashCommand?: string;

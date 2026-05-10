@@ -67,6 +67,7 @@ interface ActiveRun {
   currentStepStatus: string;
   revision: number;
   rejectReason?: string;
+  feedback?: string;
   /** Files this step is expected to produce (resolved from template + context). */
   produces: ArtifactPath[];
   /** Files this step needs from upstream (already-produced gate inputs). */
@@ -257,6 +258,7 @@ function listActiveRuns(root: string): ActiveRun[] {
           currentStepStatus: step?.status ?? '',
           revision: step?.revision ?? 1,
           rejectReason: step?.rejectReason,
+          feedback: step?.feedback,
           produces: norm
             ? norm.produces.map((p) => resolveArtifact(root, p, r.context))
             : [],
