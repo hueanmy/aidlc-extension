@@ -194,42 +194,85 @@ export function registerV2WorkspaceCommands(
   // wondering what happened. Shell integration's onDidChange fires
   // exactly when the prompt is ready, so executeCommand lands cleanly.
   /**
-   * Open the Claude terminal AND pre-type a slash command tagged with the
-   * step's carried feedback, so the user can hit Enter to send the agent
-   * an update prompt without manually composing it. Used by the "Update
-   * with feedback" button on awaiting_work steps that have a non-empty
-   * `feedback` field (cascade reject blame OR rerun feedback).
+   * Send a slash command + carried feedback to the Claude REPL. Used by
+   * the "Update with feedback" button on awaiting_work steps that have a
+   * non-empty `feedback` field (cascade reject blame OR rerun feedback).
    *
-   * Does NOT auto-execute (no trailing newline) — the user reviews and
-   * presses Enter, keeping them in control of what the agent receives.
+   * Two paths:
+   * 1. AIDLC · Claude terminal already exists → assume `claude` is running
+   *    in the REPL (most common case — we created it earlier and the user
+   *    didn't kill it). `terminal.sendText(prompt, false)` types the
+   *    prompt into the REPL with NO trailing newline so the user reviews
+   *    and presses Enter, keeping them in control. If claude actually
+   *    exited (rare), the prompt lands at the shell prompt and the user
+   *    sees a shell error — recovery is to run `claude` and re-click.
+   * 2. No terminal yet → create one and launch `claude '<prompt>'` as the
+   *    one-shot initial command. Claude takes the prompt as its first
+   *    user message, so the slash command processes immediately on boot.
+   *    Single-quote-escaped via the standard `'\''` POSIX trick so quoted
+   *    feedback bodies survive intact.
+   *
+   * Avoids the previous "wait 2.2s then sendText" approach that races
+   * against claude's boot — typing slash commands into a shell prompt that
+   * doesn't recognize them produces a confusing error.
    */
   const runWithFeedbackCmd = vscode.commands.registerCommand(
     'aidlc.runStepWithFeedback',
-    async (slashCommand?: unknown, runId?: unknown, feedback?: unknown) => {
+    (slashCommand?: unknown, runId?: unknown, feedback?: unknown) => {
       const slash = typeof slashCommand === 'string' ? slashCommand.trim() : '';
       const id = typeof runId === 'string' ? runId.trim() : '';
       const fb = typeof feedback === 'string' ? feedback.trim() : '';
       if (!slash || !id) { return; }
-      // Reuse the openClaudeTerminal command so the terminal is created /
-      // revealed + `claude` is launched the same way as the standalone
-      // entry point. After it returns, the terminal is in scope.
-      await vscode.commands.executeCommand('aidlc.openClaudeTerminal');
-      const TERMINAL_NAME = 'AIDLC · Claude';
-      const terminal = vscode.window.terminals.find((t) => t.name === TERMINAL_NAME);
-      if (!terminal) { return; }
+
       const prompt = fb
         ? `${slash} ${id} — Update artifact per feedback: "${fb.replace(/"/g, '\\"')}"`
         : `${slash} ${id}`;
-      // Tiny delay so the prompt lands after `claude` has booted (the
-      // openClaudeTerminal command kicks off `claude` via shell-integration
-      // or a 2s timeout fallback). 2.2s is enough for both paths in
-      // practice; if claude isn't ready yet the terminal just buffers.
+
+      const TERMINAL_NAME = 'AIDLC · Claude';
+      const existing = vscode.window.terminals.find((t) => t.name === TERMINAL_NAME);
+      if (existing) {
+        existing.show(false);
+        existing.sendText(prompt, false);
+        return;
+      }
+
+      // Fresh terminal — bake the prompt into the claude launch command.
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const cwd = root && fs.existsSync(root) ? root : undefined;
+      const terminal = vscode.window.createTerminal({
+        name: TERMINAL_NAME,
+        cwd,
+        iconPath: new vscode.ThemeIcon('rocket'),
+        location: vscode.TerminalLocation.Panel,
+        env: {
+          DISABLE_AUTO_UPDATE: 'true',
+          DISABLE_UPDATE_PROMPT: 'true',
+        },
+      });
+      terminal.show(false);
+
+      // POSIX single-quote escape: the only risky character in single-
+      // quoted strings is the single quote itself, replaced with '\''.
+      const escaped = prompt.replace(/'/g, "'\\''");
+      const oneShot = `claude '${escaped}'`;
+
+      let sent = false;
+      const integ = vscode.window.onDidChangeTerminalShellIntegration((e) => {
+        if (e.terminal === terminal && e.shellIntegration && !sent) {
+          sent = true;
+          e.shellIntegration.executeCommand(oneShot);
+          integ.dispose();
+        }
+      });
+      // Fallback for shells without integration — same 2s window as
+      // openClaudeTerminal. addNewLine=true so claude actually launches.
       setTimeout(() => {
-        terminal.show(false);
-        // addNewLine=false — let the user press Enter so they can edit
-        // the prompt before sending.
-        terminal.sendText(prompt, false);
-      }, 2200);
+        if (!sent) {
+          sent = true;
+          terminal.sendText(oneShot, true);
+          integ.dispose();
+        }
+      }, 2000);
     },
   );
 
