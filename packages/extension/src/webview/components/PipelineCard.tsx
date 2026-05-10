@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   Play,
   Plus,
+  Pencil,
   X,
   ArrowUp,
   ArrowDown,
@@ -16,6 +17,7 @@ import { ConfirmModal } from './ConfirmModal';
 import { StepPickerModal } from './StepPickerModal';
 import { StartRunModal } from './StartRunModal';
 import { StepConfigModal } from './StepConfigModal';
+import { PipelineModal, type PipelineDraft } from './PipelineModal';
 
 export function PipelineCard({
   pipeline,
@@ -32,6 +34,18 @@ export function PipelineCard({
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [runOpen, setRunOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+
+  const initialDraft: PipelineDraft = {
+    id: pipeline.id,
+    on_failure: pipeline.on_failure,
+    steps: pipeline.steps.map((s) => ({
+      agent: s.agent,
+      human_review: s.human_review,
+      auto_review: s.auto_review,
+      auto_review_runner: s.auto_review_runner,
+    })),
+  };
   return (
     <div className="rounded-lg border border-border bg-card p-3">
       <div className="flex items-center gap-2 border-b border-border pb-2">
@@ -59,6 +73,14 @@ export function PipelineCard({
           )}
         >
           on_failure: {pipeline.on_failure}
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditOpen(true)}
+          title="Edit workflow"
+          className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <Pencil className="h-3 w-3" />
         </button>
         <button
           type="button"
@@ -155,6 +177,18 @@ export function PipelineCard({
             postMessage({ type: 'startRunInline', pipelineId, runId })
           }
           onClose={() => setRunOpen(false)}
+        />
+      )}
+      {editOpen && (
+        <PipelineModal
+          mode="edit"
+          agents={agents}
+          existingPipelineIds={[]}
+          initial={initialDraft}
+          onSubmit={(draft) =>
+            postMessage({ type: 'editPipelineInline', id: pipeline.id, draft })
+          }
+          onClose={() => setEditOpen(false)}
         />
       )}
     </div>

@@ -6,13 +6,13 @@ import { Modal, ModalFooter, ModalCancelButton, ModalConfirmButton } from './Mod
 
 const ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
-export interface AddPipelineDraft {
+export interface PipelineDraft {
   id: string;
   on_failure: 'stop' | 'continue';
-  steps: AddPipelineStepDraft[];
+  steps: PipelineStepDraft[];
 }
 
-export interface AddPipelineStepDraft {
+export interface PipelineStepDraft {
   agent: string;
   human_review: boolean;
   auto_review: boolean;
@@ -20,24 +20,41 @@ export interface AddPipelineStepDraft {
 }
 
 interface Props {
+  mode: 'add' | 'edit';
   agents: AgentSummary[];
   existingPipelineIds: string[];
-  onSubmit: (draft: AddPipelineDraft) => void;
+  /** Pre-filled values when mode === 'edit'. */
+  initial?: PipelineDraft;
+  onSubmit: (draft: PipelineDraft) => void;
   onClose: () => void;
 }
 
-export function AddPipelineModal({ agents, existingPipelineIds, onSubmit, onClose }: Props) {
-  const [id, setId] = useState('');
-  const [onFailure, setOnFailure] = useState<'stop' | 'continue'>('stop');
-  const [steps, setSteps] = useState<AddPipelineStepDraft[]>([]);
+export function PipelineModal({
+  mode,
+  agents,
+  existingPipelineIds,
+  initial,
+  onSubmit,
+  onClose,
+}: Props) {
+  const [id, setId] = useState(initial?.id ?? '');
+  const [onFailure, setOnFailure] = useState<'stop' | 'continue'>(
+    initial?.on_failure ?? 'stop',
+  );
+  const [steps, setSteps] = useState<PipelineStepDraft[]>(initial?.steps ?? []);
   const idInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    idInputRef.current?.focus();
-  }, []);
+    // Edit mode: id is locked, no obvious target — let the user click. Add mode: focus id.
+    if (mode === 'add') {
+      idInputRef.current?.focus();
+    }
+  }, [mode]);
 
   const trimmedId = id.trim();
   const idError = useMemo(() => {
+    // In edit mode the id is locked — skip validation since the user can't change it.
+    if (mode === 'edit') { return null; }
     if (!trimmedId) { return 'Pipeline id is required'; }
     if (!ID_PATTERN.test(trimmedId)) {
       return 'Letters, digits, dot, dash, underscore — must start with letter/digit';
@@ -46,7 +63,7 @@ export function AddPipelineModal({ agents, existingPipelineIds, onSubmit, onClos
       return `Pipeline "${trimmedId}" already exists`;
     }
     return null;
-  }, [trimmedId, existingPipelineIds]);
+  }, [mode, trimmedId, existingPipelineIds]);
 
   const stepsError =
     steps.length < 2 ? 'Pick at least 2 agents (a single-step pipeline is just an agent)' : null;
@@ -90,26 +107,39 @@ export function AddPipelineModal({ agents, existingPipelineIds, onSubmit, onClos
       [next[i], next[i + 1]] = [next[i + 1], next[i]];
       return next;
     });
-  const updateAt = (i: number, patch: Partial<AddPipelineStepDraft>) =>
+  const updateAt = (i: number, patch: Partial<PipelineStepDraft>) =>
     setSteps((cur) => cur.map((s, j) => (j === i ? { ...s, ...patch } : s)));
 
+  const isEdit = mode === 'edit';
+  const title = isEdit ? 'Edit pipeline' : 'Add pipeline';
+  const submitLabel = isEdit ? 'Save pipeline' : 'Create pipeline';
+
   return (
-    <Modal title="Add pipeline" maxWidth="max-w-2xl" onClose={onClose} onSubmit={submit}>
+    <Modal title={title} maxWidth="max-w-2xl" onClose={onClose} onSubmit={submit}>
       <div className="space-y-4">
         <div>
           <label className="mb-1 block text-[10.5px] font-bold uppercase tracking-wider text-muted-foreground">
             Pipeline id
           </label>
-          <input
-            ref={idInputRef}
-            type="text"
-            value={id}
-            onChange={(e) => setId(e.target.value)}
-            placeholder="e.g. full-migration"
-            spellCheck={false}
-            className="w-full rounded-md border border-border bg-input/50 px-2.5 py-2 font-mono text-[12px] text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/40"
-          />
-          {idError && trimmedId && (
+          {isEdit ? (
+            <div
+              className="rounded-md border border-border bg-secondary/40 px-2.5 py-2 font-mono text-[12px] text-foreground/80"
+              title="ID is locked in edit mode — active pipeline runs reference it. Delete and recreate to rename."
+            >
+              {id}
+            </div>
+          ) : (
+            <input
+              ref={idInputRef}
+              type="text"
+              value={id}
+              onChange={(e) => setId(e.target.value)}
+              placeholder="e.g. full-migration"
+              spellCheck={false}
+              className="w-full rounded-md border border-border bg-input/50 px-2.5 py-2 font-mono text-[12px] text-foreground placeholder:text-muted-foreground/70 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/40"
+            />
+          )}
+          {!isEdit && idError && trimmedId && (
             <div className="mt-1 text-[10.5px] text-destructive">{idError}</div>
           )}
         </div>
@@ -202,11 +232,7 @@ export function AddPipelineModal({ agents, existingPipelineIds, onSubmit, onClos
 
       <ModalFooter>
         <ModalCancelButton onClick={onClose} />
-        <ModalConfirmButton
-          onClick={submit}
-          label="Create pipeline"
-          disabled={!!error}
-        />
+        <ModalConfirmButton onClick={submit} label={submitLabel} disabled={!!error} />
       </ModalFooter>
     </Modal>
   );

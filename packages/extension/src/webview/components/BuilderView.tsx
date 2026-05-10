@@ -6,7 +6,7 @@ import { AgentCard, KebabMenu } from './AgentCard';
 import { PipelineCard } from './PipelineCard';
 import { RenameModal } from './RenameModal';
 import { ConfirmModal } from './ConfirmModal';
-import { AddPipelineModal } from './AddPipelineModal';
+import { PipelineModal } from './PipelineModal';
 import { postMessage } from '@/lib/bridge';
 
 type BuilderTab = 'workflows' | 'agents' | 'skills' | 'epics';
@@ -107,7 +107,8 @@ export function BuilderView({ state }: { state: WorkspaceState }) {
       {tab === 'epics' && <EpicsMiniGrid state={state} />}
 
       {addPipelineOpen && (
-        <AddPipelineModal
+        <PipelineModal
+          mode="add"
           agents={aidlcAgents}
           existingPipelineIds={state.pipelines.map((p) => p.id)}
           onSubmit={(draft) =>

@@ -615,6 +615,13 @@ export class WorkspaceWebview {
         await this.addPipelineInline(draft as Record<string, unknown>);
         return;
       }
+      case 'editPipelineInline': {
+        const id = String(msg.id ?? '');
+        const draft = msg.draft;
+        if (!id || !draft || typeof draft !== 'object') { return; }
+        await this.editPipelineInline(id, draft as Record<string, unknown>);
+        return;
+      }
       case 'startPipelineRunForEpic': {
         const epicId = String(msg.epicId ?? '').trim();
         const pipelineId = String(msg.pipelineId ?? '').trim();
@@ -901,6 +908,99 @@ export class WorkspaceWebview {
 
     void vscode.window.showInformationMessage(
       `Pipeline "${id}" added: ${steps
+        .map((s) => (s as { agent: string }).agent)
+        .join(' → ')}`,
+    );
+  }
+
+  /**
+   * Apply edits from the React `PipelineModal` (edit mode). Replaces the
+   * pipeline's `steps` and `on_failure` while preserving each existing step's
+   * `requires` / `produces` (which the modal does not expose — those still
+   * live on the per-step gear-icon flow). Matching is by agent id, first
+   * occurrence — good enough for typical reorder + toggle workflows.
+   */
+  private async editPipelineInline(
+    id: string,
+    draft: Record<string, unknown>,
+  ): Promise<void> {
+    const root = this.getRootOrWarn();
+    if (!root) { return; }
+    const doc = readYaml(root);
+    if (!doc) { return; }
+
+    const pipeline = doc.pipelines.find((p) => p.id === id);
+    if (!pipeline) {
+      void vscode.window.showWarningMessage(`Pipeline "${id}" not found.`);
+      return;
+    }
+
+    const onFailure: 'stop' | 'continue' =
+      draft.on_failure === 'continue' ? 'continue' : 'stop';
+    const stepsRaw = Array.isArray(draft.steps) ? (draft.steps as unknown[]) : [];
+    if (stepsRaw.length === 0) {
+      void vscode.window.showWarningMessage('Pipeline needs at least one step.');
+      return;
+    }
+
+    const agentIds = new Set(doc.agents.map((a) => String(a.id)));
+
+    // Preserve requires/produces from the existing pipeline by agent id —
+    // first occurrence consumed per match so duplicate-agent steps still
+    // pair up with their original entries in order.
+    const oldByAgent = new Map<string, Array<{ requires: string[]; produces: string[] }>>();
+    if (Array.isArray(pipeline.steps)) {
+      for (const raw of pipeline.steps as PipelineStepConfig[]) {
+        const norm = normalizeStep(raw);
+        const arr = oldByAgent.get(norm.agent) ?? [];
+        arr.push({ requires: norm.requires, produces: norm.produces });
+        oldByAgent.set(norm.agent, arr);
+      }
+    }
+
+    const newSteps: unknown[] = [];
+    for (const raw of stepsRaw) {
+      if (!raw || typeof raw !== 'object') { continue; }
+      const r = raw as Record<string, unknown>;
+      const agent = String(r.agent ?? '').trim();
+      if (!agent || !agentIds.has(agent)) {
+        void vscode.window.showWarningMessage(
+          `Step references unknown agent "${agent}". Aborting.`,
+        );
+        return;
+      }
+      const human_review = r.human_review === true;
+      const auto_review = r.auto_review === true;
+      const runner = typeof r.auto_review_runner === 'string' ? r.auto_review_runner.trim() : '';
+      if (auto_review && !runner) {
+        void vscode.window.showWarningMessage(
+          `Step "${agent}": auto_review is on but runner path is empty.`,
+        );
+        return;
+      }
+
+      const carry = oldByAgent.get(agent)?.shift();
+      const step: Record<string, unknown> = {
+        agent,
+        enabled: true,
+        requires: carry?.requires ?? [],
+        produces: carry?.produces ?? [],
+        human_review,
+        auto_review,
+      };
+      if (auto_review) { step.auto_review_runner = runner; }
+      newSteps.push(step);
+    }
+
+    this.mutateYaml((d) => {
+      const p = d.pipelines.find((x) => x.id === id);
+      if (!p) { return false; }
+      p.steps = newSteps;
+      p.on_failure = onFailure;
+    });
+
+    void vscode.window.showInformationMessage(
+      `Pipeline "${id}" updated: ${newSteps
         .map((s) => (s as { agent: string }).agent)
         .join(' → ')}`,
     );
