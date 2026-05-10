@@ -32,6 +32,7 @@ import type { PipelineConfig } from '@aidlc/core';
 import { listEpics } from './epicsList';
 import type { PresetStore } from './presetStore';
 import { themeManager } from './themeManager';
+import { loadMcpServers, type McpServerInfo } from './mcpServers';
 import {
   rejectStepInlineCommand,
   rerunStepInlineCommand,
@@ -114,9 +115,25 @@ interface SidebarState {
    * sidebar can pop an inline "re-seed / open-as-is / cancel" modal
    * instead of letting the host show a VS Code notification. */
   demoProjectExists: boolean;
+  /** MCP servers Claude is currently connected to — null while loading
+   * (the CLI runs a health check that takes several seconds), [] when
+   * none are configured. */
+  mcpServers: McpServerInfo[] | null;
+  /** True while `claude mcp list` is in flight — the section shows a
+   * spinner instead of the empty-list message. */
+  mcpLoading: boolean;
+  /** Surfaced from the spawn so the user knows why the list is missing
+   * (claude not on PATH, timeout, etc.). */
+  mcpError: string | null;
 }
 
-function buildState(presetStore: PresetStore | null): SidebarState {
+interface McpSnapshot {
+  servers: McpServerInfo[] | null;
+  loading: boolean;
+  error: string | null;
+}
+
+function buildState(presetStore: PresetStore | null, mcp: McpSnapshot): SidebarState {
   const demoProjectExists = fs.existsSync(path.join(os.homedir(), DEMO_DIR_NAME));
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (!folder) {
@@ -131,6 +148,9 @@ function buildState(presetStore: PresetStore | null): SidebarState {
       activeRuns: [],
       pipelines: [], runIds: [],
       demoProjectExists,
+      mcpServers: mcp.servers,
+      mcpLoading: mcp.loading,
+      mcpError: mcp.error,
     };
   }
 
@@ -180,6 +200,9 @@ function buildState(presetStore: PresetStore | null): SidebarState {
       pipelines: [],
       runIds,
       demoProjectExists,
+      mcpServers: mcp.servers,
+      mcpLoading: mcp.loading,
+      mcpError: mcp.error,
     };
   }
 
@@ -217,6 +240,9 @@ function buildState(presetStore: PresetStore | null): SidebarState {
     pipelines,
     runIds,
     demoProjectExists,
+    mcpServers: mcp.servers,
+    mcpLoading: mcp.loading,
+    mcpError: mcp.error,
   };
 }
 
@@ -318,6 +344,12 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'aidlcSidebar';
   private view: vscode.WebviewView | undefined;
 
+  // MCP list is loaded lazily via `claude mcp list`; the CLI runs a health
+  // check that takes several seconds so we cache the snapshot and let the
+  // user trigger refreshes from the UI.
+  private mcp: McpSnapshot = { servers: null, loading: false, error: null };
+  private mcpLoadPromise: Promise<void> | null = null;
+
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly presetStore: PresetStore | null = null,
@@ -339,11 +371,39 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
     const themeReg = themeManager.register(view.webview);
     view.onDidDispose(() => themeReg.dispose());
     this.refresh();
+    // First-time MCP load happens once the panel is up — kicks off the
+    // spawn and re-posts state when the result lands.
+    void this.loadMcp();
   }
 
   refresh(): void {
     if (!this.view) { return; }
-    void this.view.webview.postMessage({ type: 'state', state: buildState(this.presetStore) });
+    void this.view.webview.postMessage({
+      type: 'state',
+      state: buildState(this.presetStore, this.mcp),
+    });
+  }
+
+  private async loadMcp(): Promise<void> {
+    if (this.mcpLoadPromise) { return this.mcpLoadPromise; }
+    this.mcp = { servers: this.mcp.servers, loading: true, error: null };
+    this.refresh();
+    this.mcpLoadPromise = (async () => {
+      try {
+        const result = await loadMcpServers();
+        this.mcp = { servers: result.servers, loading: false, error: result.error };
+      } catch (e) {
+        this.mcp = {
+          servers: this.mcp.servers,
+          loading: false,
+          error: e instanceof Error ? e.message : String(e),
+        };
+      } finally {
+        this.refresh();
+        this.mcpLoadPromise = null;
+      }
+    })();
+    return this.mcpLoadPromise;
   }
 
   private async handleMessage(msg: { type: string; [k: string]: unknown }): Promise<void> {
@@ -533,6 +593,9 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       case 'refresh':
         this.refresh();
         return;
+      case 'refreshMcp':
+        void this.loadMcp();
+        return;
     }
   }
 
@@ -543,7 +606,7 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       vscode.Uri.joinPath(this.extensionUri, 'media', 'icon.svg'),
     ).toString();
     const version = readExtensionVersion(this.extensionUri.fsPath);
-    const initialState = buildState(this.presetStore);
+    const initialState = buildState(this.presetStore, this.mcp);
     const initialTheme = themeManager.current;
 
     const assetsRoot = vscode.Uri.joinPath(this.extensionUri, 'out', 'webviews');

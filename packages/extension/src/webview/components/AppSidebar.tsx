@@ -18,6 +18,8 @@ import {
   Sparkles,
   Diamond,
   RefreshCw,
+  Plug,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type {
@@ -27,6 +29,7 @@ import type {
   SlashCommandRef,
   TemplateRef,
   ArtifactPath,
+  McpServerInfo,
 } from '@/lib/types';
 import { RejectModal } from './RejectModal';
 import { ConfirmModal } from './ConfirmModal';
@@ -43,6 +46,7 @@ interface CollapseState {
   slashCommands: boolean;
   workflows: boolean;
   pipelineRuns: boolean;
+  mcpServers: boolean;
 }
 
 interface PersistedUi {
@@ -55,6 +59,7 @@ const DEFAULT_COLLAPSED: CollapseState = {
   slashCommands: true,
   workflows: false,
   pipelineRuns: false,
+  mcpServers: true,
 };
 
 function isRunCollapsed(
@@ -213,6 +218,14 @@ export function AppSidebar({ state }: { state: SidebarState | null }) {
               workspaceName={state.workspaceName}
               collapsed={collapsed.workflows}
               onToggle={() => toggleSection('workflows')}
+            />
+
+            <McpServersSection
+              servers={state.mcpServers}
+              loading={state.mcpLoading}
+              error={state.mcpError}
+              collapsed={collapsed.mcpServers}
+              onToggle={() => toggleSection('mcpServers')}
             />
           </>
         )}
@@ -491,6 +504,106 @@ function SlashCommandsSection({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function McpServersSection({
+  servers,
+  loading,
+  error,
+  collapsed,
+  onToggle,
+}: {
+  servers: McpServerInfo[] | null;
+  loading: boolean;
+  error: string | null;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  // Show counts in the header so users can glance the connected total
+  // without expanding. servers === null means the list hasn't loaded yet.
+  const total = servers?.length ?? 0;
+  const connected = servers?.filter((s) => s.status === 'connected').length ?? 0;
+  return (
+    <div>
+      <SectionHeader
+        label="MCP servers"
+        collapsed={collapsed}
+        onToggle={onToggle}
+        trailing={
+          <div className="flex items-center gap-1.5">
+            {servers && (
+              <span className="text-[10px] text-muted-foreground">
+                {connected}/{total}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                postMessage({ type: 'refreshMcp' });
+              }}
+              title="Re-run claude mcp list"
+              className="grid h-5 w-5 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+              disabled={loading}
+            >
+              {loading ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3" />
+              )}
+            </button>
+          </div>
+        }
+      />
+      {!collapsed && (
+        <div className="mt-1.5 space-y-1">
+          {error && (
+            <div className="rounded border-l-2 border-destructive bg-destructive/5 px-2 py-1.5 text-[10px] text-muted-foreground">
+              {error}
+            </div>
+          )}
+          {servers === null && !error && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span>Querying claude mcp list…</span>
+            </div>
+          )}
+          {servers && servers.length === 0 && !error && (
+            <div className="px-2.5 py-1.5 text-[10px] text-muted-foreground">
+              No MCP servers configured.
+            </div>
+          )}
+          {servers?.map((s) => <McpRow key={s.name} server={s} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const MCP_DOT: Record<McpServerInfo['status'], string> = {
+  connected: 'bg-success shadow-[0_0_4px_var(--color-success)]',
+  needs_auth: 'bg-warning',
+  failed: 'bg-destructive',
+  unknown: 'bg-muted-foreground/40',
+};
+
+function McpRow({ server }: { server: McpServerInfo }) {
+  const titleParts = [server.statusText];
+  if (server.transport) { titleParts.push(server.transport); }
+  if (server.endpoint) { titleParts.push(server.endpoint); }
+  return (
+    <div
+      className="flex items-center gap-2 rounded-md border border-border bg-card/50 px-2.5 py-1.5 text-[11px]"
+      title={titleParts.join(' · ')}
+    >
+      <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', MCP_DOT[server.status])} />
+      <Plug className="h-3 w-3 shrink-0 text-muted-foreground" />
+      <span className="truncate font-medium text-foreground">{server.name}</span>
+      <span className="ml-auto shrink-0 truncate text-[9px] uppercase tracking-wider text-muted-foreground">
+        {server.status === 'needs_auth' ? 'auth' : server.status}
+      </span>
     </div>
   );
 }

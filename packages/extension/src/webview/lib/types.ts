@@ -78,6 +78,16 @@ export interface SkillTemplateRef {
   description: string;
 }
 
+export type McpStatus = 'connected' | 'needs_auth' | 'failed' | 'unknown';
+
+export interface McpServerInfo {
+  name: string;
+  endpoint: string;
+  transport: string;
+  status: McpStatus;
+  statusText: string;
+}
+
 export interface SidebarState {
   hasFolder: boolean;
   workspaceName: string;
@@ -99,6 +109,11 @@ export interface SidebarState {
    * button uses this to pop an inline modal asking re-seed vs open-as-is
    * instead of letting the host show a VS Code notification. */
   demoProjectExists: boolean;
+  /** MCP servers Claude is currently connected to. null = first load is in
+   * flight, [] = none configured. */
+  mcpServers: McpServerInfo[] | null;
+  mcpLoading: boolean;
+  mcpError: string | null;
 }
 
 export type AssetScope = 'project' | 'aidlc' | 'global';
