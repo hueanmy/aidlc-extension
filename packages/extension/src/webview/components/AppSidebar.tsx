@@ -20,6 +20,8 @@ import {
   RefreshCw,
   Plug,
   Loader2,
+  Lightbulb,
+  TrendingDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type {
@@ -30,6 +32,7 @@ import type {
   TemplateRef,
   ArtifactPath,
   McpServerInfo,
+  CostSuggestion,
 } from '@/lib/types';
 import { RejectModal } from './RejectModal';
 import { ConfirmModal } from './ConfirmModal';
@@ -47,6 +50,7 @@ interface CollapseState {
   workflows: boolean;
   pipelineRuns: boolean;
   mcpServers: boolean;
+  costSuggestions: boolean;
 }
 
 interface PersistedUi {
@@ -60,6 +64,7 @@ const DEFAULT_COLLAPSED: CollapseState = {
   workflows: false,
   pipelineRuns: false,
   mcpServers: true,
+  costSuggestions: false,
 };
 
 function isRunCollapsed(
@@ -226,6 +231,15 @@ export function AppSidebar({ state }: { state: SidebarState | null }) {
               error={state.mcpError}
               collapsed={collapsed.mcpServers}
               onToggle={() => toggleSection('mcpServers')}
+            />
+
+            <CostSuggestionsSection
+              suggestions={state.costSuggestions}
+              loading={state.costSuggestionsLoading}
+              error={state.costSuggestionsError}
+              windowDays={state.costSuggestionsWindowDays}
+              collapsed={collapsed.costSuggestions}
+              onToggle={() => toggleSection('costSuggestions')}
             />
           </>
         )}
@@ -606,6 +620,183 @@ function McpRow({ server }: { server: McpServerInfo }) {
       </span>
     </div>
   );
+}
+
+function CostSuggestionsSection({
+  suggestions,
+  loading,
+  error,
+  windowDays,
+  collapsed,
+  onToggle,
+}: {
+  suggestions: CostSuggestion[] | null;
+  loading: boolean;
+  error: string | null;
+  windowDays: number;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  // Header surfaces the most actionable summary: total estimated savings
+  // across all surfaced rules, plus a sev-count breakdown so users can
+  // tell at a glance whether anything is high-severity without expanding.
+  const totalSavings = suggestions?.reduce((s, x) => s + x.estSavings, 0) ?? 0;
+  const counts = countBySeverity(suggestions);
+  return (
+    <div>
+      <SectionHeader
+        label="Cost suggestions"
+        collapsed={collapsed}
+        onToggle={onToggle}
+        trailing={
+          <div className="flex items-center gap-1.5">
+            {suggestions && suggestions.length > 0 && (
+              <span className="flex items-center gap-1 text-[10px] tabular-nums">
+                {counts.high > 0 && (
+                  <span className="text-destructive">{counts.high}h</span>
+                )}
+                {counts.med > 0 && (
+                  <span className="text-warning">{counts.med}m</span>
+                )}
+                {counts.low > 0 && (
+                  <span className="text-muted-foreground">{counts.low}l</span>
+                )}
+                {totalSavings > 0 && (
+                  <span className="text-success">· save ~{fmtUsd(totalSavings)}</span>
+                )}
+              </span>
+            )}
+            {suggestions && suggestions.length === 0 && !loading && !error && (
+              <span className="text-[10px] text-success">all clean</span>
+            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                postMessage({ type: 'refreshCostSuggestions' });
+              }}
+              title={`Re-scan last ${windowDays} day(s) of Claude logs`}
+              className="grid h-5 w-5 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+              disabled={loading}
+            >
+              {loading ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3" />
+              )}
+            </button>
+          </div>
+        }
+      />
+      {!collapsed && (
+        <div className="mt-1.5 space-y-1.5">
+          <div className="flex items-center gap-1.5 px-1 text-[10px] text-muted-foreground">
+            <Lightbulb className="h-2.5 w-2.5" />
+            <span>Heuristic scan of last {windowDays}d · ported from claude-token-monitor</span>
+          </div>
+          {error && (
+            <div className="rounded border-l-2 border-destructive bg-destructive/5 px-2 py-1.5 text-[10px] text-muted-foreground">
+              {error}
+            </div>
+          )}
+          {suggestions === null && !error && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span>Scanning Claude logs…</span>
+            </div>
+          )}
+          {suggestions && suggestions.length === 0 && !error && (
+            <div className="flex items-center gap-1.5 rounded-md border border-success/30 bg-success/5 px-2.5 py-1.5 text-[11px] text-success">
+              <TrendingDown className="h-3 w-3" />
+              <span>No efficiency issues detected — looking clean.</span>
+            </div>
+          )}
+          {suggestions?.map((s, i) => (
+            <CostSuggestionRow key={`${s.rule}-${i}`} s={s} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function countBySeverity(
+  suggestions: CostSuggestion[] | null,
+): { high: number; med: number; low: number } {
+  const out = { high: 0, med: 0, low: 0 };
+  if (!suggestions) { return out; }
+  for (const s of suggestions) { out[s.severity]++; }
+  return out;
+}
+
+const SEV_PILL: Record<CostSuggestion['severity'], string> = {
+  high: 'bg-destructive/15 text-destructive',
+  med: 'bg-warning/15 text-warning',
+  low: 'bg-muted text-muted-foreground',
+};
+
+function CostSuggestionRow({ s }: { s: CostSuggestion }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div
+      className={cn(
+        'rounded-md border bg-card/50 px-2.5 py-1.5 text-[11px]',
+        s.severity === 'high'
+          ? 'border-destructive/40'
+          : s.severity === 'med'
+          ? 'border-warning/40'
+          : 'border-border',
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full items-center gap-2 text-left"
+        title={expanded ? 'Collapse' : 'Show evidence + recommended action'}
+      >
+        <span
+          className={cn(
+            'shrink-0 rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wider',
+            SEV_PILL[s.severity],
+          )}
+        >
+          {s.severity}
+        </span>
+        <span className="font-mono text-[10px] font-semibold text-primary truncate">
+          {s.rule}
+        </span>
+        <span className="truncate text-[10px] text-muted-foreground">· {s.scope}</span>
+        {s.estSavings > 0 && (
+          <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-success">
+            ~{fmtUsd(s.estSavings)}
+          </span>
+        )}
+      </button>
+      {expanded && (
+        <div className="mt-1.5 space-y-1 border-t border-border/50 pt-1.5 text-[10.5px]">
+          <div className="text-muted-foreground">
+            <span className="font-bold uppercase tracking-widest text-[9px] text-muted-foreground/80">
+              Evidence
+            </span>
+            <div className="mt-0.5">{s.evidence}</div>
+          </div>
+          <div>
+            <span className="font-bold uppercase tracking-widest text-[9px] text-muted-foreground/80">
+              Action
+            </span>
+            <div className="mt-0.5 text-foreground">{s.action}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function fmtUsd(n: number): string {
+  if (n >= 100) { return `$${n.toFixed(0)}`; }
+  if (n >= 10) { return `$${n.toFixed(1)}`; }
+  if (n >= 1) { return `$${n.toFixed(2)}`; }
+  return `$${n.toFixed(3)}`;
 }
 
 function WorkflowsSection({

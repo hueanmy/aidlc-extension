@@ -88,6 +88,18 @@ export interface McpServerInfo {
   statusText: string;
 }
 
+export type SuggestionSeverity = 'high' | 'med' | 'low';
+
+export interface CostSuggestion {
+  rule: string;
+  severity: SuggestionSeverity;
+  scope: string;
+  evidence: string;
+  action: string;
+  /** USD; 0 when the rule doesn't quantify a saving. */
+  estSavings: number;
+}
+
 export interface SidebarState {
   hasFolder: boolean;
   workspaceName: string;
@@ -114,6 +126,13 @@ export interface SidebarState {
   mcpServers: McpServerInfo[] | null;
   mcpLoading: boolean;
   mcpError: string | null;
+  /** Cost-saving suggestions. null while the first scan runs, [] when
+   * nothing surfaces. Sorted high → low severity, savings desc. */
+  costSuggestions: CostSuggestion[] | null;
+  costSuggestionsLoading: boolean;
+  costSuggestionsError: string | null;
+  /** Window (days) the engine scanned, surfaced in the UI label. */
+  costSuggestionsWindowDays: number;
 }
 
 export type AssetScope = 'project' | 'aidlc' | 'global';

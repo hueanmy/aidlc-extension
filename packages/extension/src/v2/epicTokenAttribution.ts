@@ -21,26 +21,7 @@ import * as readline from 'readline';
 
 import type { RunState, StepRecord } from '@aidlc/core';
 
-interface ModelPrice { in: number; out: number; cr: number; cw: number }
-
-const PRICING: Record<string, ModelPrice> = {
-  'claude-opus-4':     { in: 15.0, out: 75.0, cr: 1.50, cw: 18.75 },
-  'claude-sonnet-4':   { in:  3.0, out: 15.0, cr: 0.30, cw:  3.75 },
-  'claude-haiku-4':    { in:  1.0, out:  5.0, cr: 0.10, cw:  1.25 },
-  'claude-3-5-sonnet': { in:  3.0, out: 15.0, cr: 0.30, cw:  3.75 },
-  'claude-3-5-haiku':  { in:  0.8, out:  4.0, cr: 0.08, cw:  1.00 },
-  'claude-3-opus':     { in: 15.0, out: 75.0, cr: 1.50, cw: 18.75 },
-  'claude-3-haiku':    { in: 0.25, out: 1.25, cr: 0.03, cw:  0.30 },
-};
-const DEFAULT_PRICE: ModelPrice = { in: 3.0, out: 15.0, cr: 0.30, cw: 3.75 };
-
-function modelPrice(model: string): ModelPrice {
-  const m = (model || '').toLowerCase();
-  for (const [prefix, price] of Object.entries(PRICING)) {
-    if (m.includes(prefix)) return price;
-  }
-  return DEFAULT_PRICE;
-}
+import { modelPrice } from './tokenPricing';
 
 /**
  * Read a synthetic `.aidlc/runs/<runId>.usage.json` sidecar if present.

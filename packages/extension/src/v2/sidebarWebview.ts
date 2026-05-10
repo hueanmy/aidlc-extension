@@ -34,6 +34,8 @@ import type { PresetStore } from './presetStore';
 import { themeManager } from './themeManager';
 import { loadMcpServers, type McpServerInfo } from './mcpServers';
 import { pickAndReadTextFile } from './pickAndReadTextFile';
+import { loadAllRecords } from './tokenRecords';
+import { analyzeSuggestions, type Suggestion } from './costSuggestions';
 import {
   rejectStepInlineCommand,
   rerunStepInlineCommand,
@@ -126,6 +128,15 @@ interface SidebarState {
   /** Surfaced from the spawn so the user knows why the list is missing
    * (claude not on PATH, timeout, etc.). */
   mcpError: string | null;
+  /** Cost-saving suggestions from the suggest engine — null while the
+   * first scan is in flight, [] when nothing surfaces. Recomputed when
+   * the user clicks refresh. */
+  costSuggestions: Suggestion[] | null;
+  costSuggestionsLoading: boolean;
+  costSuggestionsError: string | null;
+  /** Window (in days) the suggestion engine scanned. Surfaced so the
+   * UI can label "scanned last 30d" honestly. */
+  costSuggestionsWindowDays: number;
 }
 
 interface McpSnapshot {
@@ -134,7 +145,18 @@ interface McpSnapshot {
   error: string | null;
 }
 
-function buildState(presetStore: PresetStore | null, mcp: McpSnapshot): SidebarState {
+interface CostSuggestionsSnapshot {
+  suggestions: Suggestion[] | null;
+  loading: boolean;
+  error: string | null;
+  windowDays: number;
+}
+
+function buildState(
+  presetStore: PresetStore | null,
+  mcp: McpSnapshot,
+  costs: CostSuggestionsSnapshot,
+): SidebarState {
   const demoProjectExists = fs.existsSync(path.join(os.homedir(), DEMO_DIR_NAME));
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (!folder) {
@@ -152,6 +174,10 @@ function buildState(presetStore: PresetStore | null, mcp: McpSnapshot): SidebarS
       mcpServers: mcp.servers,
       mcpLoading: mcp.loading,
       mcpError: mcp.error,
+      costSuggestions: costs.suggestions,
+      costSuggestionsLoading: costs.loading,
+      costSuggestionsError: costs.error,
+      costSuggestionsWindowDays: costs.windowDays,
     };
   }
 
@@ -204,6 +230,10 @@ function buildState(presetStore: PresetStore | null, mcp: McpSnapshot): SidebarS
       mcpServers: mcp.servers,
       mcpLoading: mcp.loading,
       mcpError: mcp.error,
+      costSuggestions: costs.suggestions,
+      costSuggestionsLoading: costs.loading,
+      costSuggestionsError: costs.error,
+      costSuggestionsWindowDays: costs.windowDays,
     };
   }
 
@@ -244,6 +274,10 @@ function buildState(presetStore: PresetStore | null, mcp: McpSnapshot): SidebarS
     mcpServers: mcp.servers,
     mcpLoading: mcp.loading,
     mcpError: mcp.error,
+    costSuggestions: costs.suggestions,
+    costSuggestionsLoading: costs.loading,
+    costSuggestionsError: costs.error,
+    costSuggestionsWindowDays: costs.windowDays,
   };
 }
 
@@ -351,6 +385,17 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
   private mcp: McpSnapshot = { servers: null, loading: false, error: null };
   private mcpLoadPromise: Promise<void> | null = null;
 
+  // Cost suggestion engine reads ~/.claude/projects JSONLs and runs the
+  // 10 heuristic rules. The scan is bounded by `aidlc.tokenMonitor.suggestionWindowDays`
+  // (default 30) — older logs don't reflect current habits.
+  private costs: CostSuggestionsSnapshot = {
+    suggestions: null,
+    loading: false,
+    error: null,
+    windowDays: 30,
+  };
+  private costsLoadPromise: Promise<void> | null = null;
+
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly presetStore: PresetStore | null = null,
@@ -375,13 +420,16 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
     // First-time MCP load happens once the panel is up — kicks off the
     // spawn and re-posts state when the result lands.
     void this.loadMcp();
+    // Kick the cost-suggestion scan in parallel — it reads JSONLs and
+    // can take a couple of seconds on a heavy log dir.
+    void this.loadCostSuggestions();
   }
 
   refresh(): void {
     if (!this.view) { return; }
     void this.view.webview.postMessage({
       type: 'state',
-      state: buildState(this.presetStore, this.mcp),
+      state: buildState(this.presetStore, this.mcp, this.costs),
     });
   }
 
@@ -405,6 +453,37 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       }
     })();
     return this.mcpLoadPromise;
+  }
+
+  private async loadCostSuggestions(): Promise<void> {
+    if (this.costsLoadPromise) { return this.costsLoadPromise; }
+    const cfg = vscode.workspace.getConfiguration('aidlc.tokenMonitor');
+    const windowDays = Math.max(1, cfg.get<number>('suggestionWindowDays', 30));
+    this.costs = {
+      suggestions: this.costs.suggestions,
+      loading: true,
+      error: null,
+      windowDays,
+    };
+    this.refresh();
+    this.costsLoadPromise = (async () => {
+      try {
+        const records = await loadAllRecords(windowDays);
+        const suggestions = analyzeSuggestions(records);
+        this.costs = { suggestions, loading: false, error: null, windowDays };
+      } catch (e) {
+        this.costs = {
+          suggestions: this.costs.suggestions,
+          loading: false,
+          error: e instanceof Error ? e.message : String(e),
+          windowDays,
+        };
+      } finally {
+        this.refresh();
+        this.costsLoadPromise = null;
+      }
+    })();
+    return this.costsLoadPromise;
   }
 
   private async handleMessage(msg: { type: string; [k: string]: unknown }): Promise<void> {
@@ -597,6 +676,9 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       case 'refreshMcp':
         void this.loadMcp();
         return;
+      case 'refreshCostSuggestions':
+        void this.loadCostSuggestions();
+        return;
       case 'pickAndReadFile': {
         const requestId = String(msg.requestId ?? '');
         if (!requestId) { return; }
@@ -614,7 +696,7 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       vscode.Uri.joinPath(this.extensionUri, 'media', 'icon.svg'),
     ).toString();
     const version = readExtensionVersion(this.extensionUri.fsPath);
-    const initialState = buildState(this.presetStore, this.mcp);
+    const initialState = buildState(this.presetStore, this.mcp, this.costs);
     const initialTheme = themeManager.current;
 
     const assetsRoot = vscode.Uri.joinPath(this.extensionUri, 'out', 'webviews');
