@@ -42,6 +42,48 @@ function modelPrice(model: string): ModelPrice {
   return DEFAULT_PRICE;
 }
 
+/**
+ * Read a synthetic `.aidlc/runs/<runId>.usage.json` sidecar if present.
+ * Used by the demo seeder to surface plausible numbers without polluting
+ * `~/.claude/projects`. Returns null on missing/malformed input.
+ */
+function readUsageSidecar(workspaceRoot: string, runId: string): EpicUsage | null {
+  const file = path.join(workspaceRoot, '.aidlc', 'runs', `${runId}.usage.json`);
+  if (!fs.existsSync(file)) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as Partial<EpicUsage>;
+    if (!parsed || !parsed.total || !Array.isArray(parsed.steps)) return null;
+    return {
+      total: {
+        cost: Number(parsed.total.cost) || 0,
+        totalTokens: Number(parsed.total.totalTokens) || 0,
+        calls: Number(parsed.total.calls) || 0,
+      },
+      steps: parsed.steps.map((s: Partial<StepUsage>) => ({
+        agent: typeof s.agent === 'string' ? s.agent : '',
+        startedAt: typeof s.startedAt === 'string' ? s.startedAt : null,
+        endedAt: typeof s.endedAt === 'string' ? s.endedAt : null,
+        cost: Number(s.cost) || 0,
+        totalTokens: Number(s.totalTokens) || 0,
+        inputTokens: Number(s.inputTokens) || 0,
+        outputTokens: Number(s.outputTokens) || 0,
+        cacheReadTokens: Number(s.cacheReadTokens) || 0,
+        cacheWriteTokens: Number(s.cacheWriteTokens) || 0,
+        calls: Number(s.calls) || 0,
+        history: Array.isArray(s.history) ? s.history.map((h) => ({
+          totalTokens: Number(h.totalTokens) || 0,
+          cost: Number(h.cost) || 0,
+          calls: Number(h.calls) || 0,
+        })) : undefined,
+      })),
+      hasOverlap: !!parsed.hasOverlap,
+      computedAt: Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export interface HistoryEventUsage {
   /** Tokens consumed in the segment [prev event or step.startedAt, this event.at). */
   totalTokens: number;
@@ -207,6 +249,21 @@ export async function computeWorkspaceEpicUsage(
 
   const normalized = path.resolve(workspaceRoot);
 
+  // Sidecar pre-pass: when `.aidlc/runs/<id>.usage.json` exists for a run
+  // (written by demo seeders, etc.) use it verbatim and skip the jsonl
+  // walk for that run. Lets demo epics show plausible numbers without
+  // requiring real Claude history matching the demo's cwd + windows.
+  const sidecarRuns = new Set<string>();
+  for (const run of runs) {
+    const sidecar = readUsageSidecar(workspaceRoot, run.runId);
+    if (sidecar) {
+      result.set(run.runId, sidecar);
+      sidecarRuns.add(run.runId);
+    }
+  }
+  const runsToCompute = runs.filter((r) => !sidecarRuns.has(r.runId));
+  if (runsToCompute.length === 0) return result;
+
   // Per-run pre-computation: per-step windows only. We deliberately do NOT
   // fall back to [run.startedAt, run.updatedAt] — that field gets bumped
   // every time the state file is rewritten (mirror updates, idle refreshes,
@@ -222,7 +279,7 @@ export async function computeWorkspaceEpicUsage(
     earliestMs: number;
     latestMs: number;
   }
-  const ctxByRun: RunCtx[] = runs.map((run) => {
+  const ctxByRun: RunCtx[] = runsToCompute.map((run) => {
     const windows = buildStepWindows(run);
     const steps = windows.map((w, i) =>
       emptyStep(w.agent, w.startedAt, w.endedAt, (run.steps[i].history ?? []).length),
