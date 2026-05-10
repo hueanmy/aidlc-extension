@@ -25,7 +25,7 @@ import * as path from 'path';
 
 import type { PipelineConfig } from '../schema/WorkspaceSchema';
 import { normalizeStep } from '../schema/WorkspaceSchema';
-import type { RunState, StepRecord, AutoReviewVerdict } from './RunState';
+import type { RunState, StepRecord, AutoReviewVerdict, StepHistoryEntry } from './RunState';
 import { resolvePath } from './RunState';
 
 export class PipelineRunError extends Error {
@@ -227,10 +227,25 @@ export function submitAutoReviewVerdict(args: {
   const next = clone(state);
   const nextStep = next.steps[idx];
   nextStep.autoReviewVerdict = verdict;
+  nextStep.history = pushHistory(nextStep.history, {
+    kind: 'auto_review',
+    at: verdict.at,
+    revision: nextStep.revision,
+    decision: verdict.decision,
+    reason: verdict.reason,
+    runner: verdict.runner,
+  });
 
   if (verdict.decision === 'reject') {
     nextStep.status = 'rejected';
     nextStep.rejectReason = verdict.reason;
+    nextStep.history = pushHistory(nextStep.history, {
+      kind: 'reject',
+      at: verdict.at,
+      revision: nextStep.revision,
+      reason: verdict.reason,
+      sentBackToIdx: idx,
+    });
     next.status = 'running';
     return next;
   }
@@ -296,26 +311,61 @@ export function rejectStep(args: {
     );
   }
 
+  const now = new Date().toISOString();
   const isCascade = typeof targetIdx === 'number' && targetIdx >= 0 && targetIdx < idx;
   if (isCascade) {
     const next = clone(state);
     const blame = `Rejected at step ${idx + 1} (${step.agent})${reason ? `: ${reason}` : ''}`;
-    const now = new Date().toISOString();
+    // History on the rejected step: a `reject` entry pointing at the cascade
+    // target so a future viewer can see "step N was rejected, work bounced
+    // back to step M".
+    const rejectedHistory = pushHistory(next.steps[idx].history, {
+      kind: 'reject',
+      at: now,
+      revision: next.steps[idx].revision,
+      reason,
+      sentBackToIdx: targetIdx as number,
+    });
     for (let i = targetIdx as number; i <= idx; i++) {
       const s = next.steps[i];
       if (i === (targetIdx as number)) {
+        // Target step: bump revision + reset to awaiting_work. Record the
+        // cascade-rerun on its own history.
+        const newRev = s.revision + 1;
         next.steps[i] = {
           ...s,
           status: 'awaiting_work',
-          revision: s.revision + 1,
+          revision: newRev,
           feedback: blame,
           rejectReason: undefined,
           autoReviewVerdict: undefined,
           artifactsProduced: [],
           finishedAt: undefined,
           startedAt: now,
+          history: pushHistory(s.history, {
+            kind: 'rerun',
+            at: now,
+            revision: newRev,
+            feedback: blame,
+          }),
+        };
+      } else if (i === idx) {
+        // The rejected step keeps its full history + the new reject entry,
+        // even though we're about to reset its working fields.
+        next.steps[i] = {
+          ...s,
+          status: 'pending',
+          rejectReason: undefined,
+          autoReviewVerdict: undefined,
+          artifactsProduced: [],
+          startedAt: undefined,
+          finishedAt: undefined,
+          history: rejectedHistory,
         };
       } else {
+        // Intermediate step (target < i < idx). Reset to pending, history
+        // preserved as-is — these steps weren't directly involved in this
+        // rejection.
         next.steps[i] = {
           ...s,
           status: 'pending',
@@ -337,6 +387,13 @@ export function rejectStep(args: {
     ...step,
     status: 'rejected',
     rejectReason: reason ?? '',
+    history: pushHistory(step.history, {
+      kind: 'reject',
+      at: now,
+      revision: step.revision,
+      reason,
+      sentBackToIdx: idx,
+    }),
   };
   next.status = 'running';
   return next;
@@ -363,16 +420,114 @@ export function rerunStep(args: {
       `Cannot rerun step "${step.agent}": status is "${step.status}", expected "rejected"`,
     );
   }
+  const now = new Date().toISOString();
   const next = clone(state);
+  const newRev = step.revision + 1;
+  const carriedFeedback = feedback ?? step.feedback;
   next.steps[idx] = {
     ...step,
     status: 'awaiting_work',
-    revision: step.revision + 1,
-    feedback: feedback ?? step.feedback,
+    revision: newRev,
+    feedback: carriedFeedback,
     rejectReason: undefined,
     artifactsProduced: [],
-    startedAt: new Date().toISOString(),
+    startedAt: now,
+    history: pushHistory(step.history, {
+      kind: 'rerun',
+      at: now,
+      revision: newRev,
+      feedback: carriedFeedback,
+    }),
   };
+  next.status = 'running';
+  return next;
+}
+
+/**
+ * Request an update on a previously-approved step. Triggered by the user
+ * outside the awaiting_review flow when requirements change after the step
+ * was approved (or after the run already moved past it). Behaves like a
+ * cascade reject but is callable from any current state:
+ *
+ *   - The targeted step rewinds to `awaiting_work` with revision++ and the
+ *     supplied feedback carried forward (so the next agent run sees what
+ *     changed).
+ *   - All steps downstream of the target up to the current step (or end of
+ *     pipeline if the run already completed) are reset to `pending`,
+ *     losing their artifactsProduced / verdicts. Their history is
+ *     preserved — UI can show "previously done, awaiting update".
+ *   - currentStepIdx rewinds to the target step.
+ *   - The whole run flips to `running` if it was completed.
+ *
+ * History on the target step records both a `rerun` entry (since revision
+ * bumps) for symmetry with the regular rerun flow, so the audit trail
+ * answers the question "why did this step get redone?".
+ */
+export function requestStepUpdate(args: {
+  state: RunState;
+  pipeline: PipelineConfig;
+  stepIdx: number;
+  feedback?: string;
+}): RunState {
+  const { state, pipeline, stepIdx, feedback } = args;
+  if (
+    !Number.isInteger(stepIdx) ||
+    stepIdx < 0 ||
+    stepIdx >= state.steps.length
+  ) {
+    throw new PipelineRunError(`Invalid stepIdx ${stepIdx}`);
+  }
+  const target = state.steps[stepIdx];
+  if (target.status !== 'approved') {
+    throw new PipelineRunError(
+      `Cannot request update on step "${target.agent}": status is "${target.status}", expected "approved"`,
+    );
+  }
+
+  const now = new Date().toISOString();
+  const next = clone(state);
+  // upper bound for the reset range — the current step (inclusive). If the
+  // run already completed we still go through the very last step.
+  const upper = state.status === 'completed'
+    ? pipeline.steps.length - 1
+    : state.currentStepIdx;
+
+  for (let i = stepIdx; i <= upper; i++) {
+    const s = next.steps[i];
+    if (i === stepIdx) {
+      const newRev = s.revision + 1;
+      next.steps[i] = {
+        ...s,
+        status: 'awaiting_work',
+        revision: newRev,
+        feedback: feedback ?? s.feedback,
+        rejectReason: undefined,
+        autoReviewVerdict: undefined,
+        artifactsProduced: [],
+        finishedAt: undefined,
+        startedAt: now,
+        history: pushHistory(s.history, {
+          kind: 'rerun',
+          at: now,
+          revision: newRev,
+          feedback: feedback ?? s.feedback,
+        }),
+      };
+    } else {
+      // Downstream step — reset to pending, KEEP history so the UI can
+      // distinguish "previously done, awaiting update" from "never reached".
+      next.steps[i] = {
+        ...s,
+        status: 'pending',
+        rejectReason: undefined,
+        autoReviewVerdict: undefined,
+        artifactsProduced: [],
+        startedAt: undefined,
+        finishedAt: undefined,
+      };
+    }
+  }
+  next.currentStepIdx = stepIdx;
   next.status = 'running';
   return next;
 }
@@ -380,10 +535,16 @@ export function rerunStep(args: {
 /** Mark the current step approved + open the next step (or complete the run). */
 function advance(next: RunState, idx: number, pipeline: PipelineConfig): RunState {
   const finishedAt = new Date().toISOString();
+  const approved = next.steps[idx];
   next.steps[idx] = {
-    ...next.steps[idx],
+    ...approved,
     status: 'approved',
     finishedAt,
+    history: pushHistory(approved.history, {
+      kind: 'approve',
+      at: finishedAt,
+      revision: approved.revision,
+    }),
   };
   const nextIdx = idx + 1;
   if (nextIdx >= pipeline.steps.length) {
@@ -402,4 +563,11 @@ function advance(next: RunState, idx: number, pipeline: PipelineConfig): RunStat
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function pushHistory(
+  existing: StepHistoryEntry[] | undefined,
+  entry: StepHistoryEntry,
+): StepHistoryEntry[] {
+  return existing ? [...existing, entry] : [entry];
 }

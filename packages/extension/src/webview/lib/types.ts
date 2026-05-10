@@ -23,7 +23,10 @@ export type UiStatus =
   | 'rejected'
   | 'pending'
   | 'awaiting_review'
-  | 'awaiting_work';
+  | 'awaiting_work'
+  /** Step was previously approved but a downstream `requestStepUpdate`
+   * reset it to pending — its history is intact, just needs to be redone. */
+  | 'awaiting_update';
 
 export interface ArtifactPath {
   path: string;
@@ -40,6 +43,7 @@ export interface ActiveRun {
   currentStepStatus: StepStatus | string;
   revision: number;
   rejectReason?: string;
+  feedback?: string;
   produces: ArtifactPath[];
   requires: ArtifactPath[];
   currentSlashCommand?: string;
@@ -63,6 +67,27 @@ export interface TemplateRef {
   description: string;
 }
 
+export interface PipelineRef {
+  id: string;
+  stepCount: number;
+  onFailure: 'stop' | 'continue';
+}
+
+export interface SkillTemplateRef {
+  id: string;
+  description: string;
+}
+
+export type McpStatus = 'connected' | 'needs_auth' | 'failed' | 'unknown';
+
+export interface McpServerInfo {
+  name: string;
+  endpoint: string;
+  transport: string;
+  status: McpStatus;
+  statusText: string;
+}
+
 export interface SidebarState {
   hasFolder: boolean;
   workspaceName: string;
@@ -76,6 +101,19 @@ export interface SidebarState {
   builtinTemplates: TemplateRef[];
   projectTemplates: TemplateRef[];
   activeRuns: ActiveRun[];
+  /** Lightweight pipeline list for the inline Start-Run modal. */
+  pipelines: PipelineRef[];
+  /** All existing run ids (any status) — used by the modal to validate uniqueness. */
+  runIds: string[];
+  /** True when ~/aidlc-demo-project already exists. The "Load Demo Project"
+   * button uses this to pop an inline modal asking re-seed vs open-as-is
+   * instead of letting the host show a VS Code notification. */
+  demoProjectExists: boolean;
+  /** MCP servers Claude is currently connected to. null = first load is in
+   * flight, [] = none configured. */
+  mcpServers: McpServerInfo[] | null;
+  mcpLoading: boolean;
+  mcpError: string | null;
 }
 
 export type AssetScope = 'project' | 'aidlc' | 'global';
@@ -121,6 +159,34 @@ export interface AutoReviewVerdict {
   runner: string;
 }
 
+export type StepHistoryEntry =
+  | {
+      kind: 'reject';
+      at: string;
+      revision: number;
+      reason?: string;
+      sentBackToIdx: number;
+    }
+  | {
+      kind: 'rerun';
+      at: string;
+      revision: number;
+      feedback?: string;
+    }
+  | {
+      kind: 'auto_review';
+      at: string;
+      revision: number;
+      decision: 'pass' | 'reject';
+      reason: string;
+      runner: string;
+    }
+  | {
+      kind: 'approve';
+      at: string;
+      revision: number;
+    };
+
 export interface EpicStepDetailFull {
   agent: string;
   status: 'pending' | 'in_progress' | 'done' | 'failed';
@@ -132,6 +198,13 @@ export interface EpicStepDetailFull {
   stepHasHumanReview: boolean;
   startedAt?: string;
   finishedAt?: string;
+  /** Append-only timeline of significant transitions (reject / rerun /
+   * auto_review / approve). Surfaced verbatim from the run state. */
+  history?: StepHistoryEntry[];
+  /** Number of times this step has been rejected (cached count for display). */
+  rejectCount?: number;
+  /** Carried feedback (from cascade reject blame or manual rerun feedback). */
+  feedback?: string;
 }
 
 export interface EpicSummary {
@@ -158,6 +231,8 @@ export interface AgentMeta {
   inputs: string;
   outputs: string;
   artifact: string;
+  /** Capability ids declared on the agent (used by Start Epic to ask for run-time bindings). */
+  capabilities?: string[];
 }
 
 export interface WorkspaceState {
@@ -177,6 +252,14 @@ export interface WorkspaceState {
   skillsCount: number;
   pipelinesCount: number;
   epicsCount: number;
+  /** All existing run ids (any status) — for inline Start-Run modal uniqueness check. */
+  runIds: string[];
+  /** Built-in skill templates surfaced for the inline AddSkill modal. */
+  skillTemplates: SkillTemplateRef[];
+  /** Suggested next sequential id for the inline Start-Epic modal (e.g. EPIC-007). */
+  nextEpicId: string;
+  /** All existing epic ids (folders under epicRoot) — for uniqueness check. */
+  existingEpicIds: string[];
   /** Initial view to render when the panel first opens. */
   initialView?: WorkspaceView;
 }

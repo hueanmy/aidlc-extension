@@ -11,6 +11,8 @@ import {
 import { cn } from '@/lib/utils';
 import type { AgentSummary } from '@/lib/types';
 import { postMessage } from '@/lib/bridge';
+import { RenameModal } from './RenameModal';
+import { ConfirmModal } from './ConfirmModal';
 
 const scopeLabel: Record<AgentSummary['scope'], string> = {
   project: 'PROJECT',
@@ -30,8 +32,16 @@ const integrationIcons: Record<string, React.ReactNode> = {
   slack: <MessageSquare className="h-3 w-3" />,
 };
 
-export function AgentCard({ agent }: { agent: AgentSummary }) {
+export function AgentCard({
+  agent,
+  allAgentIds,
+}: {
+  agent: AgentSummary;
+  allAgentIds: string[];
+}) {
   const isAidlc = agent.scope === 'aidlc';
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const onCardClick = () => {
     if (isAidlc) {
       postMessage({ type: 'openYaml' });
@@ -73,9 +83,22 @@ export function AgentCard({ agent }: { agent: AgentSummary }) {
         {isAidlc && (
           <KebabMenu
             items={[
-              { label: 'Rename', icon: <Pencil className="h-3 w-3" />, action: 'renameAgent' },
-              { label: 'Duplicate', icon: <Copy className="h-3 w-3" />, action: 'duplicateAgent' },
-              { label: 'Delete', icon: <Trash2 className="h-3 w-3" />, action: 'deleteAgent', danger: true },
+              {
+                label: 'Rename',
+                icon: <Pencil className="h-3 w-3" />,
+                onSelect: () => setRenameOpen(true),
+              },
+              {
+                label: 'Duplicate',
+                icon: <Copy className="h-3 w-3" />,
+                action: 'duplicateAgent',
+              },
+              {
+                label: 'Delete',
+                icon: <Trash2 className="h-3 w-3" />,
+                onSelect: () => setDeleteOpen(true),
+                danger: true,
+              },
             ]}
             payload={{ id: agent.id }}
           />
@@ -99,7 +122,7 @@ export function AgentCard({ agent }: { agent: AgentSummary }) {
 
       {agent.integrations && agent.integrations.length > 0 && (
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-          {agent.integrations.map((i) => (
+          {agent.integrations.map((i: string) => (
             <span
               key={i}
               className="flex items-center gap-1 rounded bg-accent px-1.5 py-0.5 text-[10px] text-accent-foreground"
@@ -110,6 +133,35 @@ export function AgentCard({ agent }: { agent: AgentSummary }) {
           ))}
         </div>
       )}
+
+      {renameOpen && (
+        <RenameModal
+          kind="agent"
+          currentId={agent.id}
+          existingIds={allAgentIds}
+          onRename={(newId) =>
+            postMessage({ type: 'renameAgent', id: agent.id, newId })
+          }
+          onClose={() => setRenameOpen(false)}
+        />
+      )}
+      {deleteOpen && (
+        <ConfirmModal
+          title="Delete agent"
+          danger
+          confirmLabel="Delete"
+          message={
+            <>
+              Delete agent <span className="font-mono">{agent.id}</span> from{' '}
+              <span className="font-mono">workspace.yaml</span>? This cannot be undone.
+            </>
+          }
+          onConfirm={() =>
+            postMessage({ type: 'deleteAgent', id: agent.id, confirmed: true })
+          }
+          onClose={() => setDeleteOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -117,7 +169,9 @@ export function AgentCard({ agent }: { agent: AgentSummary }) {
 interface KebabItem {
   label: string;
   icon: React.ReactNode;
-  action: string;
+  /** Either fire an `action` message via postMessage with `payload`, or run a custom callback. */
+  action?: string;
+  onSelect?: () => void;
   danger?: boolean;
 }
 
@@ -126,7 +180,7 @@ export function KebabMenu({
   payload,
 }: {
   items: KebabItem[];
-  payload: Record<string, unknown>;
+  payload?: Record<string, unknown>;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -171,12 +225,16 @@ export function KebabMenu({
         >
           {items.map((item) => (
             <button
-              key={item.action}
+              key={item.label}
               type="button"
               role="menuitem"
               onClick={() => {
                 setOpen(false);
-                postMessage({ type: item.action, ...payload });
+                if (item.onSelect) {
+                  item.onSelect();
+                } else if (item.action) {
+                  postMessage({ type: item.action, ...(payload ?? {}) });
+                }
               }}
               className={cn(
                 'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors',

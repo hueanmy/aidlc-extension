@@ -62,7 +62,53 @@ export interface StepRecord {
    * said. Cleared on rerun.
    */
   autoReviewVerdict?: AutoReviewVerdict;
+  /**
+   * Append-only timeline of significant state transitions for this step.
+   * Survives reruns (each rerun adds an entry) so the user can review what
+   * happened, when, why — even after the run completes. Optional for
+   * backward compat with state files written before this field existed.
+   */
+  history?: StepHistoryEntry[];
 }
+
+/**
+ * One entry in a step's append-only history. The discriminated `kind` tells
+ * the UI which fields to expect; `at` and `revision` are always present.
+ */
+export type StepHistoryEntry =
+  | {
+      kind: 'reject';
+      at: string;
+      revision: number;
+      /** Reason supplied by the human (free-form, optional). */
+      reason?: string;
+      /**
+       * Step index the rejection sent the work back to. Equals the rejected
+       * step's idx for an in-place rerun; lower idx for a cascade.
+       */
+      sentBackToIdx: number;
+    }
+  | {
+      kind: 'rerun';
+      at: string;
+      /** Revision the step is now on after the rerun bump. */
+      revision: number;
+      /** Optional feedback the user kept on the step at rerun time. */
+      feedback?: string;
+    }
+  | {
+      kind: 'auto_review';
+      at: string;
+      revision: number;
+      decision: 'pass' | 'reject';
+      reason: string;
+      runner: string;
+    }
+  | {
+      kind: 'approve';
+      at: string;
+      revision: number;
+    };
 
 /**
  * Outcome of an auto-reviewer (validator script) run for a step. Produced

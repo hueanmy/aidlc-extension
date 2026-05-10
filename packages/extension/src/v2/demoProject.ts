@@ -32,22 +32,41 @@ const STEPS = [
 ];
 const PIPELINE_ID = 'demo-pipeline';
 
-export async function loadDemoProjectCommand(): Promise<void> {
+/**
+ * `mode` lets a webview caller skip the VS Code warning notification when
+ * it has already collected the user's choice via an inline modal:
+ *
+ *   undefined  — default; show the notification when the demo dir exists.
+ *   'reseed'   — wipe and re-seed the demo dir, then open.
+ *   'open-as-is' — leave the existing demo dir alone, just open it.
+ */
+export async function loadDemoProjectCommand(
+  mode?: 'reseed' | 'open-as-is',
+): Promise<void> {
   const demoRoot = path.join(os.homedir(), DEMO_DIR_NAME);
+  const exists = fs.existsSync(demoRoot);
 
-  if (fs.existsSync(demoRoot)) {
-    const choice = await vscode.window.showWarningMessage(
-      `Demo project already exists at ~/${DEMO_DIR_NAME}. Re-seed (overwrites .aidlc/ + docs/epics/) or just open it as-is?`,
-      { modal: false },
-      'Re-seed and open',
-      'Open as-is',
-      'Cancel',
-    );
-    if (choice === 'Cancel' || !choice) { return; }
-    if (choice === 'Re-seed and open') {
+  if (exists) {
+    let action: 'reseed' | 'open-as-is';
+    if (mode) {
+      action = mode;
+    } else {
+      const choice = await vscode.window.showWarningMessage(
+        `Demo project already exists at ~/${DEMO_DIR_NAME}. Re-seed (overwrites .aidlc/ + docs/epics/) or just open it as-is?`,
+        { modal: false },
+        'Re-seed and open',
+        'Open as-is',
+        'Cancel',
+      );
+      if (choice === 'Cancel' || !choice) { return; }
+      action = choice === 'Re-seed and open' ? 'reseed' : 'open-as-is';
+    }
+    if (action === 'reseed') {
       try { wipeDemoData(demoRoot); }
       catch (err) {
-        void vscode.window.showErrorMessage(`Failed to clear demo data: ${err instanceof Error ? err.message : String(err)}`);
+        void vscode.window.showErrorMessage(
+          `Failed to clear demo data: ${err instanceof Error ? err.message : String(err)}`,
+        );
         return;
       }
       seedDemo(demoRoot);
@@ -69,7 +88,7 @@ export async function loadDemoProjectCommand(): Promise<void> {
  * (e.g. their own scratch notes in the demo folder) untouched.
  */
 function wipeDemoData(root: string): void {
-  for (const sub of ['.aidlc', 'docs/epics']) {
+  for (const sub of ['.aidlc', 'docs/epics', '.claude/commands']) {
     const p = path.join(root, sub);
     if (fs.existsSync(p)) { fs.rmSync(p, { recursive: true, force: true }); }
   }
@@ -85,6 +104,74 @@ function seedDemo(root: string): void {
   writeFile(path.join(root, '.aidlc', 'skills', 'demo-review-skill.md'), REVIEW_SKILL);
   writeFile(path.join(root, '.aidlc', 'skills', 'demo-release-skill.md'), RELEASE_SKILL);
   writeFile(path.join(root, '.aidlc', 'validators', 'demo-validator.js'), DEMO_VALIDATOR);
+
+  // Claude Code reads slash commands from `.claude/commands/<name>.md`, NOT
+  // from workspace.yaml. Mirror each AIDLC agent there so `/demo-plan ARG`
+  // etc. actually work in the Claude CLI for this demo project. Each
+  // command inlines the skill body + AIDLC-specific task instructions
+  // (read state.json / inputs.json, address carried feedback, write the
+  // expected artifact, tell the user to mark step done).
+  writeFile(
+    path.join(root, '.claude', 'commands', 'demo-plan.md'),
+    claudeCommand({
+      agentLabel: 'Plan',
+      description: 'Draft the PRD for the epic',
+      artifact: 'PRD.md',
+      stepIdx: 0,
+      skillBody: PLAN_SKILL,
+    }),
+  );
+  writeFile(
+    path.join(root, '.claude', 'commands', 'demo-design.md'),
+    claudeCommand({
+      agentLabel: 'Design',
+      description: 'Author the tech design from the PRD',
+      artifact: 'TECH-DESIGN.md',
+      stepIdx: 1,
+      skillBody: DESIGN_SKILL,
+    }),
+  );
+  writeFile(
+    path.join(root, '.claude', 'commands', 'demo-implement.md'),
+    claudeCommand({
+      agentLabel: 'Implement',
+      description: 'Land the code change against the design',
+      artifact: 'CHANGES.md',
+      stepIdx: 2,
+      skillBody: IMPLEMENT_SKILL,
+    }),
+  );
+  writeFile(
+    path.join(root, '.claude', 'commands', 'demo-review.md'),
+    claudeCommand({
+      agentLabel: 'Review',
+      description: 'Review the diff for bugs, security, performance',
+      artifact: 'REVIEW.md',
+      stepIdx: 3,
+      skillBody: REVIEW_SKILL,
+    }),
+  );
+  writeFile(
+    path.join(root, '.claude', 'commands', 'demo-release.md'),
+    claudeCommand({
+      agentLabel: 'Release',
+      description: 'Compose release notes for the change',
+      artifact: 'RELEASE.md',
+      stepIdx: 4,
+      skillBody: RELEASE_SKILL,
+    }),
+  );
+  writeFile(
+    path.join(root, '.claude', 'commands', 'hello.md'),
+    `---
+description: Greet the user and confirm the AIDLC demo runner is wired up
+---
+
+${HELLO_SKILL}
+
+Reply with a friendly greeting and confirm the demo project is wired correctly. Mention the epic key the user passed: \`$ARGUMENTS\`.
+`,
+  );
 
   // 6 demo epics, each park at a different gate state
   seedEpic(root, 'DEMO-001-MARK-DONE', {
@@ -160,6 +247,362 @@ function seedDemo(root: string): void {
     doneCount: STEPS.length,
     createdHoursAgo: 121,
   });
+
+  // ── Rich-history demos ─────────────────────────────────────────────
+  seedRichEpic(root, 'DEMO-007-RICH-HISTORY', {
+    title: 'Demo: Awaiting review — with prior reject',
+    description:
+      'Step 3/5 is awaiting_review (revision 2). Step was rejected once for missing tests, reworked, auto-validated, and now back at the human gate. Expand "History" on step 3 to see the timeline.',
+    createdHoursAgo: 36,
+    completed: false,
+    currentStepIdx: 2,
+    currentStatus: 'awaiting_review',
+    histories: {
+      0: [
+        { kind: 'approve', revision: 1, hoursAgo: 35 },
+      ],
+      1: [
+        { kind: 'auto_review', decision: 'pass', revision: 1, hoursAgo: 33,
+          reason: 'Validator pass — design covers all PRD acceptance criteria.' },
+        { kind: 'approve', revision: 1, hoursAgo: 32 },
+      ],
+      2: [
+        { kind: 'auto_review', decision: 'pass', revision: 1, hoursAgo: 28,
+          reason: 'All produced artifacts present; no policy violations.' },
+        { kind: 'reject', revision: 1, hoursAgo: 26,
+          reason: 'CHANGES.md is missing test coverage for the timeout branch — add unit tests and resubmit.',
+          sentBackToIdx: 2 },
+        { kind: 'rerun', revision: 2, hoursAgo: 24,
+          feedback: 'Add unit tests for the timeout branch, resubmit.' },
+        { kind: 'auto_review', decision: 'pass', revision: 2, hoursAgo: 2,
+          reason: 'All produced artifacts present; coverage hooks satisfied.' },
+      ],
+    },
+    revisions: { 2: 2 },
+    artifactProducedAt: 2,
+    autoReviewVerdictAtCurrent: {
+      decision: 'pass',
+      reason: 'All produced artifacts present; coverage hooks satisfied.',
+      runner: '.aidlc/validators/demo-validator.js',
+    },
+  });
+
+  seedRichEpic(root, 'DEMO-008-DONE-WITH-HISTORY', {
+    title: 'Demo: Completed — with rocky history',
+    description:
+      'All 5/5 steps approved, but it was bumpy: step 2 was rejected once, step 4 cascade-rejected back to step 2, step 4 then rejected twice again before approval. Audit trail survives in state.json under each step.',
+    createdHoursAgo: 168,
+    completed: true,
+    currentStepIdx: STEPS.length - 1,
+    histories: {
+      0: [
+        { kind: 'approve', revision: 1, hoursAgo: 167 },
+      ],
+      1: [
+        { kind: 'auto_review', decision: 'pass', revision: 1, hoursAgo: 165,
+          reason: 'Design draft validated.' },
+        { kind: 'reject', revision: 1, hoursAgo: 164,
+          reason: 'Tech design omits the rate-limit policy from PRD §4.2.',
+          sentBackToIdx: 1 },
+        { kind: 'rerun', revision: 2, hoursAgo: 162,
+          feedback: 'Add rate-limit section.' },
+        { kind: 'auto_review', decision: 'pass', revision: 2, hoursAgo: 161,
+          reason: 'Design v2 validated — rate-limit section present.' },
+        // Cascade reject from step 4 lands here as a `rerun`:
+        { kind: 'rerun', revision: 3, hoursAgo: 100,
+          feedback: 'Rejected at step 4 (demo-review): rate-limit numbers do not match implementation' },
+        { kind: 'auto_review', decision: 'pass', revision: 3, hoursAgo: 99,
+          reason: 'Design v3 validated — rate-limit numbers updated.' },
+        { kind: 'approve', revision: 3, hoursAgo: 95 },
+      ],
+      2: [
+        { kind: 'auto_review', decision: 'pass', revision: 1, hoursAgo: 130,
+          reason: 'Implementation diff validated.' },
+        { kind: 'approve', revision: 1, hoursAgo: 128 },
+        // Cascade-reset by step 4's reject — a fresh rerun lands here:
+        { kind: 'rerun', revision: 2, hoursAgo: 100,
+          feedback: 'Implementation reset because step 4 rejected upstream.' },
+        { kind: 'auto_review', decision: 'pass', revision: 2, hoursAgo: 80,
+          reason: 'Implementation v2 validated.' },
+        { kind: 'approve', revision: 2, hoursAgo: 78 },
+      ],
+      3: [
+        { kind: 'auto_review', decision: 'pass', revision: 1, hoursAgo: 105,
+          reason: 'Review draft validated.' },
+        { kind: 'reject', revision: 1, hoursAgo: 102,
+          reason: 'Rate-limit numbers in REVIEW.md do not match the implementation. Send back to step 2 to align.',
+          sentBackToIdx: 1 },
+        { kind: 'rerun', revision: 2, hoursAgo: 75,
+          feedback: 'Re-do review with corrected rate-limit numbers.' },
+        { kind: 'auto_review', decision: 'pass', revision: 2, hoursAgo: 73,
+          reason: 'Review v2 validated.' },
+        { kind: 'reject', revision: 2, hoursAgo: 70,
+          reason: 'Missing security checklist item (auth flow).',
+          sentBackToIdx: 3 },
+        { kind: 'rerun', revision: 3, hoursAgo: 60,
+          feedback: 'Add security checklist.' },
+        { kind: 'auto_review', decision: 'pass', revision: 3, hoursAgo: 58,
+          reason: 'Review v3 validated.' },
+        { kind: 'approve', revision: 3, hoursAgo: 50 },
+      ],
+      4: [
+        { kind: 'auto_review', decision: 'pass', revision: 1, hoursAgo: 30,
+          reason: 'Release notes validated.' },
+        { kind: 'approve', revision: 1, hoursAgo: 25 },
+      ],
+    },
+    revisions: { 1: 3, 2: 2, 3: 3 },
+  });
+}
+
+interface SeedRichStep {
+  kind: 'reject' | 'rerun' | 'auto_review' | 'approve';
+  revision: number;
+  hoursAgo: number;
+  reason?: string;
+  feedback?: string;
+  decision?: 'pass' | 'reject';
+  runner?: string;
+  sentBackToIdx?: number;
+}
+
+interface SeedRichEpicOpts {
+  title: string;
+  description: string;
+  createdHoursAgo: number;
+  completed: boolean;
+  currentStepIdx: number;
+  currentStatus?: 'awaiting_work' | 'awaiting_auto_review' | 'awaiting_review' | 'rejected';
+  /** Per-step history entries (idx → list, oldest first). */
+  histories: Record<number, SeedRichStep[]>;
+  /** Per-step final revision count (idx → revision). Defaults to 1. */
+  revisions?: Record<number, number>;
+  /** Step idx whose artifact was produced (for the current in-flight step). */
+  artifactProducedAt?: number;
+  /** Auto-review verdict to surface on the current step. */
+  autoReviewVerdictAtCurrent?: { decision: 'pass' | 'reject'; reason: string; runner: string };
+}
+
+/**
+ * Seed an epic with rich per-step history + a matching state.json snapshot.
+ * Used for the demo epics that showcase the History panel — keeps the
+ * existing simple seeders intact for the basic gate-state demos.
+ */
+function seedRichEpic(root: string, epicId: string, opts: SeedRichEpicOpts): void {
+  const validatorPath = '.aidlc/validators/demo-validator.js';
+  const buildHistory = (idx: number): Record<string, unknown>[] =>
+    (opts.histories[idx] ?? []).map((h) => {
+      const at = isoOffset(-h.hoursAgo);
+      switch (h.kind) {
+        case 'reject':
+          return {
+            kind: 'reject',
+            at,
+            revision: h.revision,
+            reason: h.reason,
+            sentBackToIdx: h.sentBackToIdx ?? idx,
+          };
+        case 'rerun':
+          return { kind: 'rerun', at, revision: h.revision, feedback: h.feedback };
+        case 'auto_review':
+          return {
+            kind: 'auto_review',
+            at,
+            revision: h.revision,
+            decision: h.decision ?? 'pass',
+            reason: h.reason ?? '',
+            runner: h.runner ?? validatorPath,
+          };
+        case 'approve':
+          return { kind: 'approve', at, revision: h.revision };
+      }
+    });
+
+  const steps = STEPS.map((s, i) => {
+    const rev = opts.revisions?.[i] ?? 1;
+    const history = buildHistory(i);
+    const rec: Record<string, unknown> = {
+      stepIdx: i,
+      agent: s.agent,
+      revision: rev,
+      artifactsProduced: [] as string[],
+      history,
+    };
+    if (opts.completed) {
+      rec.status = 'approved';
+      rec.startedAt = isoOffset(-opts.createdHoursAgo + i);
+      rec.finishedAt = isoOffset(-opts.createdHoursAgo + i + 0.5);
+      rec.artifactsProduced = [`docs/epics/${epicId}/artifacts/${s.artifact}`];
+      return rec;
+    }
+    if (i < opts.currentStepIdx) {
+      rec.status = 'approved';
+      rec.startedAt = isoOffset(-opts.createdHoursAgo + i);
+      rec.finishedAt = isoOffset(-opts.createdHoursAgo + i + 0.5);
+      rec.artifactsProduced = [`docs/epics/${epicId}/artifacts/${s.artifact}`];
+    } else if (i === opts.currentStepIdx && opts.currentStatus) {
+      rec.status = opts.currentStatus;
+      rec.startedAt = isoOffset(-opts.createdHoursAgo + i);
+      if (
+        opts.currentStatus === 'awaiting_auto_review' ||
+        opts.currentStatus === 'awaiting_review' ||
+        opts.currentStatus === 'rejected'
+      ) {
+        rec.artifactsProduced = [`docs/epics/${epicId}/artifacts/${s.artifact}`];
+      }
+      if (opts.autoReviewVerdictAtCurrent) {
+        rec.autoReviewVerdict = {
+          ...opts.autoReviewVerdictAtCurrent,
+          at: isoOffset(-1.5),
+        };
+      }
+    } else {
+      rec.status = 'pending';
+    }
+    return rec;
+  });
+
+  const runState = {
+    schemaVersion: 1,
+    runId: epicId,
+    pipelineId: PIPELINE_ID,
+    context: { epic: epicId },
+    startedAt: isoOffset(-opts.createdHoursAgo),
+    updatedAt: isoOffset(-1),
+    currentStepIdx: opts.completed ? STEPS.length - 1 : opts.currentStepIdx,
+    status: opts.completed ? 'completed' : 'running',
+    steps,
+  };
+  writeJson(path.join(root, '.aidlc', 'runs', `${epicId}.json`), runState);
+
+  // Mirror into state.json so a teammate who only pulls the repo (and
+  // therefore lacks the gitignored .aidlc/runs/) can still read the
+  // history. Mirrors the shape produced by `mirrorRunStateToEpic`.
+  const stateStepStates = steps.map((s) => ({
+    agent: s.agent,
+    status: mapRichStatus(String(s.status)),
+    revision: s.revision,
+    runStatus: s.status,
+    startedAt: s.startedAt ?? null,
+    finishedAt: s.finishedAt ?? null,
+    rejectReason: undefined,
+    autoReviewVerdict: (s as Record<string, unknown>).autoReviewVerdict,
+    history: s.history,
+    artifactsProduced: s.artifactsProduced,
+  }));
+  const epicStatus = opts.completed
+    ? 'done'
+    : 'in_progress';
+  const epicState = {
+    id: epicId,
+    title: opts.title,
+    description: opts.description,
+    pipeline: PIPELINE_ID,
+    agent: null,
+    agents: STEPS.map((s) => s.agent),
+    currentStep: opts.completed ? STEPS.length - 1 : opts.currentStepIdx,
+    status: epicStatus,
+    createdAt: isoOffset(-opts.createdHoursAgo),
+    updatedAt: isoOffset(-1),
+    stepStates: stateStepStates,
+  };
+  const epicDir = path.join(root, 'docs', 'epics', epicId);
+  writeJson(path.join(epicDir, 'state.json'), epicState);
+  writeJson(path.join(epicDir, 'inputs.json'), {
+    jira: `DEMO-${epicId.split('-')[1]}`,
+    files: 'src/**/*.ts',
+    github: 'aidlc-io/aidlc',
+  });
+
+  // Artifacts: write one for every step that has been produced.
+  steps.forEach((s, i) => {
+    const arts = s.artifactsProduced as string[];
+    if (arts.length > 0) {
+      writeFile(
+        path.join(epicDir, 'artifacts', STEPS[i].artifact),
+        artifactStub(epicId, i),
+      );
+    }
+  });
+  if (typeof opts.artifactProducedAt === 'number') {
+    writeFile(
+      path.join(epicDir, 'artifacts', STEPS[opts.artifactProducedAt].artifact),
+      artifactStub(epicId, opts.artifactProducedAt),
+    );
+  }
+}
+
+/**
+ * Build a Claude Code slash-command markdown file from one of the demo
+ * agents. The result lives at `.claude/commands/<name>.md` and is what
+ * actually makes `/demo-plan EPIC-ID` work in the Claude REPL — Claude
+ * Code reads from `.claude/commands/`, not from `.aidlc/workspace.yaml`.
+ *
+ * The body inlines the skill prompt + AIDLC-specific task wiring so the
+ * agent knows to:
+ *   - read the epic's state.json / inputs.json
+ *   - honour any carried feedback from a prior reject (the run's history)
+ *   - write the expected artifact under docs/epics/<id>/artifacts/
+ *   - tell the user to click "Mark step done" when finished
+ *
+ * `$ARGUMENTS` is Claude's positional-argument placeholder — whatever
+ * the user passes to the slash command (typically the epic id).
+ */
+function claudeCommand(opts: {
+  agentLabel: string;
+  description: string;
+  artifact: string;
+  stepIdx: number;
+  skillBody: string;
+}): string {
+  return `---
+description: ${opts.description}
+---
+
+You are the **${opts.agentLabel}** agent for the AIDLC demo pipeline.
+
+## Skill
+
+${opts.skillBody.trim()}
+
+## Task
+
+The user invoked you with epic id \`$ARGUMENTS\`.
+
+1. Read \`docs/epics/$ARGUMENTS/state.json\` to understand the run.
+   - The current step is index ${opts.stepIdx}.
+   - If \`stepStates[${opts.stepIdx}].feedback\` is set, the previous
+     reviewer asked for changes — address that feedback explicitly in
+     this revision.
+   - If \`stepStates[${opts.stepIdx}].history\` contains \`reject\`
+     entries, read their \`reason\` fields for context.
+
+2. Read \`docs/epics/$ARGUMENTS/inputs.json\` for capability bindings
+   (jira ticket, files glob, github repo, etc.) — these are the
+   user-supplied inputs for this run.
+
+3. Produce \`docs/epics/$ARGUMENTS/artifacts/${opts.artifact}\`. The
+   AIDLC validator checks for this file's existence when the user
+   marks the step done.
+
+4. When finished, summarize what you produced and tell the user to
+   click "Mark step done" in the AIDLC sidebar to advance the pipeline.
+`;
+}
+
+function mapRichStatus(status: string): 'pending' | 'in_progress' | 'done' | 'failed' {
+  switch (status) {
+    case 'approved':
+      return 'done';
+    case 'rejected':
+      return 'failed';
+    case 'awaiting_work':
+    case 'awaiting_auto_review':
+    case 'awaiting_review':
+      return 'in_progress';
+    default:
+      return 'pending';
+  }
 }
 
 interface SeedEpicOpts {

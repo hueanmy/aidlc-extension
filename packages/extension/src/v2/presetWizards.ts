@@ -124,10 +124,14 @@ export async function savePresetCommand(store: PresetStore): Promise<void> {
  * Apply a preset. When `presetId` is given (sidebar click), skip the quick-
  * pick and apply that one directly. Without it, the command shows the
  * picker (command-palette / Builder button entry points).
+ *
+ * `skipConfirm` is set by the React TemplateRow flow when the inline
+ * ConfirmModal already asked the user about overwriting workspace.yaml.
  */
 export async function applyPresetCommand(
   store: PresetStore,
   presetId?: string,
+  skipConfirm = false,
 ): Promise<void> {
   const root = requireRoot('Apply Preset');
   if (!root) { return; }
@@ -170,12 +174,14 @@ export async function applyPresetCommand(
   const existing = readYaml(root);
   let overwrite = false;
   if (existing) {
-    const choice = await vscode.window.showWarningMessage(
-      `This project already has .aidlc/workspace.yaml. Overwrite with preset \`${preset.id}\`?`,
-      { modal: false },
-      'Overwrite', 'Cancel',
-    );
-    if (choice !== 'Overwrite') { return; }
+    if (!skipConfirm) {
+      const choice = await vscode.window.showWarningMessage(
+        `This project already has .aidlc/workspace.yaml. Overwrite with preset \`${preset.id}\`?`,
+        { modal: false },
+        'Overwrite', 'Cancel',
+      );
+      if (choice !== 'Overwrite') { return; }
+    }
     overwrite = true;
   }
 
@@ -236,6 +242,52 @@ export async function deletePresetCommand(store: PresetStore): Promise<void> {
 
   store.delete(root, picked.preset.id);
   void vscode.window.showInformationMessage(`Deleted template \`${picked.preset.id}\`.`);
+}
+
+/**
+ * Webview-driven save: caller (the React SavePresetModal) supplies
+ * id / name / description directly so we skip the chain of inputBoxes and
+ * the overwrite warning. Validations the modal already enforces (id pattern,
+ * builtin reservation) are re-checked here as a safety net.
+ */
+export async function savePresetInlineCommand(
+  store: PresetStore,
+  draft: { id: string; name: string; description: string },
+): Promise<void> {
+  const root = requireRoot('Save Preset');
+  if (!root) { return; }
+  const doc = readYaml(root);
+  if (!doc) {
+    void vscode.window.showWarningMessage(
+      'AIDLC: No .aidlc/workspace.yaml in this project — initialize one before saving as a template.',
+    );
+    return;
+  }
+
+  const id = draft.id.trim();
+  const name = draft.name.trim();
+  const description = draft.description.trim();
+  if (!id || !name) { return; }
+  if (!/^[a-z][a-z0-9-]*$/.test(id)) {
+    void vscode.window.showWarningMessage(
+      `Invalid template id "${id}" — lowercase letters / digits / dashes only.`,
+    );
+    return;
+  }
+  if (isBuiltinPreset(id)) {
+    void vscode.window.showWarningMessage(
+      `"${id}" is reserved for a built-in template — pick a different id.`,
+    );
+    return;
+  }
+
+  const preset = PresetStore.buildFromWorkspace(root, doc, { id, name, description });
+  store.save(root, preset);
+
+  const skillCount = Object.keys(preset.skillContents).length;
+  void vscode.window.showInformationMessage(
+    `Saved template "${id}" (${doc.agents.length} agents, ${skillCount} skills, ${doc.pipelines.length} pipelines).`,
+  );
 }
 
 function presetDetailLine(p: WorkspacePreset): string {

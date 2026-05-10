@@ -32,6 +32,7 @@ import {
   approveStep,
   rejectStep,
   rerunStep,
+  requestStepUpdate,
   submitAutoReviewVerdict,
   runAutoReview,
   PipelineRunError,
@@ -40,6 +41,25 @@ import {
 import type { PipelineConfig, RunState } from '@aidlc/core';
 
 import { readYaml } from './yamlIO';
+import { mirrorRunStateToEpic } from './epicsList';
+
+/**
+ * Save the runtime RunState file AND mirror its display fields + per-step
+ * history into the epic's docs/epics/<id>/state.json so the on-disk record
+ * stays in sync. Mirror failures don't block the save — runs/ is the
+ * authoritative source for the live machine; state.json is a snapshot for
+ * git / offline review.
+ */
+function saveRun(workspaceRoot: string, next: RunState): void {
+  RunStateStore.save(workspaceRoot, next);
+  try {
+    mirrorRunStateToEpic(workspaceRoot, next, readYaml(workspaceRoot));
+  } catch (err) {
+    void vscode.window.showWarningMessage(
+      `AIDLC: failed to mirror run state into epic state.json — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
 
 function getRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -92,6 +112,59 @@ async function resolveRunId(
 }
 
 // ── start ────────────────────────────────────────────────────────────────
+
+/**
+ * Webview-driven start: caller (the React StartRunModal) supplies pipelineId
+ * and runId directly so we skip showQuickPick + showInputBox. The validations
+ * the input box did (RUN_ID_PATTERN, no duplicate) also run inside the modal,
+ * so the only re-checks here are server-side safety nets — invalid inputs
+ * just fall through to a warning toast.
+ */
+export async function startPipelineRunInlineCommand(
+  pipelineId: string,
+  runId: string,
+): Promise<void> {
+  const root = requireRoot('Start Pipeline Run');
+  if (!root) { return; }
+
+  const id = pipelineId.trim();
+  const rid = runId.trim();
+  if (!id || !rid) { return; }
+  if (!RUN_ID_PATTERN.test(rid)) {
+    void vscode.window.showWarningMessage(
+      `Invalid run id "${rid}" — must match ${RUN_ID_PATTERN}.`,
+    );
+    return;
+  }
+
+  const doc = readYaml(root);
+  if (!doc || !Array.isArray(doc.pipelines)) {
+    void vscode.window.showWarningMessage('AIDLC: no workspace.yaml or no pipelines defined.');
+    return;
+  }
+  const pipeline = (doc.pipelines as PipelineConfig[]).find((p) => p.id === id);
+  if (!pipeline) {
+    void vscode.window.showWarningMessage(`Pipeline "${id}" not found in workspace.yaml.`);
+    return;
+  }
+  if (RunStateStore.load(root, rid)) {
+    void vscode.window.showWarningMessage(`Run "${rid}" already exists.`);
+    return;
+  }
+
+  const state = startRun({
+    runId: rid,
+    pipeline,
+    context: { work: rid },
+  });
+  saveRun(root, state);
+
+  const firstStep = pipeline.steps[0];
+  const firstAgent = typeof firstStep === 'string' ? firstStep : firstStep.agent;
+  void vscode.window.showInformationMessage(
+    `Started run "${rid}" — first step: ${firstAgent}. Run /${firstAgent} ${rid} in Claude, then click "Mark step done" in the sidebar.`,
+  );
+}
 
 export async function startPipelineRunCommand(pipelineIdArg?: string): Promise<void> {
   const root = requireRoot('Start Pipeline Run');
@@ -151,7 +224,7 @@ export async function startPipelineRunCommand(pipelineIdArg?: string): Promise<v
     pipeline: pickedPipeline.pipeline,
     context: { epic: runId.trim() },
   });
-  RunStateStore.save(root, state);
+  saveRun(root, state);
 
   const firstStep = pickedPipeline.pipeline.steps[0];
   const firstAgent = typeof firstStep === 'string' ? firstStep : firstStep.agent;
@@ -200,7 +273,7 @@ export async function markStepDoneCommand(runIdArg?: string): Promise<void> {
 
   try {
     const next = markStepDone({ state, pipeline, workspaceRoot: root });
-    RunStateStore.save(root, next);
+    saveRun(root, next);
     notifyStepTransition(next, state.currentStepIdx);
   } catch (err) {
     surfaceRunError(err);
@@ -236,7 +309,7 @@ export async function runAutoReviewCommand(runIdArg?: string): Promise<void> {
       try {
         const verdict = await runAutoReview({ workspaceRoot: root, state, pipeline });
         const next = submitAutoReviewVerdict({ state, pipeline, verdict });
-        RunStateStore.save(root, next);
+        saveRun(root, next);
 
         const tag = verdict.decision === 'pass' ? '✅ pass' : '❌ reject';
         const followUp = next.steps[next.currentStepIdx];
@@ -284,7 +357,7 @@ export async function approveStepCommand(runIdArg?: string): Promise<void> {
 
   try {
     const next = approveStep({ state, pipeline });
-    RunStateStore.save(root, next);
+    saveRun(root, next);
     notifyStepTransition(next, state.currentStepIdx);
   } catch (err) {
     surfaceRunError(err);
@@ -327,7 +400,7 @@ export async function rejectStepCommand(runIdArg?: string): Promise<void> {
       reason: reason.trim() || undefined,
       targetIdx: targetIdx === idx ? undefined : targetIdx,
     });
-    RunStateStore.save(root, next);
+    saveRun(root, next);
     if (targetIdx === idx) {
       void vscode.window.showInformationMessage(
         `Rejected step "${currentStep.agent}". Click "Rerun" in the sidebar when ready.`,
@@ -369,7 +442,7 @@ export async function rejectStepInlineCommand(
       reason: reason.trim() || undefined,
       targetIdx: targetIdx === idx ? undefined : targetIdx,
     });
-    RunStateStore.save(root, next);
+    saveRun(root, next);
     if (targetIdx === idx) {
       void vscode.window.showInformationMessage(
         `Rejected step "${currentStep.agent}". Click "Rerun" in the sidebar when ready.`,
@@ -449,9 +522,74 @@ export async function rerunStepCommand(runIdArg?: string): Promise<void> {
 
   try {
     const next = rerunStep({ state, feedback: feedback.trim() || undefined });
-    RunStateStore.save(root, next);
+    saveRun(root, next);
     void vscode.window.showInformationMessage(
       `Step "${step.agent}" reset (revision ${next.steps[state.currentStepIdx].revision}). Run the slash command again, then "Mark step done".`,
+    );
+  } catch (err) {
+    surfaceRunError(err);
+  }
+}
+
+/**
+ * Webview-driven rerun: caller (the React RerunModal) supplies the optional
+ * feedback string directly so we skip the showInputBox dialog.
+ */
+export async function rerunStepInlineCommand(
+  runId: string,
+  feedback: string,
+): Promise<void> {
+  const root = requireRoot('Rerun Step');
+  if (!root) { return; }
+  const state = RunStateStore.load(root, runId);
+  if (!state) { return; }
+  const step = state.steps[state.currentStepIdx];
+  if (!step) { return; }
+
+  try {
+    const next = rerunStep({ state, feedback: feedback.trim() || undefined });
+    saveRun(root, next);
+    void vscode.window.showInformationMessage(
+      `Step "${step.agent}" reset (revision ${next.steps[state.currentStepIdx].revision}). Run the slash command again, then "Mark step done".`,
+    );
+  } catch (err) {
+    surfaceRunError(err);
+  }
+}
+
+/**
+ * Webview-driven update request: rewind an already-approved step (and
+ * downstream steps) so the user can re-do them after a requirement change.
+ * Carries the supplied feedback to the rewound step. Mirrors run state
+ * into the epic's state.json via `saveRun`.
+ */
+export async function requestStepUpdateInlineCommand(
+  runId: string,
+  stepIdx: number,
+  feedback: string,
+): Promise<void> {
+  const root = requireRoot('Request Step Update');
+  if (!root) { return; }
+  const state = RunStateStore.load(root, runId);
+  if (!state) { return; }
+  const pipeline = loadPipeline(root, state.pipelineId);
+  if (!pipeline) {
+    void vscode.window.showErrorMessage(
+      `Run "${runId}" references pipeline "${state.pipelineId}" which is no longer in workspace.yaml.`,
+    );
+    return;
+  }
+  try {
+    const next = requestStepUpdate({
+      state,
+      pipeline,
+      stepIdx,
+      feedback: feedback.trim() || undefined,
+    });
+    saveRun(root, next);
+    const target = next.steps[stepIdx];
+    void vscode.window.showInformationMessage(
+      `Step "${target.agent}" reopened (revision ${target.revision}). Downstream steps reset to pending — work them again after this one.`,
     );
   } catch (err) {
     surfaceRunError(err);
@@ -472,17 +610,24 @@ export async function openRunStateCommand(runIdArg?: string): Promise<void> {
 
 // ── deleteRun ────────────────────────────────────────────────────────────
 
-export async function deleteRunCommand(runIdArg?: string): Promise<void> {
+export async function deleteRunCommand(
+  runIdArg?: string,
+  /** When true, skip the VS Code confirm dialog (the webview already showed an
+   * inline ConfirmModal). Always false for command-palette invocations. */
+  skipConfirm = false,
+): Promise<void> {
   const root = requireRoot('Delete Run');
   if (!root) { return; }
   const runId = await resolveRunId(root, runIdArg);
   if (!runId) { return; }
-  const choice = await vscode.window.showWarningMessage(
-    `Delete run "${runId}"? The state JSON is removed; produced artifacts on disk are kept.`,
-    { modal: false },
-    'Delete', 'Cancel',
-  );
-  if (choice !== 'Delete') { return; }
+  if (!skipConfirm) {
+    const choice = await vscode.window.showWarningMessage(
+      `Delete run "${runId}"? The state JSON is removed; produced artifacts on disk are kept.`,
+      { modal: false },
+      'Delete', 'Cancel',
+    );
+    if (choice !== 'Delete') { return; }
+  }
   RunStateStore.delete(root, runId);
   void vscode.window.showInformationMessage(`Deleted run "${runId}".`);
 }

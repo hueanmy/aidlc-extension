@@ -25,7 +25,9 @@ import {
   discoverAssets,
   RunStateStore,
   startRun,
+  targetPath,
 } from '@aidlc/core';
+import { SKILL_TEMPLATES } from './skillTemplates';
 import type {
   PipelineStepConfig,
   AssetScope,
@@ -33,11 +35,22 @@ import type {
   PipelineConfig,
   StepStatus,
   AutoReviewVerdict,
+  StepHistoryEntry,
 } from '@aidlc/core';
 import { promptStepConfig } from './wizards';
-import { listEpics, type EpicSummary as CoreEpicSummary } from './epicsList';
+import {
+  listEpics,
+  mirrorRunStateToEpic,
+  type EpicSummary as CoreEpicSummary,
+} from './epicsList';
 import { themeManager } from './themeManager';
-import { rejectStepInlineCommand } from './runCommands';
+import {
+  rejectStepInlineCommand,
+  rerunStepInlineCommand,
+  requestStepUpdateInlineCommand,
+  startPipelineRunInlineCommand,
+} from './runCommands';
+import { pickAndReadTextFile } from './pickAndReadTextFile';
 
 // ── Webview-side type shapes (must mirror src/webview/lib/types.ts) ───────
 
@@ -83,6 +96,7 @@ interface AgentMeta {
   inputs: string;
   outputs: string;
   artifact: string;
+  capabilities?: string[];
 }
 
 interface EpicStepDetailFull {
@@ -96,6 +110,9 @@ interface EpicStepDetailFull {
   stepHasHumanReview: boolean;
   startedAt?: string;
   finishedAt?: string;
+  history?: StepHistoryEntry[];
+  rejectCount?: number;
+  feedback?: string;
 }
 
 interface EpicSummaryUi {
@@ -116,6 +133,11 @@ interface EpicSummaryUi {
   createdAt: string;
 }
 
+interface SkillTemplateRef {
+  id: string;
+  description: string;
+}
+
 interface WorkspaceState {
   hasFolder: boolean;
   workspaceName: string;
@@ -130,8 +152,21 @@ interface WorkspaceState {
   skillsCount: number;
   pipelinesCount: number;
   epicsCount: number;
+  /** All existing run ids (any status) — for inline Start-Run modal uniqueness check. */
+  runIds: string[];
+  /** Built-in skill templates surfaced for the inline AddSkill modal. */
+  skillTemplates: SkillTemplateRef[];
+  /** Suggested next sequential id for the inline Start-Epic modal. */
+  nextEpicId: string;
+  /** All existing epic ids (folders under epicRoot) — for uniqueness check. */
+  existingEpicIds: string[];
   initialView?: WorkspaceView;
 }
+
+const SKILL_TEMPLATE_REFS: SkillTemplateRef[] = SKILL_TEMPLATES.map((t) => ({
+  id: t.id,
+  description: t.description,
+}));
 
 // ── State builders ────────────────────────────────────────────────────────
 
@@ -145,6 +180,10 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
       agents: [], skills: [], pipelines: [], epics: [],
       agentMeta: {}, slashCommandsByAgent: {},
       agentsCount: 0, skillsCount: 0, pipelinesCount: 0, epicsCount: 0,
+      runIds: [],
+      skillTemplates: SKILL_TEMPLATE_REFS,
+      nextEpicId: 'EPIC-001',
+      existingEpicIds: [],
       initialView,
     };
   }
@@ -160,12 +199,15 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
   if (doc) {
     for (const a of doc.agents) {
       const id = String(a.id);
+      const capsRaw = Array.isArray(a.capabilities) ? (a.capabilities as unknown[]) : [];
+      const capabilities = capsRaw.map(String).filter((c) => c);
       agentMeta[id] = {
         name: typeof a.name === 'string' ? a.name : id,
         description: typeof a.description === 'string' ? a.description : '',
         inputs: typeof a.inputs === 'string' ? a.inputs : '',
         outputs: typeof a.outputs === 'string' ? a.outputs : '',
         artifact: typeof a.artifact === 'string' ? a.artifact : '',
+        capabilities: capabilities.length > 0 ? capabilities : undefined,
       };
     }
     for (const c of doc.slash_commands) {
@@ -181,6 +223,7 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
   if (!doc) {
     const agents = mergeAgents(null, discovered.agents);
     const skills = mergeSkills(null, root, discovered.skills);
+    const epicIds0 = listEpicIdsFromDir(root, 'docs/epics');
     return {
       hasFolder: true,
       workspaceName: folder.name,
@@ -193,6 +236,10 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
       skillsCount: skills.length,
       pipelinesCount: 0,
       epicsCount: epics.length,
+      runIds: listRunIds(root),
+      skillTemplates: SKILL_TEMPLATE_REFS,
+      nextEpicId: suggestNextEpicId(epicIds0),
+      existingEpicIds: epicIds0,
       initialView,
     };
   }
@@ -219,6 +266,9 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
       : [],
   }));
 
+  const epicRoot = readEpicRoot(doc);
+  const epicIds = listEpicIdsFromDir(root, epicRoot);
+
   return {
     hasFolder: true,
     workspaceName: folder.name,
@@ -229,8 +279,50 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
     skillsCount: skills.length,
     pipelinesCount: pipelines.length,
     epicsCount: epics.length,
+    runIds: listRunIds(root),
+    skillTemplates: SKILL_TEMPLATE_REFS,
+    nextEpicId: suggestNextEpicId(epicIds),
+    existingEpicIds: epicIds,
     initialView,
   };
+}
+
+function listRunIds(root: string): string[] {
+  try {
+    return RunStateStore.list(root).map((r) => r.runId);
+  } catch {
+    return [];
+  }
+}
+
+function readEpicRoot(doc: { state?: unknown }): string {
+  const state = doc.state as Record<string, unknown> | undefined;
+  if (state && typeof state.root === 'string' && state.root.trim()) {
+    return state.root;
+  }
+  return 'docs/epics';
+}
+
+function listEpicIdsFromDir(workspaceRoot: string, epicRoot: string): string[] {
+  const dir = path.resolve(workspaceRoot, epicRoot);
+  if (!fs.existsSync(dir)) { return []; }
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch {
+    return [];
+  }
+}
+
+function suggestNextEpicId(existing: string[]): string {
+  const numbered = existing
+    .map((n) => n.match(/^EPIC-(\d+)$/i))
+    .filter((m): m is RegExpMatchArray => !!m)
+    .map((m) => parseInt(m[1], 10));
+  const next = numbered.length > 0 ? Math.max(...numbered) + 1 : 1;
+  return `EPIC-${String(next).padStart(3, '0')}`;
 }
 
 function toEpicSummaryUi(e: CoreEpicSummary): EpicSummaryUi {
@@ -263,6 +355,9 @@ function toEpicSummaryUi(e: CoreEpicSummary): EpicSummaryUi {
       stepHasHumanReview: s.stepHasHumanReview,
       startedAt: s.startedAt ?? undefined,
       finishedAt: s.finishedAt ?? undefined,
+      history: s.history,
+      rejectCount: s.rejectCount,
+      feedback: s.feedback,
     })),
     currentStep: e.currentStep,
     pipeline: e.pipeline,
@@ -369,6 +464,16 @@ export class WorkspaceWebview {
     WorkspaceWebview.current = new WorkspaceWebview(panel, extensionUri, initialView);
   }
 
+  /**
+   * Open the workspace panel on the Epics view and ask the React side to pop
+   * the StartEpicModal. Used by the sidebar's "Start Epic" button so the user
+   * gets the inline experience instead of a chain of VS Code dialogs.
+   */
+  static triggerStartEpic(extensionUri: vscode.Uri): void {
+    WorkspaceWebview.show(extensionUri, 'epics');
+    void WorkspaceWebview.current?.panel.webview.postMessage({ type: 'triggerStartEpic' });
+  }
+
   private constructor(
     private readonly panel: vscode.WebviewPanel,
     private readonly extensionUri: vscode.Uri,
@@ -411,6 +516,19 @@ export class WorkspaceWebview {
       runsWatcher.onDidCreate(refresh, null, this.disposables);
       runsWatcher.onDidDelete(refresh, null, this.disposables);
       this.disposables.push(runsWatcher);
+
+      // Artifacts dir under each epic — refresh when the agent writes a
+      // produced file. Without this, "PRD.md · not produced yet" stays
+      // stale until the user triggers another refresh manually.
+      const artifactsPattern = new vscode.RelativePattern(
+        vscode.Uri.file(root),
+        '**/artifacts/**',
+      );
+      const artifactsWatcher = vscode.workspace.createFileSystemWatcher(artifactsPattern);
+      artifactsWatcher.onDidChange(refresh, null, this.disposables);
+      artifactsWatcher.onDidCreate(refresh, null, this.disposables);
+      artifactsWatcher.onDidDelete(refresh, null, this.disposables);
+      this.disposables.push(artifactsWatcher);
     }
 
     this.refresh();
@@ -564,11 +682,21 @@ export class WorkspaceWebview {
       case 'approveStep':
       case 'rejectStep':
       case 'rerunStep':
-      case 'deleteRun':
       case 'openRunState': {
         const runId = String(msg.runId ?? '');
         const cmd = `aidlc.${msg.type}`;
         await vscode.commands.executeCommand(cmd, runId || undefined);
+        return;
+      }
+      case 'deleteRun': {
+        const runId = String(msg.runId ?? '');
+        // confirmed: webview already showed an inline ConfirmModal, skip the
+        // VS Code warning dialog. Falsy for command-palette invocations.
+        await vscode.commands.executeCommand(
+          'aidlc.deleteRun',
+          runId || undefined,
+          msg.confirmed === true,
+        );
         return;
       }
       case 'rejectStepInline': {
@@ -577,6 +705,85 @@ export class WorkspaceWebview {
         const targetIdx = Number(msg.targetIdx);
         if (!runId || !Number.isInteger(targetIdx)) { return; }
         await rejectStepInlineCommand(runId, reason, targetIdx);
+        return;
+      }
+      case 'startRunInline': {
+        const pipelineId = String(msg.pipelineId ?? '');
+        const runId = String(msg.runId ?? '');
+        if (!pipelineId || !runId) { return; }
+        await startPipelineRunInlineCommand(pipelineId, runId);
+        return;
+      }
+      case 'addPipelineInline': {
+        const draft = msg.draft;
+        if (!draft || typeof draft !== 'object') { return; }
+        await this.addPipelineInline(draft as Record<string, unknown>);
+        return;
+      }
+      case 'editPipelineInline': {
+        const id = String(msg.id ?? '');
+        const draft = msg.draft;
+        if (!id || !draft || typeof draft !== 'object') { return; }
+        await this.editPipelineInline(id, draft as Record<string, unknown>);
+        return;
+      }
+      case 'addSkillInline': {
+        const draft = msg.draft;
+        if (!draft || typeof draft !== 'object') { return; }
+        await this.addSkillInline(draft as Record<string, unknown>);
+        return;
+      }
+      case 'addAgentInline': {
+        const draft = msg.draft;
+        if (!draft || typeof draft !== 'object') { return; }
+        await this.addAgentInline(draft as Record<string, unknown>);
+        return;
+      }
+      case 'startEpicInline': {
+        const draft = msg.draft;
+        if (!draft || typeof draft !== 'object') { return; }
+        await this.startEpicInline(draft as Record<string, unknown>);
+        return;
+      }
+      case 'rerunStepInline': {
+        const runId = String(msg.runId ?? '');
+        const feedback = String(msg.feedback ?? '');
+        if (!runId) { return; }
+        await rerunStepInlineCommand(runId, feedback);
+        return;
+      }
+      case 'runStepWithFeedback': {
+        const slash = String(msg.slashCommand ?? '');
+        const runId = String(msg.runId ?? '');
+        const feedback = String(msg.feedback ?? '');
+        if (!slash || !runId) { return; }
+        await vscode.commands.executeCommand(
+          'aidlc.runStepWithFeedback',
+          slash,
+          runId,
+          feedback,
+        );
+        return;
+      }
+      case 'requestStepUpdate': {
+        const runId = String(msg.runId ?? '');
+        const stepIdx = Number(msg.stepIdx);
+        const feedback = String(msg.feedback ?? '');
+        if (!runId || !Number.isInteger(stepIdx)) { return; }
+        await requestStepUpdateInlineCommand(runId, stepIdx, feedback);
+        return;
+      }
+      case 'savePresetInline': {
+        const draft = msg.draft;
+        if (!draft || typeof draft !== 'object') { return; }
+        await vscode.commands.executeCommand('aidlc.savePresetInline', draft);
+        return;
+      }
+      case 'pickAndReadFile': {
+        const requestId = String(msg.requestId ?? '');
+        if (!requestId) { return; }
+        const reply = await pickAndReadTextFile(requestId);
+        void this.panel.webview.postMessage({ type: 'pickAndReadFile:reply', ...reply });
         return;
       }
       case 'startPipelineRunForEpic': {
@@ -595,20 +802,50 @@ export class WorkspaceWebview {
           Number(msg.toIdx ?? -1),
         );
         return;
-      case 'addStepToPipeline':
-        await this.addStepToPipeline(String(msg.pipelineId ?? ''));
+      case 'addStepToPipeline': {
+        const pipelineId = String(msg.pipelineId ?? '');
+        const agentId = typeof msg.agentId === 'string' ? msg.agentId : undefined;
+        await this.addStepToPipeline(pipelineId, agentId);
         return;
+      }
       case 'deleteStep':
         await this.deleteStep(String(msg.pipelineId ?? ''), Number(msg.idx ?? -1));
         return;
-      case 'editStepConfig':
-        await this.editStepConfig(String(msg.pipelineId ?? ''), Number(msg.idx ?? -1));
+      case 'editStepConfig': {
+        const inlineConfig =
+          msg.config && typeof msg.config === 'object'
+            ? (msg.config as Record<string, unknown>)
+            : undefined;
+        await this.editStepConfig(
+          String(msg.pipelineId ?? ''),
+          Number(msg.idx ?? -1),
+          inlineConfig,
+        );
         return;
-      case 'deleteAgent':    await this.deleteItem('agents',   String(msg.id ?? '')); return;
-      case 'deleteSkill':    await this.deleteItem('skills',   String(msg.id ?? '')); return;
-      case 'deletePipeline': await this.deleteItem('pipelines', String(msg.id ?? '')); return;
-      case 'renameAgent':    await this.renameItem('agents', String(msg.id ?? '')); return;
-      case 'renameSkill':    await this.renameItem('skills', String(msg.id ?? '')); return;
+      }
+      case 'deleteAgent':
+        await this.deleteItem('agents', String(msg.id ?? ''), msg.confirmed === true);
+        return;
+      case 'deleteSkill':
+        await this.deleteItem('skills', String(msg.id ?? ''), msg.confirmed === true);
+        return;
+      case 'deletePipeline':
+        await this.deleteItem('pipelines', String(msg.id ?? ''), msg.confirmed === true);
+        return;
+      case 'renameAgent':
+        await this.renameItem(
+          'agents',
+          String(msg.id ?? ''),
+          typeof msg.newId === 'string' ? msg.newId : undefined,
+        );
+        return;
+      case 'renameSkill':
+        await this.renameItem(
+          'skills',
+          String(msg.id ?? ''),
+          typeof msg.newId === 'string' ? msg.newId : undefined,
+        );
+        return;
       case 'duplicateAgent': await this.duplicateItem('agents', String(msg.id ?? '')); return;
       case 'duplicateSkill': await this.duplicateItem('skills', String(msg.id ?? '')); return;
       case 'togglePipelineFailure':
@@ -694,7 +931,13 @@ export class WorkspaceWebview {
     });
   }
 
-  private async editStepConfig(pipelineId: string, idx: number): Promise<void> {
+  private async editStepConfig(
+    pipelineId: string,
+    idx: number,
+    /** Webview already collected the new config via inline StepConfigModal —
+     * apply it directly and skip promptStepConfig's QuickPick chain. */
+    inlineConfig?: Record<string, unknown>,
+  ): Promise<void> {
     if (!pipelineId || idx < 0) { return; }
     const root = this.getRootOrWarn();
     if (!root) { return; }
@@ -707,15 +950,39 @@ export class WorkspaceWebview {
     }
     const raw = pipeline.steps[idx] as PipelineStepConfig;
     const norm = normalizeStep(raw);
-    const draft = await promptStepConfig(norm.agent, {
-      enabled: norm.enabled,
-      requires: norm.requires,
-      produces: norm.produces,
-      human_review: norm.human_review,
-      auto_review: norm.auto_review,
-      auto_review_runner: norm.auto_review_runner,
-    });
-    if (!draft) { return; }
+    let draft;
+    if (inlineConfig) {
+      const requires = Array.isArray(inlineConfig.requires)
+        ? (inlineConfig.requires as unknown[]).map(String)
+        : [];
+      const produces = Array.isArray(inlineConfig.produces)
+        ? (inlineConfig.produces as unknown[]).map(String)
+        : [];
+      const runnerRaw = inlineConfig.auto_review_runner;
+      draft = {
+        agent: norm.agent,
+        enabled: inlineConfig.enabled === true,
+        requires,
+        produces,
+        human_review: inlineConfig.human_review === true,
+        auto_review: inlineConfig.auto_review === true,
+        auto_review_runner:
+          inlineConfig.auto_review === true && typeof runnerRaw === 'string' && runnerRaw.trim()
+            ? runnerRaw.trim()
+            : undefined,
+      };
+    } else {
+      const result = await promptStepConfig(norm.agent, {
+        enabled: norm.enabled,
+        requires: norm.requires,
+        produces: norm.produces,
+        human_review: norm.human_review,
+        auto_review: norm.auto_review,
+        auto_review_runner: norm.auto_review_runner,
+      });
+      if (!result) { return; }
+      draft = result;
+    }
     this.mutateYaml((d) => {
       const p = d.pipelines.find((x) => x.id === pipelineId);
       if (!p || !Array.isArray(p.steps) || idx >= p.steps.length) { return false; }
@@ -734,7 +1001,479 @@ export class WorkspaceWebview {
     });
   }
 
-  private async addStepToPipeline(pipelineId: string): Promise<void> {
+  /**
+   * Apply the AddSkillModal draft: write the .md file at the scope-target
+   * path and (for aidlc) register it in workspace.yaml. No overwrite — if
+   * the file already exists we surface a warning and abort. Webview's
+   * `takenIds` should prevent collisions in normal use.
+   */
+  private async addSkillInline(draft: Record<string, unknown>): Promise<void> {
+    const root = this.getRootOrWarn();
+    if (!root) { return; }
+    const doc = readYaml(root);
+    if (!doc) {
+      void vscode.window.showWarningMessage('AIDLC: no workspace.yaml — initialize first.');
+      return;
+    }
+
+    const scope = draft.scope as AssetScope;
+    const id = String(draft.id ?? '').trim();
+    const sourceRaw = draft.source as Record<string, unknown> | undefined;
+    if (!id || !sourceRaw) { return; }
+    if (scope !== 'project' && scope !== 'aidlc' && scope !== 'global') { return; }
+
+    let content = '';
+    let openInEditor = false;
+    const kind = String(sourceRaw.kind ?? '');
+    if (kind === 'template') {
+      const tplId = String(sourceRaw.templateId ?? '');
+      const tpl = SKILL_TEMPLATES.find((t) => t.id === tplId);
+      if (!tpl) {
+        void vscode.window.showWarningMessage(`Skill template "${tplId}" not found.`);
+        return;
+      }
+      content = tpl.content;
+    } else if (kind === 'paste') {
+      content = String(sourceRaw.content ?? '');
+      if (!content.trim()) { return; }
+    } else if (kind === 'blank') {
+      content = `# ${id}\n\n<!-- Write the system prompt for this skill here. -->\n`;
+      openInEditor = true;
+    } else {
+      return;
+    }
+
+    const skillPath = targetPath(root, scope, 'skill', id);
+    if (fs.existsSync(skillPath)) {
+      void vscode.window.showWarningMessage(
+        `Skill file already exists at ${path.relative(root, skillPath) || skillPath}. Delete it first.`,
+      );
+      return;
+    }
+    fs.mkdirSync(path.dirname(skillPath), { recursive: true });
+    fs.writeFileSync(skillPath, content, 'utf8');
+
+    if (scope === 'aidlc') {
+      this.mutateYaml((d) => {
+        d.skills.push({ id, path: `./.aidlc/skills/${id}.md` });
+      });
+    }
+
+    if (openInEditor || kind === 'template') {
+      const docOpen = await vscode.workspace.openTextDocument(skillPath);
+      await vscode.window.showTextDocument(docOpen, { preview: false });
+    }
+
+    const yamlNote = scope === 'aidlc' ? ' + workspace.yaml' : '';
+    void vscode.window.showInformationMessage(
+      `Skill "${id}" added (${scope})${yamlNote}.`,
+    );
+  }
+
+  /**
+   * Apply the AddAgentModal draft. AIDLC scope appends to workspace.yaml
+   * `agents:`. Project / global scopes write a Claude Code-native .md file
+   * with frontmatter + the picked skills inlined as a starter prompt.
+   */
+  private async addAgentInline(draft: Record<string, unknown>): Promise<void> {
+    const root = this.getRootOrWarn();
+    if (!root) { return; }
+    const doc = readYaml(root);
+    if (!doc) {
+      void vscode.window.showWarningMessage('AIDLC: no workspace.yaml — initialize first.');
+      return;
+    }
+
+    const scope = draft.scope as AssetScope;
+    const id = String(draft.id ?? '').trim();
+    const name = String(draft.name ?? '').trim();
+    const skillsRaw = Array.isArray(draft.skills) ? (draft.skills as unknown[]) : [];
+    const skills = skillsRaw.map(String).filter((s) => s);
+    if (!id || !name || skills.length === 0) { return; }
+    if (scope !== 'project' && scope !== 'aidlc' && scope !== 'global') { return; }
+
+    const yamlSkillIds = new Set(doc.skills.map((s) => String(s.id)));
+    for (const s of skills) {
+      if (!yamlSkillIds.has(s)) {
+        void vscode.window.showWarningMessage(
+          `Skill "${s}" not declared in workspace.yaml.`,
+        );
+        return;
+      }
+    }
+
+    if (scope === 'aidlc') {
+      const model = String(draft.model ?? '').trim();
+      if (!model) { return; }
+      const envObj = draft.env && typeof draft.env === 'object'
+        ? (draft.env as Record<string, unknown>)
+        : {};
+      const env: Record<string, string> = {};
+      for (const [k, v] of Object.entries(envObj)) { env[k] = String(v); }
+      const capsRaw = Array.isArray(draft.capabilities) ? (draft.capabilities as unknown[]) : [];
+      const capabilities = capsRaw.map(String).filter((c) => c);
+
+      const agent: Record<string, unknown> = { id, name, skills, model };
+      if (Object.keys(env).length > 0) { agent.env = env; }
+      if (capabilities.length > 0) { agent.capabilities = capabilities; }
+
+      this.mutateYaml((d) => {
+        d.agents.push(agent);
+      });
+
+      void vscode.window.showInformationMessage(
+        `Agent "${id}" added (aidlc · skills: ${skills.join(', ')}, model: ${model}).`,
+      );
+      return;
+    }
+
+    // project / global: write Claude-native .md
+    const description = String(draft.description ?? '').trim() || `${name} agent.`;
+    const agentPath = targetPath(root, scope, 'agent', id);
+    if (fs.existsSync(agentPath)) {
+      void vscode.window.showWarningMessage(
+        `Agent file already exists at ${path.relative(root, agentPath) || agentPath}. Delete it first.`,
+      );
+      return;
+    }
+
+    const sections: string[] = [];
+    for (const skillId of skills) {
+      sections.push(`<!-- ── Skill: ${skillId} ── -->`);
+      const decl = doc.skills.find((s) => String(s.id) === skillId);
+      const declPath = decl && typeof decl.path === 'string' ? decl.path : '';
+      let inlined: string | null = null;
+      if (declPath) {
+        const resolved = path.isAbsolute(declPath) ? declPath : path.resolve(root, declPath);
+        if (fs.existsSync(resolved)) {
+          const raw = fs.readFileSync(resolved, 'utf8');
+          inlined = raw.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim();
+        }
+      }
+      sections.push(
+        inlined ?? `<!-- TODO: paste content for skill "${skillId}" — file not found -->`,
+      );
+      sections.push('');
+    }
+
+    const content = `---
+name: ${name}
+description: ${description}
+---
+
+${sections.join('\n').trimEnd()}
+`;
+
+    fs.mkdirSync(path.dirname(agentPath), { recursive: true });
+    fs.writeFileSync(agentPath, content, 'utf8');
+
+    const docOpen = await vscode.workspace.openTextDocument(agentPath);
+    await vscode.window.showTextDocument(docOpen, { preview: false });
+
+    void vscode.window.showInformationMessage(
+      `Agent "${id}" added (${scope} · skills: ${skills.join(', ')}).`,
+    );
+  }
+
+  /**
+   * Apply the StartEpicModal draft. Mirrors `startEpicCommand`:
+   * - writes <epicRoot>/<id>/state.json + inputs.json + artifacts/.
+   * - when target is a pipeline, scaffolds a RunState (runId === epicId) so
+   *   the gate UI lights up immediately.
+   *
+   * Refuses to overwrite an existing epic dir — the modal's existingEpicIds
+   * already blocks collisions in normal use; this is the safety net.
+   */
+  private async startEpicInline(draft: Record<string, unknown>): Promise<void> {
+    const root = this.getRootOrWarn();
+    if (!root) { return; }
+    const doc = readYaml(root);
+    if (!doc) {
+      void vscode.window.showWarningMessage('AIDLC: no workspace.yaml — initialize first.');
+      return;
+    }
+
+    const targetRaw = draft.target as Record<string, unknown> | undefined;
+    const epicId = String(draft.epicId ?? '').trim();
+    const title = String(draft.title ?? '').trim();
+    const description = String(draft.description ?? '').trim();
+    const inputsRaw = draft.inputs && typeof draft.inputs === 'object'
+      ? (draft.inputs as Record<string, unknown>)
+      : {};
+    const inputs: Record<string, string> = {};
+    for (const [k, v] of Object.entries(inputsRaw)) {
+      if (typeof v === 'string' && v.trim()) { inputs[k] = v; }
+    }
+
+    if (!targetRaw || !epicId) { return; }
+    const targetKind = String(targetRaw.kind ?? '');
+    const targetId = String(targetRaw.id ?? '').trim();
+    if (!targetId) { return; }
+    if (targetKind !== 'pipeline' && targetKind !== 'agent') { return; }
+
+    let agents: string[] = [];
+    if (targetKind === 'pipeline') {
+      const p = (doc.pipelines as PipelineConfig[] | undefined)?.find(
+        (x) => x.id === targetId,
+      );
+      if (!p) {
+        void vscode.window.showWarningMessage(`Pipeline "${targetId}" not found.`);
+        return;
+      }
+      agents = Array.isArray(p.steps) ? (p.steps as unknown[]).map(stepAgentId) : [];
+    } else {
+      const a = doc.agents.find((x) => String(x.id) === targetId);
+      if (!a) {
+        void vscode.window.showWarningMessage(`Agent "${targetId}" not found.`);
+        return;
+      }
+      agents = [targetId];
+    }
+    if (agents.length === 0) {
+      void vscode.window.showWarningMessage(`Target "${targetId}" has no agents.`);
+      return;
+    }
+
+    const epicRoot = readEpicRoot(doc);
+    const epicDir = path.resolve(root, epicRoot, epicId);
+    if (fs.existsSync(epicDir)) {
+      void vscode.window.showWarningMessage(
+        `Epic dir already exists at ${path.relative(root, epicDir) || epicDir}. Delete it first.`,
+      );
+      return;
+    }
+
+    fs.mkdirSync(epicDir, { recursive: true });
+    fs.mkdirSync(path.join(epicDir, 'artifacts'), { recursive: true });
+
+    const state = {
+      id: epicId,
+      title,
+      description,
+      pipeline: targetKind === 'pipeline' ? targetId : null,
+      agent: targetKind === 'agent' ? targetId : null,
+      agents,
+      currentStep: 0,
+      status: 'pending' as const,
+      createdAt: new Date().toISOString(),
+      stepStates: agents.map((a) => ({
+        agent: a,
+        status: 'pending' as const,
+        startedAt: null,
+        finishedAt: null,
+      })),
+    };
+
+    fs.writeFileSync(
+      path.join(epicDir, 'state.json'),
+      JSON.stringify(state, null, 2) + '\n',
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(epicDir, 'inputs.json'),
+      JSON.stringify(inputs, null, 2) + '\n',
+      'utf8',
+    );
+
+    if (targetKind === 'pipeline') {
+      const pipelineCfg = (doc.pipelines as PipelineConfig[] | undefined)?.find(
+        (p) => p.id === targetId,
+      );
+      if (pipelineCfg && Array.isArray(pipelineCfg.steps) && pipelineCfg.steps.length > 0) {
+        const existingRun = RunStateStore.load(root, epicId);
+        if (!existingRun) {
+          try {
+            const runState = startRun({
+              runId: epicId,
+              pipeline: pipelineCfg,
+              context: { epic: epicId, ...inputs },
+            });
+            RunStateStore.save(root, runState);
+            mirrorRunStateToEpic(root, runState, doc);
+          } catch (err) {
+            void vscode.window.showWarningMessage(
+              `Epic created, but pipeline run could not be scaffolded: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+      }
+    }
+
+    void vscode.window.showInformationMessage(
+      `Started epic "${epicId}" — ${agents[0]}. Run /${agents[0]} ${epicId} in Claude to begin.`,
+    );
+  }
+
+  /**
+   * Build a pipeline from the React `AddPipelineModal` payload — bypasses
+   * the legacy QuickPick wizard chain. Validates id, agents, and runner
+   * paths server-side; surfaces issues as a warning and aborts.
+   */
+  private async addPipelineInline(draft: Record<string, unknown>): Promise<void> {
+    const root = this.getRootOrWarn();
+    if (!root) { return; }
+    const doc = readYaml(root);
+    if (!doc) {
+      void vscode.window.showWarningMessage('AIDLC: no workspace.yaml — initialize first.');
+      return;
+    }
+
+    const id = String(draft.id ?? '').trim();
+    const onFailure: 'stop' | 'continue' =
+      draft.on_failure === 'continue' ? 'continue' : 'stop';
+    const stepsRaw = Array.isArray(draft.steps) ? (draft.steps as unknown[]) : [];
+
+    if (!id) {
+      void vscode.window.showWarningMessage('Pipeline id is required.');
+      return;
+    }
+    if (doc.pipelines.some((p) => p.id === id)) {
+      void vscode.window.showWarningMessage(`Pipeline "${id}" already exists.`);
+      return;
+    }
+    if (stepsRaw.length === 0) {
+      void vscode.window.showWarningMessage('Pipeline needs at least one step.');
+      return;
+    }
+
+    const agentIds = new Set(doc.agents.map((a) => String(a.id)));
+    const steps: unknown[] = [];
+    for (const raw of stepsRaw) {
+      if (!raw || typeof raw !== 'object') { continue; }
+      const r = raw as Record<string, unknown>;
+      const agent = String(r.agent ?? '').trim();
+      if (!agent || !agentIds.has(agent)) {
+        void vscode.window.showWarningMessage(
+          `Step references unknown agent "${agent}". Aborting.`,
+        );
+        return;
+      }
+      const human_review = r.human_review === true;
+      const auto_review = r.auto_review === true;
+      const runner = typeof r.auto_review_runner === 'string' ? r.auto_review_runner.trim() : '';
+      if (auto_review && !runner) {
+        void vscode.window.showWarningMessage(
+          `Step "${agent}": auto_review is on but runner path is empty.`,
+        );
+        return;
+      }
+      const step: Record<string, unknown> = {
+        agent,
+        enabled: true,
+        requires: [],
+        produces: [],
+        human_review,
+        auto_review,
+      };
+      if (auto_review) { step.auto_review_runner = runner; }
+      steps.push(step);
+    }
+
+    this.mutateYaml((d) => {
+      d.pipelines.push({ id, steps, on_failure: onFailure });
+    });
+
+    void vscode.window.showInformationMessage(
+      `Pipeline "${id}" added: ${steps
+        .map((s) => (s as { agent: string }).agent)
+        .join(' → ')}`,
+    );
+  }
+
+  /**
+   * Apply edits from the React `PipelineModal` (edit mode). Replaces the
+   * pipeline's `steps` and `on_failure` while preserving each existing step's
+   * `requires` / `produces` (which the modal does not expose — those still
+   * live on the per-step gear-icon flow). Matching is by agent id, first
+   * occurrence — good enough for typical reorder + toggle workflows.
+   */
+  private async editPipelineInline(
+    id: string,
+    draft: Record<string, unknown>,
+  ): Promise<void> {
+    const root = this.getRootOrWarn();
+    if (!root) { return; }
+    const doc = readYaml(root);
+    if (!doc) { return; }
+
+    const pipeline = doc.pipelines.find((p) => p.id === id);
+    if (!pipeline) {
+      void vscode.window.showWarningMessage(`Pipeline "${id}" not found.`);
+      return;
+    }
+
+    const onFailure: 'stop' | 'continue' =
+      draft.on_failure === 'continue' ? 'continue' : 'stop';
+    const stepsRaw = Array.isArray(draft.steps) ? (draft.steps as unknown[]) : [];
+    if (stepsRaw.length === 0) {
+      void vscode.window.showWarningMessage('Pipeline needs at least one step.');
+      return;
+    }
+
+    const agentIds = new Set(doc.agents.map((a) => String(a.id)));
+
+    // Preserve requires/produces from the existing pipeline by agent id —
+    // first occurrence consumed per match so duplicate-agent steps still
+    // pair up with their original entries in order.
+    const oldByAgent = new Map<string, Array<{ requires: string[]; produces: string[] }>>();
+    if (Array.isArray(pipeline.steps)) {
+      for (const raw of pipeline.steps as PipelineStepConfig[]) {
+        const norm = normalizeStep(raw);
+        const arr = oldByAgent.get(norm.agent) ?? [];
+        arr.push({ requires: norm.requires, produces: norm.produces });
+        oldByAgent.set(norm.agent, arr);
+      }
+    }
+
+    const newSteps: unknown[] = [];
+    for (const raw of stepsRaw) {
+      if (!raw || typeof raw !== 'object') { continue; }
+      const r = raw as Record<string, unknown>;
+      const agent = String(r.agent ?? '').trim();
+      if (!agent || !agentIds.has(agent)) {
+        void vscode.window.showWarningMessage(
+          `Step references unknown agent "${agent}". Aborting.`,
+        );
+        return;
+      }
+      const human_review = r.human_review === true;
+      const auto_review = r.auto_review === true;
+      const runner = typeof r.auto_review_runner === 'string' ? r.auto_review_runner.trim() : '';
+      if (auto_review && !runner) {
+        void vscode.window.showWarningMessage(
+          `Step "${agent}": auto_review is on but runner path is empty.`,
+        );
+        return;
+      }
+
+      const carry = oldByAgent.get(agent)?.shift();
+      const step: Record<string, unknown> = {
+        agent,
+        enabled: true,
+        requires: carry?.requires ?? [],
+        produces: carry?.produces ?? [],
+        human_review,
+        auto_review,
+      };
+      if (auto_review) { step.auto_review_runner = runner; }
+      newSteps.push(step);
+    }
+
+    this.mutateYaml((d) => {
+      const p = d.pipelines.find((x) => x.id === id);
+      if (!p) { return false; }
+      p.steps = newSteps;
+      p.on_failure = onFailure;
+    });
+
+    void vscode.window.showInformationMessage(
+      `Pipeline "${id}" updated: ${newSteps
+        .map((s) => (s as { agent: string }).agent)
+        .join(' → ')}`,
+    );
+  }
+
+  private async addStepToPipeline(pipelineId: string, agentIdArg?: string): Promise<void> {
     if (!pipelineId) { return; }
     const root = this.getRootOrWarn();
     if (!root) { return; }
@@ -752,40 +1491,58 @@ export class WorkspaceWebview {
     }
     const pipeline = doc.pipelines.find((x) => x.id === pipelineId);
     if (!pipeline) { return; }
-    const currentSteps = Array.isArray(pipeline.steps)
-      ? pipeline.steps.map(stepAgentId)
-      : [];
-    const picked = await vscode.window.showQuickPick(
-      doc.agents.map((a) => {
-        const id = String(a.id);
-        const name = typeof a.name === 'string' ? a.name : id;
-        const inPipeline = currentSteps.includes(id);
-        return {
-          label: id,
-          description: name,
-          detail: inPipeline ? '· already in pipeline (will duplicate)' : '',
-          id,
-        };
-      }),
-      { placeHolder: `Append a step to \`${pipelineId}\``, ignoreFocusOut: true, matchOnDetail: true },
-    );
-    if (!picked) { return; }
+
+    let chosenId: string | undefined;
+    if (agentIdArg) {
+      // Webview already showed an inline StepPickerModal — trust the choice
+      // but verify the agent still exists in workspace.yaml.
+      if (doc.agents.some((a) => String(a.id) === agentIdArg)) {
+        chosenId = agentIdArg;
+      }
+    } else {
+      const currentSteps = Array.isArray(pipeline.steps)
+        ? pipeline.steps.map(stepAgentId)
+        : [];
+      const picked = await vscode.window.showQuickPick(
+        doc.agents.map((a) => {
+          const id = String(a.id);
+          const name = typeof a.name === 'string' ? a.name : id;
+          const inPipeline = currentSteps.includes(id);
+          return {
+            label: id,
+            description: name,
+            detail: inPipeline ? '· already in pipeline (will duplicate)' : '',
+            id,
+          };
+        }),
+        { placeHolder: `Append a step to \`${pipelineId}\``, ignoreFocusOut: true, matchOnDetail: true },
+      );
+      chosenId = picked?.id;
+    }
+    if (!chosenId) { return; }
     this.mutateYaml((d) => {
       const p = d.pipelines.find((x) => x.id === pipelineId);
       if (!p) { return false; }
       const steps = Array.isArray(p.steps) ? (p.steps as PipelineStepConfig[]) : [];
-      steps.push(picked.id);
+      steps.push(chosenId!);
       p.steps = steps;
     });
   }
 
-  private async deleteItem(field: 'agents' | 'skills' | 'pipelines', id: string): Promise<void> {
+  private async deleteItem(
+    field: 'agents' | 'skills' | 'pipelines',
+    id: string,
+    /** Webview already confirmed via inline modal — skip the VS Code dialog. */
+    skipConfirm = false,
+  ): Promise<void> {
     if (!id) { return; }
-    const confirm = await vscode.window.showWarningMessage(
-      `Delete ${field.replace(/s$/, '')} \`${id}\`?`,
-      { modal: true }, 'Delete', 'Cancel',
-    );
-    if (confirm !== 'Delete') { return; }
+    if (!skipConfirm) {
+      const confirm = await vscode.window.showWarningMessage(
+        `Delete ${field.replace(/s$/, '')} \`${id}\`?`,
+        { modal: true }, 'Delete', 'Cancel',
+      );
+      if (confirm !== 'Delete') { return; }
+    }
     this.mutateYaml((doc) => {
       const arr = doc[field];
       if (!Array.isArray(arr)) { return false; }
@@ -795,21 +1552,31 @@ export class WorkspaceWebview {
     });
   }
 
-  private async renameItem(field: 'agents' | 'skills', id: string): Promise<void> {
+  private async renameItem(
+    field: 'agents' | 'skills',
+    id: string,
+    /** Webview already prompted via inline RenameModal — use this directly
+     * and skip the VS Code input box. Falsy for command-palette flows. */
+    newIdArg?: string,
+  ): Promise<void> {
     if (!id) { return; }
-    const newId = await vscode.window.showInputBox({
-      prompt: `New ID for ${field.replace(/s$/, '')} \`${id}\``,
-      value: id,
-      validateInput: (v) => v && v.trim() ? null : 'ID cannot be empty',
-    });
-    if (!newId || newId.trim() === id) { return; }
+    let newId = newIdArg;
+    if (!newId) {
+      newId = await vscode.window.showInputBox({
+        prompt: `New ID for ${field.replace(/s$/, '')} \`${id}\``,
+        value: id,
+        validateInput: (v) => v && v.trim() ? null : 'ID cannot be empty',
+      });
+    }
+    const trimmed = newId?.trim();
+    if (!trimmed || trimmed === id) { return; }
     this.mutateYaml((doc) => {
       const arr = doc[field];
       if (!Array.isArray(arr)) { return false; }
       const item = arr.find((x) => x.id === id);
       if (!item) { return false; }
-      if (arr.some((x) => x.id === newId.trim())) { return false; }
-      item.id = newId.trim();
+      if (arr.some((x) => x.id === trimmed)) { return false; }
+      item.id = trimmed;
     });
   }
 
@@ -877,6 +1644,7 @@ export class WorkspaceWebview {
     try {
       const runState = startRun({ runId: epicId, pipeline, context });
       RunStateStore.save(root, runState);
+      mirrorRunStateToEpic(root, runState, readYaml(root));
       void vscode.window.showInformationMessage(
         `Pipeline run "${epicId}" started — current step: ${runState.steps[runState.currentStepIdx].agent}.`,
       );

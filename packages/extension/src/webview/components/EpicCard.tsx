@@ -14,17 +14,23 @@ import {
   ExternalLink,
   Folder,
   Play,
+  History,
+  RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type {
   EpicSummary,
   EpicStepDetailFull,
   AgentMeta,
+  StepHistoryEntry,
   StepStatus,
   UiStatus,
 } from '@/lib/types';
 import { StatusBadge } from './StatusBadge';
 import { RejectModal } from './RejectModal';
+import { RerunModal } from './RerunModal';
+import { RunWithFeedbackModal } from './RunWithFeedbackModal';
+import { RequestUpdateModal } from './RequestUpdateModal';
 import { postMessage } from '@/lib/bridge';
 
 function epicUiStatus(status: EpicSummary['status']): UiStatus {
@@ -214,6 +220,11 @@ function Stepper({
         {steps.map((step, i) => {
           const isCurrent = i === currentStep;
           const isFocused = i === focusedIdx;
+          // Pending step that carries history was previously approved and
+          // got reset by a downstream Request-Update — surface that as
+          // a warning-tinted state separate from never-touched pending.
+          const isAwaitingUpdate =
+            step.status === 'pending' && (step.history ?? []).length > 0;
           const inner =
             step.status === 'done'
               ? <Check className="h-3.5 w-3.5" />
@@ -236,7 +247,9 @@ function Stepper({
                 type="button"
                 onClick={() => onFocus(i)}
                 className="group flex flex-col items-center gap-1 px-1"
-                title={`${step.agent} — ${STEP_LABEL[step.status]}`}
+                title={`${step.agent} — ${
+                  isAwaitingUpdate ? 'awaiting update' : STEP_LABEL[step.status]
+                }`}
               >
                 <div
                   className={cn(
@@ -245,8 +258,10 @@ function Stepper({
                     step.status === 'in_progress' &&
                       'bg-warning text-warning-foreground shadow-[0_0_14px_color-mix(in_oklab,var(--color-warning)_40%,transparent)]',
                     step.status === 'failed' && 'bg-destructive text-destructive-foreground',
-                    step.status === 'pending' &&
+                    step.status === 'pending' && !isAwaitingUpdate &&
                       'border-2 border-border bg-card text-muted-foreground',
+                    isAwaitingUpdate &&
+                      'border-2 border-warning/60 bg-warning/10 text-warning',
                     isCurrent && 'scale-110',
                     isFocused && 'ring-4 ring-primary/30',
                   )}
@@ -292,6 +307,10 @@ function StepDetail({
     if (focused.status === 'done') { return 'done' as const; }
     if (focused.status === 'in_progress') { return 'in_progress' as const; }
     if (focused.status === 'failed') { return 'rejected' as const; }
+    // Pending step that carries history was previously approved and got
+    // reset by a downstream Request-Update — flag it so the user can tell
+    // it apart from a never-touched step.
+    if ((focused.history ?? []).length > 0) { return 'awaiting_update' as const; }
     return 'pending' as const;
   })();
   const m = meta ?? { name: focused.agent, description: '', inputs: '', outputs: '', artifact: '' };
@@ -383,7 +402,14 @@ function StepDetail({
         )}
       </div>
 
-      <RunGate epic={epic} focused={focused} />
+      <RunGate
+        epic={epic}
+        focused={focused}
+        slashCommand={slashCommand}
+        artifactExists={artifactExists}
+      />
+      <RequestUpdateAction epic={epic} focused={focused} focusedIdx={focusedIdx} />
+      <StepHistory step={focused} />
     </div>
   );
 }
@@ -397,6 +423,202 @@ function DetailLabel({ icon, text }: { icon: React.ReactNode; text: string }) {
   );
 }
 
+function RequestUpdateAction({
+  epic,
+  focused,
+  focusedIdx,
+}: {
+  epic: EpicSummary;
+  focused: EpicStepDetailFull;
+  focusedIdx: number;
+}) {
+  const [open, setOpen] = useState(false);
+  // Only show for steps the run-state machine considers "approved" — that's
+  // what `requestStepUpdate` accepts. A done-from-state.json with no
+  // matching run record can't be rewound by the runner.
+  if (!epic.runId || focused.runStatus !== 'approved') { return null; }
+  // Count downstream approved + in-flight steps so the modal can show the
+  // blast radius accurately.
+  const downstreamCount = epic.stepDetails
+    .slice(focusedIdx + 1)
+    .filter((s) => s.runStatus === 'approved' || s.isCurrentRunStep).length;
+  return (
+    <div className="mt-3 flex items-center justify-between rounded-md border border-dashed border-warning/40 bg-warning/5 px-3 py-2 text-[11px]">
+      <div className="text-muted-foreground">
+        Requirements changed?{' '}
+        <span className="text-foreground/80">Reopen this step</span> to redo it
+        {downstreamCount > 0 && (
+          <> + reset {downstreamCount} downstream</>
+        )}.
+      </div>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex shrink-0 items-center gap-1 rounded-md border border-warning/50 bg-warning/15 px-2 py-1 text-[10.5px] font-semibold text-warning hover:border-warning hover:bg-warning/25"
+      >
+        <RefreshCw className="h-2.5 w-2.5" /> Request update
+      </button>
+      {open && (
+        <RequestUpdateModal
+          agent={focused.agent}
+          runId={epic.runId}
+          stepIdx={focusedIdx}
+          downstreamCount={downstreamCount}
+          onSubmit={(feedback) =>
+            postMessage({
+              type: 'requestStepUpdate',
+              runId: epic.runId!,
+              stepIdx: focusedIdx,
+              feedback,
+            })
+          }
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function StepHistory({ step }: { step: EpicStepDetailFull }) {
+  const [open, setOpen] = useState(false);
+  const entries = step.history ?? [];
+  if (entries.length === 0) { return null; }
+
+  const rejectCount = step.rejectCount ?? 0;
+  const rerunCount = entries.filter((e) => e.kind === 'rerun').length;
+  const lastReject = [...entries].reverse().find((e) => e.kind === 'reject') as
+    | (StepHistoryEntry & { kind: 'reject' })
+    | undefined;
+
+  const summary = [
+    rejectCount > 0 && `rejected ${rejectCount}×`,
+    rerunCount > 0 && `rerun ${rerunCount}×`,
+    !rejectCount && entries.some((e) => e.kind === 'approve') && 'approved',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <div className="mt-3 rounded-md border border-border bg-secondary/20">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] hover:bg-accent/40"
+      >
+        {open ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />}
+        <History className="h-3 w-3 text-muted-foreground" />
+        <span className="font-bold uppercase tracking-wider text-muted-foreground">
+          History
+        </span>
+        <span className="text-muted-foreground/80">· {entries.length} entries</span>
+        {summary && <span className="text-muted-foreground/80">· {summary}</span>}
+        {lastReject?.reason && !open && (
+          <span className="ml-auto truncate font-mono text-[10.5px] text-destructive/80 max-w-[55%]">
+            ↳ {lastReject.reason}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <ol className="border-t border-border/60 px-3 py-2 space-y-1.5 text-[10.5px]">
+          {entries.map((e, i) => (
+            <li key={i} className="flex items-start gap-2">
+              <HistoryIcon kind={e.kind} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-1.5">
+                  <HistoryLabel entry={e} />
+                  <span className="text-[9.5px] text-muted-foreground tabular-nums">
+                    rev {e.revision}
+                  </span>
+                  <span className="ml-auto text-[9.5px] text-muted-foreground/80">
+                    {fmtTime(e.at)}
+                  </span>
+                </div>
+                <HistoryBody entry={e} />
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function HistoryIcon({ kind }: { kind: StepHistoryEntry['kind'] }) {
+  switch (kind) {
+    case 'reject':
+      return <X className="mt-0.5 h-3 w-3 shrink-0 text-destructive" />;
+    case 'rerun':
+      return <RefreshCw className="mt-0.5 h-3 w-3 shrink-0 text-warning" />;
+    case 'auto_review':
+      return <Bot className="mt-0.5 h-3 w-3 shrink-0 text-info" />;
+    case 'approve':
+      return <Check className="mt-0.5 h-3 w-3 shrink-0 text-success" />;
+  }
+}
+
+function HistoryLabel({ entry }: { entry: StepHistoryEntry }) {
+  switch (entry.kind) {
+    case 'reject':
+      return (
+        <span className="font-semibold text-destructive">
+          Rejected
+          {entry.sentBackToIdx !== undefined && (
+            <span className="ml-1 font-normal text-muted-foreground">
+              → step {entry.sentBackToIdx + 1}
+            </span>
+          )}
+        </span>
+      );
+    case 'rerun':
+      return <span className="font-semibold text-warning">Rerun</span>;
+    case 'auto_review':
+      return (
+        <span className={cn('font-semibold', entry.decision === 'pass' ? 'text-success' : 'text-destructive')}>
+          Auto-review {entry.decision === 'pass' ? '✓ pass' : '✕ reject'}
+        </span>
+      );
+    case 'approve':
+      return <span className="font-semibold text-success">Approved</span>;
+  }
+}
+
+function HistoryBody({ entry }: { entry: StepHistoryEntry }) {
+  switch (entry.kind) {
+    case 'reject':
+      return entry.reason ? (
+        <div className="font-mono text-foreground/80">↳ {entry.reason}</div>
+      ) : null;
+    case 'rerun':
+      return entry.feedback ? (
+        <div className="font-mono text-muted-foreground">↳ {entry.feedback}</div>
+      ) : null;
+    case 'auto_review':
+      return (
+        <div className="font-mono text-foreground/80">
+          ↳ {entry.reason}
+        </div>
+      );
+    case 'approve':
+      return null;
+  }
+}
+
+function fmtTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) { return iso; }
+    return d.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
 function DetailValue({ children, empty }: { children: React.ReactNode; empty?: boolean }) {
   return (
     <div className={cn('leading-relaxed', empty ? 'text-muted-foreground italic' : 'text-foreground')}>
@@ -405,8 +627,20 @@ function DetailValue({ children, empty }: { children: React.ReactNode; empty?: b
   );
 }
 
-function RunGate({ epic, focused }: { epic: EpicSummary; focused: EpicStepDetailFull }) {
+function RunGate({
+  epic,
+  focused,
+  slashCommand,
+  artifactExists,
+}: {
+  epic: EpicSummary;
+  focused: EpicStepDetailFull;
+  slashCommand: string | undefined;
+  artifactExists: boolean;
+}) {
   const [rejectOpen, setRejectOpen] = useState(false);
+  const [rerunOpen, setRerunOpen] = useState(false);
+  const [runOpen, setRunOpen] = useState(false);
   if (!epic.runId || !focused.isCurrentRunStep) { return null; }
   const ui = runStatusUi(focused.runStatus);
   if (!ui) { return null; }
@@ -458,6 +692,12 @@ function RunGate({ epic, focused }: { epic: EpicSummary; focused: EpicStepDetail
         </div>
       )}
 
+      {status === 'awaiting_work' && focused.feedback && (
+        <div className="rounded border border-warning/40 bg-warning/10 px-2 py-1 font-mono text-[10.5px] text-warning">
+          ↳ {focused.feedback}
+        </div>
+      )}
+
       {focused.autoReviewVerdict && (
         <div
           className={cn(
@@ -501,12 +741,43 @@ function RunGate({ epic, focused }: { epic: EpicSummary; focused: EpicStepDetail
 
       <div className="flex flex-wrap gap-2">
         {status === 'awaiting_work' && (
-          <GateButton
-            variant="primary"
-            onClick={() => postMessage({ type: 'markStepDone', runId: epic.runId! })}
-          >
-            Mark step done
-          </GateButton>
+          <>
+            {slashCommand && (() => {
+              const isUpdate = artifactExists || !!focused.feedback;
+              return (
+                <GateButton
+                  variant="approve"
+                  onClick={() => {
+                    if (isUpdate) {
+                      // Already-touched step → open modal so the user can
+                      // attach feedback before re-running the agent.
+                      setRunOpen(true);
+                    } else {
+                      // First run on this step (no artifact + no carried
+                      // feedback) — just launch claude with the bare slash
+                      // command. No modal needed; runStepWithFeedback
+                      // produces `${slash} ${id}` when feedback is empty.
+                      postMessage({
+                        type: 'runStepWithFeedback',
+                        runId: epic.runId!,
+                        slashCommand,
+                        feedback: '',
+                      });
+                    }
+                  }}
+                >
+                  <Play className="h-3 w-3" />
+                  {isUpdate ? 'Update with feedback' : 'Run with Claude'}
+                </GateButton>
+              );
+            })()}
+            <GateButton
+              variant="primary"
+              onClick={() => postMessage({ type: 'markStepDone', runId: epic.runId! })}
+            >
+              Mark step done
+            </GateButton>
+          </>
         )}
         {status === 'awaiting_auto_review' && (
           <GateButton
@@ -533,10 +804,7 @@ function RunGate({ epic, focused }: { epic: EpicSummary; focused: EpicStepDetail
           </>
         )}
         {status === 'rejected' && (
-          <GateButton
-            variant="primary"
-            onClick={() => postMessage({ type: 'rerunStep', runId: epic.runId! })}
-          >
+          <GateButton variant="primary" onClick={() => setRerunOpen(true)}>
             Rerun
           </GateButton>
         )}
@@ -548,6 +816,34 @@ function RunGate({ epic, focused }: { epic: EpicSummary; focused: EpicStepDetail
           currentStepIdx={epic.currentStep}
           stepAgents={epic.stepDetails.map((d) => d.agent)}
           onClose={() => setRejectOpen(false)}
+        />
+      )}
+      {rerunOpen && epic.runId && (
+        <RerunModal
+          runId={epic.runId}
+          agent={focused.agent}
+          rejectReason={focused.rejectReason}
+          onSubmit={(feedback) =>
+            postMessage({ type: 'rerunStepInline', runId: epic.runId!, feedback })
+          }
+          onClose={() => setRerunOpen(false)}
+        />
+      )}
+      {runOpen && epic.runId && slashCommand && (
+        <RunWithFeedbackModal
+          agent={focused.agent}
+          runId={epic.runId}
+          slashCommand={slashCommand}
+          carriedFeedback={focused.feedback}
+          onSubmit={(feedback) =>
+            postMessage({
+              type: 'runStepWithFeedback',
+              runId: epic.runId!,
+              slashCommand,
+              feedback,
+            })
+          }
+          onClose={() => setRunOpen(false)}
         />
       )}
     </div>

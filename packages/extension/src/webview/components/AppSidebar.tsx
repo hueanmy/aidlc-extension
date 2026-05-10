@@ -18,6 +18,8 @@ import {
   Sparkles,
   Diamond,
   RefreshCw,
+  Plug,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type {
@@ -27,8 +29,15 @@ import type {
   SlashCommandRef,
   TemplateRef,
   ArtifactPath,
+  McpServerInfo,
 } from '@/lib/types';
 import { RejectModal } from './RejectModal';
+import { ConfirmModal } from './ConfirmModal';
+import { StartRunModal } from './StartRunModal';
+import { RerunModal } from './RerunModal';
+import { RunWithFeedbackModal } from './RunWithFeedbackModal';
+import { SavePresetModal } from './SavePresetModal';
+import { LoadDemoModal } from './LoadDemoModal';
 import { ThemeToggle } from './ThemeToggle';
 import { postMessage, getPersistedUi, setPersistedUi } from '@/lib/bridge';
 
@@ -37,6 +46,7 @@ interface CollapseState {
   slashCommands: boolean;
   workflows: boolean;
   pipelineRuns: boolean;
+  mcpServers: boolean;
 }
 
 interface PersistedUi {
@@ -49,6 +59,7 @@ const DEFAULT_COLLAPSED: CollapseState = {
   slashCommands: true,
   workflows: false,
   pipelineRuns: false,
+  mcpServers: true,
 };
 
 function isRunCollapsed(
@@ -136,7 +147,7 @@ export function AppSidebar({ state }: { state: SidebarState | null }) {
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-3 py-3 space-y-2">
         {!state.hasFolder ? (
-          <EmptyNoFolder />
+          <EmptyNoFolder demoProjectExists={state.demoProjectExists} />
         ) : (
           <>
             <ProjectBar workspaceName={state.workspaceName} configExists={state.configExists} />
@@ -161,7 +172,7 @@ export function AppSidebar({ state }: { state: SidebarState | null }) {
               <>
                 <button
                   type="button"
-                  onClick={() => postMessage({ type: 'startEpic' })}
+                  onClick={() => postMessage({ type: 'requestStartEpic' })}
                   className="flex w-full items-center gap-2 rounded-md bg-primary px-3 py-2 text-xs font-semibold uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90"
                 >
                   <Play className="h-3.5 w-3.5" />
@@ -173,7 +184,8 @@ export function AppSidebar({ state }: { state: SidebarState | null }) {
 
                 <ActiveRunsSection
                   runs={state.activeRuns}
-                  pipelinesCount={state.pipelinesCount}
+                  pipelines={state.pipelines}
+                  runIds={state.runIds}
                   collapsed={collapsed.pipelineRuns}
                   onToggleSection={() => toggleSection('pipelineRuns')}
                   isRunCollapsed={(runId, status) => isRunCollapsed(runId, status, collapsedRuns)}
@@ -202,8 +214,18 @@ export function AppSidebar({ state }: { state: SidebarState | null }) {
             <WorkflowsSection
               builtins={state.builtinTemplates}
               project={state.projectTemplates}
+              configExists={state.configExists}
+              workspaceName={state.workspaceName}
               collapsed={collapsed.workflows}
               onToggle={() => toggleSection('workflows')}
+            />
+
+            <McpServersSection
+              servers={state.mcpServers}
+              loading={state.mcpLoading}
+              error={state.mcpError}
+              collapsed={collapsed.mcpServers}
+              onToggle={() => toggleSection('mcpServers')}
             />
           </>
         )}
@@ -286,7 +308,18 @@ function ProjectBar({
   );
 }
 
-function EmptyNoFolder() {
+function EmptyNoFolder({ demoProjectExists }: { demoProjectExists: boolean }) {
+  const [demoModalOpen, setDemoModalOpen] = useState(false);
+  const onLoadDemo = () => {
+    if (demoProjectExists) {
+      // Pop the inline picker — replaces the VS Code notification chrome
+      // that the host would otherwise show when the dir already exists.
+      setDemoModalOpen(true);
+    } else {
+      // Fresh install — just create + open. No prompt needed.
+      postMessage({ type: 'loadDemoProject' });
+    }
+  };
   return (
     <div className="rounded-md border border-dashed border-border bg-surface/50 p-4 text-center">
       <h3 className="mb-1.5 text-xs font-bold tracking-wide">No project open</h3>
@@ -304,12 +337,18 @@ function EmptyNoFolder() {
       </button>
       <button
         type="button"
-        onClick={() => postMessage({ type: 'loadDemoProject' })}
+        onClick={onLoadDemo}
         className="mt-2 flex w-full items-center gap-2 rounded-md border border-border bg-card/50 px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
         <Beaker className="h-3.5 w-3.5" />
         <span>Load Demo Project</span>
       </button>
+      {demoModalOpen && (
+        <LoadDemoModal
+          onChoose={(mode) => postMessage({ type: 'loadDemoProject', mode })}
+          onClose={() => setDemoModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -469,30 +508,156 @@ function SlashCommandsSection({
   );
 }
 
+function McpServersSection({
+  servers,
+  loading,
+  error,
+  collapsed,
+  onToggle,
+}: {
+  servers: McpServerInfo[] | null;
+  loading: boolean;
+  error: string | null;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  // Show counts in the header so users can glance the connected total
+  // without expanding. servers === null means the list hasn't loaded yet.
+  const total = servers?.length ?? 0;
+  const connected = servers?.filter((s) => s.status === 'connected').length ?? 0;
+  return (
+    <div>
+      <SectionHeader
+        label="MCP servers"
+        collapsed={collapsed}
+        onToggle={onToggle}
+        trailing={
+          <div className="flex items-center gap-1.5">
+            {servers && (
+              <span className="text-[10px] text-muted-foreground">
+                {connected}/{total}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                postMessage({ type: 'refreshMcp' });
+              }}
+              title="Re-run claude mcp list"
+              className="grid h-5 w-5 place-items-center rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+              disabled={loading}
+            >
+              {loading ? (
+                <Loader2 className="h-3 w-3 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3 w-3" />
+              )}
+            </button>
+          </div>
+        }
+      />
+      {!collapsed && (
+        <div className="mt-1.5 space-y-1">
+          {error && (
+            <div className="rounded border-l-2 border-destructive bg-destructive/5 px-2 py-1.5 text-[10px] text-muted-foreground">
+              {error}
+            </div>
+          )}
+          {servers === null && !error && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span>Querying claude mcp list…</span>
+            </div>
+          )}
+          {servers && servers.length === 0 && !error && (
+            <div className="px-2.5 py-1.5 text-[10px] text-muted-foreground">
+              No MCP servers configured.
+            </div>
+          )}
+          {servers?.map((s) => <McpRow key={s.name} server={s} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const MCP_DOT: Record<McpServerInfo['status'], string> = {
+  connected: 'bg-success shadow-[0_0_4px_var(--color-success)]',
+  needs_auth: 'bg-warning',
+  failed: 'bg-destructive',
+  unknown: 'bg-muted-foreground/40',
+};
+
+function McpRow({ server }: { server: McpServerInfo }) {
+  const titleParts = [server.statusText];
+  if (server.transport) { titleParts.push(server.transport); }
+  if (server.endpoint) { titleParts.push(server.endpoint); }
+  return (
+    <div
+      className="flex items-center gap-2 rounded-md border border-border bg-card/50 px-2.5 py-1.5 text-[11px]"
+      title={titleParts.join(' · ')}
+    >
+      <span className={cn('h-1.5 w-1.5 shrink-0 rounded-full', MCP_DOT[server.status])} />
+      <Plug className="h-3 w-3 shrink-0 text-muted-foreground" />
+      <span className="truncate font-medium text-foreground">{server.name}</span>
+      <span className="ml-auto shrink-0 truncate text-[9px] uppercase tracking-wider text-muted-foreground">
+        {server.status === 'needs_auth' ? 'auth' : server.status}
+      </span>
+    </div>
+  );
+}
+
 function WorkflowsSection({
   builtins,
   project,
+  configExists,
+  workspaceName,
   collapsed,
   onToggle,
 }: {
   builtins: TemplateRef[];
   project: TemplateRef[];
+  configExists: boolean;
+  workspaceName: string;
   collapsed: boolean;
   onToggle: () => void;
 }) {
-  if (builtins.length === 0 && project.length === 0) { return null; }
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [pendingApply, setPendingApply] = useState<TemplateRef | null>(null);
+
+  if (builtins.length === 0 && project.length === 0 && !configExists) { return null; }
+
+  const onApplyClick = (template: TemplateRef) => {
+    if (configExists) {
+      setPendingApply(template);
+    } else {
+      postMessage({ type: 'applyTemplate', id: template.id, skipConfirm: true });
+    }
+  };
+
   return (
     <div>
       <SectionHeader label="Workflows" collapsed={collapsed} onToggle={onToggle} />
       {!collapsed && (
         <div className="mt-1.5 space-y-1.5">
+          {configExists && (
+            <button
+              type="button"
+              onClick={() => setSaveOpen(true)}
+              className="flex w-full items-center gap-2 rounded-md border border-dashed border-border px-2.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+            >
+              <Diamond className="h-3 w-3" />
+              <span>Save current as template</span>
+            </button>
+          )}
           {builtins.length > 0 && (
             <>
               <div className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">
                 Common
               </div>
               {builtins.map((t) => (
-                <TemplateRow key={t.id} template={t} builtin />
+                <TemplateRow key={t.id} template={t} builtin onApply={onApplyClick} />
               ))}
             </>
           )}
@@ -502,27 +667,63 @@ function WorkflowsSection({
                 Custom
               </div>
               {project.map((t) => (
-                <TemplateRow key={t.id} template={t} builtin={false} />
+                <TemplateRow key={t.id} template={t} builtin={false} onApply={onApplyClick} />
               ))}
             </>
           )}
         </div>
       )}
+
+      {saveOpen && (
+        <SavePresetModal
+          existingProjectIds={project.map((p) => p.id)}
+          builtinIds={builtins.map((b) => b.id)}
+          defaultId={workspaceName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '')}
+          defaultName={workspaceName}
+          onSubmit={(draft) => postMessage({ type: 'savePresetInline', draft })}
+          onClose={() => setSaveOpen(false)}
+        />
+      )}
+      {pendingApply && (
+        <ConfirmModal
+          title="Apply template"
+          danger
+          confirmLabel="Overwrite & apply"
+          message={
+            <>
+              This project already has <span className="font-mono">.aidlc/workspace.yaml</span>.
+              Overwrite with template <span className="font-mono">{pendingApply.id}</span>?
+            </>
+          }
+          onConfirm={() =>
+            postMessage({ type: 'applyTemplate', id: pendingApply.id, skipConfirm: true })
+          }
+          onClose={() => setPendingApply(null)}
+        />
+      )}
     </div>
   );
 }
 
-function TemplateRow({ template, builtin }: { template: TemplateRef; builtin: boolean }) {
+function TemplateRow({
+  template,
+  builtin,
+  onApply,
+}: {
+  template: TemplateRef;
+  builtin: boolean;
+  onApply: (template: TemplateRef) => void;
+}) {
   const Icon = builtin ? Sparkles : Diamond;
   return (
     <div
       role="button"
       tabIndex={0}
-      onClick={() => postMessage({ type: 'applyTemplate', id: template.id })}
+      onClick={() => onApply(template)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          postMessage({ type: 'applyTemplate', id: template.id });
+          onApply(template);
         }
       }}
       title={`Apply template ${template.id}`}
@@ -539,20 +740,23 @@ function TemplateRow({ template, builtin }: { template: TemplateRef; builtin: bo
 
 function ActiveRunsSection({
   runs,
-  pipelinesCount,
+  pipelines,
+  runIds,
   collapsed,
   onToggleSection,
   isRunCollapsed,
   onToggleRun,
 }: {
   runs: ActiveRun[];
-  pipelinesCount: number;
+  pipelines: SidebarState['pipelines'];
+  runIds: string[];
   collapsed: boolean;
   onToggleSection: () => void;
   isRunCollapsed: (runId: string, status: string) => boolean;
   onToggleRun: (runId: string, status: string) => void;
 }) {
-  const canStart = pipelinesCount > 0;
+  const [startOpen, setStartOpen] = useState(false);
+  const canStart = pipelines.length > 0;
   if (runs.length === 0 && !canStart) { return null; }
 
   return (
@@ -571,7 +775,7 @@ function ActiveRunsSection({
           {canStart && (
             <button
               type="button"
-              onClick={() => postMessage({ type: 'startPipelineRun' })}
+              onClick={() => setStartOpen(true)}
               className="flex w-full items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-primary"
             >
               <Play className="h-3 w-3" />
@@ -580,6 +784,16 @@ function ActiveRunsSection({
             </button>
           )}
         </div>
+      )}
+      {startOpen && (
+        <StartRunModal
+          pipelines={pipelines}
+          existingRunIds={runIds}
+          onStart={(pipelineId, runId) =>
+            postMessage({ type: 'startRunInline', pipelineId, runId })
+          }
+          onClose={() => setStartOpen(false)}
+        />
       )}
     </div>
   );
@@ -603,6 +817,7 @@ function RunCard({
 }) {
   const stepLabel = `${run.currentStepIdx + 1}/${run.totalSteps}: ${run.currentAgent}`;
   const pillCls = STATUS_PILL[run.currentStepStatus] ?? 'bg-muted text-muted-foreground';
+  const [runOpen, setRunOpen] = useState(false);
   return (
     <div className="rounded-md border border-border bg-card/50 px-2.5 py-2">
       <div className="flex items-center gap-1.5">
@@ -649,17 +864,29 @@ function RunCard({
           </div>
 
           {run.currentSlashCommand && (
-            <button
-              type="button"
-              onClick={() =>
-                postMessage({ type: 'copyCommand', command: run.currentSlashCommand })
-              }
-              title="Click to copy — paste into Claude to run this step"
-              className="mt-1.5 flex w-full items-center gap-1.5 rounded bg-primary/10 px-1.5 py-1 font-mono text-[10px] text-primary hover:bg-primary/20"
-            >
-              <span className="flex-1 truncate text-left">{run.currentSlashCommand}</span>
-              <Copy className="h-2.5 w-2.5 opacity-70" />
-            </button>
+            <div className="mt-1.5 flex items-stretch gap-1">
+              <button
+                type="button"
+                onClick={() =>
+                  postMessage({ type: 'copyCommand', command: run.currentSlashCommand })
+                }
+                title="Click to copy — paste into Claude manually if you prefer"
+                className="flex flex-1 items-center gap-1.5 rounded bg-primary/10 px-1.5 py-1 font-mono text-[10px] text-primary hover:bg-primary/20"
+              >
+                <span className="flex-1 truncate text-left">{run.currentSlashCommand}</span>
+                <Copy className="h-2.5 w-2.5 opacity-70" />
+              </button>
+              {run.currentStepStatus === 'awaiting_work' && (
+                <button
+                  type="button"
+                  onClick={() => setRunOpen(true)}
+                  title="Run in Claude with optional feedback for the agent"
+                  className="flex shrink-0 items-center justify-center rounded bg-primary px-2 text-primary-foreground hover:bg-primary/90"
+                >
+                  <Play className="h-3 w-3" />
+                </button>
+              )}
+            </div>
           )}
 
           {run.currentStepStatus === 'rejected' && run.rejectReason && (
@@ -677,6 +904,24 @@ function RunCard({
 
           <RunActions run={run} />
         </>
+      )}
+
+      {runOpen && run.currentSlashCommand && (
+        <RunWithFeedbackModal
+          agent={run.currentAgent}
+          runId={run.runId}
+          slashCommand={run.currentSlashCommand}
+          carriedFeedback={run.feedback}
+          onSubmit={(feedback) =>
+            postMessage({
+              type: 'runStepWithFeedback',
+              runId: run.runId,
+              slashCommand: run.currentSlashCommand,
+              feedback,
+            })
+          }
+          onClose={() => setRunOpen(false)}
+        />
       )}
     </div>
   );
@@ -727,6 +972,8 @@ function ArtifactList({
 
 function RunActions({ run }: { run: ActiveRun }) {
   const [rejectOpen, setRejectOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [rerunOpen, setRerunOpen] = useState(false);
   return (
     <div className="mt-2 flex gap-1">
       {run.currentStepStatus === 'awaiting_work' && (
@@ -759,16 +1006,13 @@ function RunActions({ run }: { run: ActiveRun }) {
         </>
       )}
       {run.currentStepStatus === 'rejected' && (
-        <ActionBtn
-          variant="primary"
-          onClick={() => postMessage({ type: 'rerunStep', runId: run.runId })}
-        >
+        <ActionBtn variant="primary" onClick={() => setRerunOpen(true)}>
           Rerun
         </ActionBtn>
       )}
       <button
         type="button"
-        onClick={() => postMessage({ type: 'deleteRun', runId: run.runId })}
+        onClick={() => setDeleteOpen(true)}
         title="Delete run"
         className="rounded-md border border-border px-2 py-1 text-[10px] text-muted-foreground hover:border-destructive hover:text-destructive"
       >
@@ -780,6 +1024,34 @@ function RunActions({ run }: { run: ActiveRun }) {
           currentStepIdx={run.currentStepIdx}
           stepAgents={run.stepAgents}
           onClose={() => setRejectOpen(false)}
+        />
+      )}
+      {deleteOpen && (
+        <ConfirmModal
+          title="Delete run"
+          danger
+          confirmLabel="Delete"
+          message={
+            <>
+              Delete run <span className="font-mono">{run.runId}</span>? The run state
+              file is removed; produced artifacts on disk are kept.
+            </>
+          }
+          onConfirm={() =>
+            postMessage({ type: 'deleteRun', runId: run.runId, confirmed: true })
+          }
+          onClose={() => setDeleteOpen(false)}
+        />
+      )}
+      {rerunOpen && (
+        <RerunModal
+          runId={run.runId}
+          agent={run.currentAgent}
+          rejectReason={run.rejectReason}
+          onSubmit={(feedback) =>
+            postMessage({ type: 'rerunStepInline', runId: run.runId, feedback })
+          }
+          onClose={() => setRerunOpen(false)}
         />
       )}
     </div>

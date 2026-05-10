@@ -13,8 +13,11 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as os from 'os';
 
 import * as fs from 'fs';
+
+const DEMO_DIR_NAME = 'aidlc-demo-project';
 
 import { readYaml } from './yamlIO';
 import {
@@ -29,7 +32,15 @@ import type { PipelineConfig } from '@aidlc/core';
 import { listEpics } from './epicsList';
 import type { PresetStore } from './presetStore';
 import { themeManager } from './themeManager';
-import { rejectStepInlineCommand } from './runCommands';
+import { loadMcpServers, type McpServerInfo } from './mcpServers';
+import { pickAndReadTextFile } from './pickAndReadTextFile';
+import {
+  rejectStepInlineCommand,
+  rerunStepInlineCommand,
+  requestStepUpdateInlineCommand,
+  startPipelineRunInlineCommand,
+} from './runCommands';
+import { WorkspaceWebview } from './workspaceWebview';
 
 // VS Code reuses output channels by name, so this resolves to the same
 // channel created in extension.ts activate().
@@ -62,6 +73,7 @@ interface ActiveRun {
   currentStepStatus: string;
   revision: number;
   rejectReason?: string;
+  feedback?: string;
   /** Files this step is expected to produce (resolved from template + context). */
   produces: ArtifactPath[];
   /** Files this step needs from upstream (already-produced gate inputs). */
@@ -72,6 +84,12 @@ interface ActiveRun {
    * command targets this agent — the user just sees the agent id then.
    */
   currentSlashCommand?: string;
+}
+
+interface PipelineRef {
+  id: string;
+  stepCount: number;
+  onFailure: 'stop' | 'continue';
 }
 
 interface SidebarState {
@@ -90,9 +108,34 @@ interface SidebarState {
   projectTemplates: TemplateRef[];
   /** Pipeline runs with status === 'running'. */
   activeRuns: ActiveRun[];
+  /** Lightweight pipeline list for the inline Start-Run modal. */
+  pipelines: PipelineRef[];
+  /** All existing run ids (any status). */
+  runIds: string[];
+  /** True when ~/aidlc-demo-project already exists — surfaced so the
+   * sidebar can pop an inline "re-seed / open-as-is / cancel" modal
+   * instead of letting the host show a VS Code notification. */
+  demoProjectExists: boolean;
+  /** MCP servers Claude is currently connected to — null while loading
+   * (the CLI runs a health check that takes several seconds), [] when
+   * none are configured. */
+  mcpServers: McpServerInfo[] | null;
+  /** True while `claude mcp list` is in flight — the section shows a
+   * spinner instead of the empty-list message. */
+  mcpLoading: boolean;
+  /** Surfaced from the spawn so the user knows why the list is missing
+   * (claude not on PATH, timeout, etc.). */
+  mcpError: string | null;
 }
 
-function buildState(presetStore: PresetStore | null): SidebarState {
+interface McpSnapshot {
+  servers: McpServerInfo[] | null;
+  loading: boolean;
+  error: string | null;
+}
+
+function buildState(presetStore: PresetStore | null, mcp: McpSnapshot): SidebarState {
+  const demoProjectExists = fs.existsSync(path.join(os.homedir(), DEMO_DIR_NAME));
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (!folder) {
     return {
@@ -104,6 +147,11 @@ function buildState(presetStore: PresetStore | null): SidebarState {
       slashCommands: [],
       builtinTemplates: [], projectTemplates: [],
       activeRuns: [],
+      pipelines: [], runIds: [],
+      demoProjectExists,
+      mcpServers: mcp.servers,
+      mcpLoading: mcp.loading,
+      mcpError: mcp.error,
     };
   }
 
@@ -136,6 +184,7 @@ function buildState(presetStore: PresetStore | null): SidebarState {
   // Active pipeline runs live in .aidlc/runs/ and are independent of the
   // workspace doc — surface them whenever the folder is open.
   const activeRuns = listActiveRuns(root);
+  const runIds = listAllRunIds(root);
 
   if (!doc) {
     return {
@@ -149,8 +198,20 @@ function buildState(presetStore: PresetStore | null): SidebarState {
       slashCommands: [],
       builtinTemplates, projectTemplates,
       activeRuns,
+      pipelines: [],
+      runIds,
+      demoProjectExists,
+      mcpServers: mcp.servers,
+      mcpLoading: mcp.loading,
+      mcpError: mcp.error,
     };
   }
+
+  const pipelines: PipelineRef[] = (doc.pipelines as PipelineConfig[]).map((p) => ({
+    id: String(p.id),
+    stepCount: Array.isArray(p.steps) ? p.steps.length : 0,
+    onFailure: p.on_failure === 'continue' ? 'continue' : 'stop',
+  }));
 
   return {
     hasFolder: true,
@@ -177,7 +238,21 @@ function buildState(presetStore: PresetStore | null): SidebarState {
     builtinTemplates,
     projectTemplates,
     activeRuns,
+    pipelines,
+    runIds,
+    demoProjectExists,
+    mcpServers: mcp.servers,
+    mcpLoading: mcp.loading,
+    mcpError: mcp.error,
   };
+}
+
+function listAllRunIds(root: string): string[] {
+  try {
+    return RunStateStore.list(root).map((r) => r.runId);
+  } catch {
+    return [];
+  }
 }
 
 function listActiveRuns(root: string): ActiveRun[] {
@@ -222,6 +297,7 @@ function listActiveRuns(root: string): ActiveRun[] {
           currentStepStatus: step?.status ?? '',
           revision: step?.revision ?? 1,
           rejectReason: step?.rejectReason,
+          feedback: step?.feedback,
           produces: norm
             ? norm.produces.map((p) => resolveArtifact(root, p, r.context))
             : [],
@@ -269,6 +345,12 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'aidlcSidebar';
   private view: vscode.WebviewView | undefined;
 
+  // MCP list is loaded lazily via `claude mcp list`; the CLI runs a health
+  // check that takes several seconds so we cache the snapshot and let the
+  // user trigger refreshes from the UI.
+  private mcp: McpSnapshot = { servers: null, loading: false, error: null };
+  private mcpLoadPromise: Promise<void> | null = null;
+
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly presetStore: PresetStore | null = null,
@@ -290,11 +372,39 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
     const themeReg = themeManager.register(view.webview);
     view.onDidDispose(() => themeReg.dispose());
     this.refresh();
+    // First-time MCP load happens once the panel is up — kicks off the
+    // spawn and re-posts state when the result lands.
+    void this.loadMcp();
   }
 
   refresh(): void {
     if (!this.view) { return; }
-    void this.view.webview.postMessage({ type: 'state', state: buildState(this.presetStore) });
+    void this.view.webview.postMessage({
+      type: 'state',
+      state: buildState(this.presetStore, this.mcp),
+    });
+  }
+
+  private async loadMcp(): Promise<void> {
+    if (this.mcpLoadPromise) { return this.mcpLoadPromise; }
+    this.mcp = { servers: this.mcp.servers, loading: true, error: null };
+    this.refresh();
+    this.mcpLoadPromise = (async () => {
+      try {
+        const result = await loadMcpServers();
+        this.mcp = { servers: result.servers, loading: false, error: result.error };
+      } catch (e) {
+        this.mcp = {
+          servers: this.mcp.servers,
+          loading: false,
+          error: e instanceof Error ? e.message : String(e),
+        };
+      } finally {
+        this.refresh();
+        this.mcpLoadPromise = null;
+      }
+    })();
+    return this.mcpLoadPromise;
   }
 
   private async handleMessage(msg: { type: string; [k: string]: unknown }): Promise<void> {
@@ -340,11 +450,20 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       case 'init':
         await vscode.commands.executeCommand('aidlc.initWorkspace');
         return;
-      case 'loadDemoProject':
-        await vscode.commands.executeCommand('aidlc.loadDemoProject');
+      case 'loadDemoProject': {
+        // mode is set by the React modal so the host skips the VS Code
+        // notification — undefined falls back to the legacy prompt.
+        const mode = msg.mode === 'reseed' || msg.mode === 'open-as-is'
+          ? msg.mode
+          : undefined;
+        await vscode.commands.executeCommand('aidlc.loadDemoProject', mode);
         return;
+      }
       case 'startEpic':
         await vscode.commands.executeCommand('aidlc.startEpic');
+        return;
+      case 'requestStartEpic':
+        WorkspaceWebview.triggerStartEpic(this.extensionUri);
         return;
       case 'openEpicsList':
         await vscode.commands.executeCommand('aidlc.openEpicsList');
@@ -367,7 +486,45 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       case 'applyTemplate': {
         const id = String(msg.id ?? '');
         if (!id) { return; }
-        await vscode.commands.executeCommand('aidlc.applyPreset', id);
+        await vscode.commands.executeCommand(
+          'aidlc.applyPreset',
+          id,
+          msg.skipConfirm === true,
+        );
+        return;
+      }
+      case 'savePresetInline': {
+        const draft = msg.draft;
+        if (!draft || typeof draft !== 'object') { return; }
+        await vscode.commands.executeCommand('aidlc.savePresetInline', draft);
+        return;
+      }
+      case 'rerunStepInline': {
+        const runId = String(msg.runId ?? '');
+        const feedback = String(msg.feedback ?? '');
+        if (!runId) { return; }
+        await rerunStepInlineCommand(runId, feedback);
+        return;
+      }
+      case 'runStepWithFeedback': {
+        const slash = String(msg.slashCommand ?? '');
+        const runId = String(msg.runId ?? '');
+        const feedback = String(msg.feedback ?? '');
+        if (!slash || !runId) { return; }
+        await vscode.commands.executeCommand(
+          'aidlc.runStepWithFeedback',
+          slash,
+          runId,
+          feedback,
+        );
+        return;
+      }
+      case 'requestStepUpdate': {
+        const runId = String(msg.runId ?? '');
+        const stepIdx = Number(msg.stepIdx);
+        const feedback = String(msg.feedback ?? '');
+        if (!runId || !Number.isInteger(stepIdx)) { return; }
+        await requestStepUpdateInlineCommand(runId, stepIdx, feedback);
         return;
       }
       case 'startPipelineRun':
@@ -378,11 +535,19 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       case 'rejectStep':
       case 'rerunStep':
       case 'runAutoReview':
-      case 'openRunState':
-      case 'deleteRun': {
+      case 'openRunState': {
         const runId = String(msg.runId ?? '');
         const cmd = `aidlc.${msg.type}`;
         await vscode.commands.executeCommand(cmd, runId || undefined);
+        return;
+      }
+      case 'deleteRun': {
+        const runId = String(msg.runId ?? '');
+        await vscode.commands.executeCommand(
+          'aidlc.deleteRun',
+          runId || undefined,
+          msg.confirmed === true,
+        );
         return;
       }
       case 'rejectStepInline': {
@@ -391,6 +556,13 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
         const targetIdx = Number(msg.targetIdx);
         if (!runId || !Number.isInteger(targetIdx)) { return; }
         await rejectStepInlineCommand(runId, reason, targetIdx);
+        return;
+      }
+      case 'startRunInline': {
+        const pipelineId = String(msg.pipelineId ?? '');
+        const runId = String(msg.runId ?? '');
+        if (!pipelineId || !runId) { return; }
+        await startPipelineRunInlineCommand(pipelineId, runId);
         return;
       }
       case 'openArtifact': {
@@ -422,6 +594,16 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       case 'refresh':
         this.refresh();
         return;
+      case 'refreshMcp':
+        void this.loadMcp();
+        return;
+      case 'pickAndReadFile': {
+        const requestId = String(msg.requestId ?? '');
+        if (!requestId) { return; }
+        const reply = await pickAndReadTextFile(requestId);
+        void this.view?.webview.postMessage({ type: 'pickAndReadFile:reply', ...reply });
+        return;
+      }
     }
   }
 
@@ -432,7 +614,7 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
       vscode.Uri.joinPath(this.extensionUri, 'media', 'icon.svg'),
     ).toString();
     const version = readExtensionVersion(this.extensionUri.fsPath);
-    const initialState = buildState(this.presetStore);
+    const initialState = buildState(this.presetStore, this.mcp);
     const initialTheme = themeManager.current;
 
     const assetsRoot = vscode.Uri.joinPath(this.extensionUri, 'out', 'webviews');

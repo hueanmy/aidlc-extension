@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { WorkspaceState, EpicSummary, EpicFilter } from '@/lib/types';
 import { EpicCard } from './EpicCard';
-import { postMessage } from '@/lib/bridge';
+import { StartEpicModal } from './StartEpicModal';
+import { postMessage, onHostMessage } from '@/lib/bridge';
 
 const FILTERS: { id: EpicFilter; label: string }[] = [
   { id: 'all', label: 'All' },
@@ -20,6 +21,15 @@ function matches(epic: EpicSummary, filter: EpicFilter): boolean {
 
 export function EpicsView({ state }: { state: WorkspaceState }) {
   const [filter, setFilter] = useState<EpicFilter>('all');
+  const [startEpicOpen, setStartEpicOpen] = useState(false);
+
+  useEffect(() => {
+    return onHostMessage((msg) => {
+      if (msg.type === 'triggerStartEpic') {
+        setStartEpicOpen(true);
+      }
+    });
+  }, []);
 
   const counts = useMemo(() => {
     const out: Record<EpicFilter, number> = {
@@ -53,7 +63,7 @@ export function EpicsView({ state }: { state: WorkspaceState }) {
         </div>
         <button
           type="button"
-          onClick={() => postMessage({ type: 'startEpic' })}
+          onClick={() => setStartEpicOpen(true)}
           className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3.5 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
         >
           <Plus className="h-3.5 w-3.5" />
@@ -102,6 +112,18 @@ export function EpicsView({ state }: { state: WorkspaceState }) {
             />
           ))}
         </div>
+      )}
+
+      {startEpicOpen && (
+        <StartEpicModal
+          pipelines={state.pipelines}
+          agents={state.agents}
+          agentMeta={state.agentMeta}
+          nextEpicId={state.nextEpicId}
+          existingEpicIds={state.existingEpicIds}
+          onSubmit={(draft) => postMessage({ type: 'startEpicInline', draft })}
+          onClose={() => setStartEpicOpen(false)}
+        />
       )}
     </div>
   );

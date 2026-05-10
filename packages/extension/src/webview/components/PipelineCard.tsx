@@ -2,6 +2,7 @@ import { useState } from 'react';
 import {
   Play,
   Plus,
+  Pencil,
   X,
   ArrowUp,
   ArrowDown,
@@ -10,13 +11,41 @@ import {
   User,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { PipelineSummary, PipelineStepSummary } from '@/lib/types';
+import type { PipelineSummary, PipelineStepSummary, AgentSummary } from '@/lib/types';
 import { postMessage } from '@/lib/bridge';
+import { ConfirmModal } from './ConfirmModal';
+import { StepPickerModal } from './StepPickerModal';
+import { StartRunModal } from './StartRunModal';
+import { StepConfigModal } from './StepConfigModal';
+import { PipelineModal, type PipelineDraft } from './PipelineModal';
 
-export function PipelineCard({ pipeline }: { pipeline: PipelineSummary }) {
+export function PipelineCard({
+  pipeline,
+  agents,
+  runIds,
+}: {
+  pipeline: PipelineSummary;
+  agents: AgentSummary[];
+  runIds: string[];
+}) {
   const total = pipeline.steps.length;
   const [dragSrc, setDragSrc] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [runOpen, setRunOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+
+  const initialDraft: PipelineDraft = {
+    id: pipeline.id,
+    on_failure: pipeline.on_failure,
+    steps: pipeline.steps.map((s) => ({
+      agent: s.agent,
+      human_review: s.human_review,
+      auto_review: s.auto_review,
+      auto_review_runner: s.auto_review_runner,
+    })),
+  };
   return (
     <div className="rounded-lg border border-border bg-card p-3">
       <div className="flex items-center gap-2 border-b border-border pb-2">
@@ -25,7 +54,7 @@ export function PipelineCard({ pipeline }: { pipeline: PipelineSummary }) {
         <div className="flex-1" />
         <button
           type="button"
-          onClick={() => postMessage({ type: 'runPipeline', pipelineId: pipeline.id })}
+          onClick={() => setRunOpen(true)}
           title="Start a pipeline run for this workflow"
           className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary hover:border-primary/60 hover:bg-primary/25"
         >
@@ -47,7 +76,15 @@ export function PipelineCard({ pipeline }: { pipeline: PipelineSummary }) {
         </button>
         <button
           type="button"
-          onClick={() => postMessage({ type: 'deletePipeline', id: pipeline.id })}
+          onClick={() => setEditOpen(true)}
+          title="Edit workflow"
+          className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <Pencil className="h-3 w-3" />
+        </button>
+        <button
+          type="button"
+          onClick={() => setDeleteOpen(true)}
           title="Delete workflow"
           className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
         >
@@ -89,13 +126,71 @@ export function PipelineCard({ pipeline }: { pipeline: PipelineSummary }) {
         ))}
         <button
           type="button"
-          onClick={() => postMessage({ type: 'addStepToPipeline', pipelineId: pipeline.id })}
+          onClick={() => setPickerOpen(true)}
           title="Append a step to this workflow"
           className="ml-1 grid h-8 w-8 shrink-0 place-items-center rounded-full border-2 border-dashed border-primary/40 bg-primary/5 text-primary transition-all hover:scale-110 hover:border-primary/70 hover:border-solid hover:bg-primary/15"
         >
           <Plus className="h-4 w-4" />
         </button>
       </div>
+
+      {deleteOpen && (
+        <ConfirmModal
+          title="Delete workflow"
+          danger
+          confirmLabel="Delete"
+          message={
+            <>
+              Delete workflow <span className="font-mono">{pipeline.id}</span> from{' '}
+              <span className="font-mono">workspace.yaml</span>? Existing runs are kept.
+            </>
+          }
+          onConfirm={() =>
+            postMessage({ type: 'deletePipeline', id: pipeline.id, confirmed: true })
+          }
+          onClose={() => setDeleteOpen(false)}
+        />
+      )}
+      {pickerOpen && (
+        <StepPickerModal
+          pipelineId={pipeline.id}
+          agents={agents}
+          existingAgentIds={pipeline.steps.map((s) => s.agent)}
+          onPick={(agentId) =>
+            postMessage({ type: 'addStepToPipeline', pipelineId: pipeline.id, agentId })
+          }
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
+      {runOpen && (
+        <StartRunModal
+          pipelines={[
+            {
+              id: pipeline.id,
+              stepCount: pipeline.steps.length,
+              onFailure: pipeline.on_failure,
+            },
+          ]}
+          preselectedPipelineId={pipeline.id}
+          existingRunIds={runIds}
+          onStart={(pipelineId, runId) =>
+            postMessage({ type: 'startRunInline', pipelineId, runId })
+          }
+          onClose={() => setRunOpen(false)}
+        />
+      )}
+      {editOpen && (
+        <PipelineModal
+          mode="edit"
+          agents={agents}
+          existingPipelineIds={[]}
+          initial={initialDraft}
+          onSubmit={(draft) =>
+            postMessage({ type: 'editPipelineInline', id: pipeline.id, draft })
+          }
+          onClose={() => setEditOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -125,6 +220,7 @@ function FlowNode({
 }) {
   const requires = step.requires.length;
   const produces = step.produces.length;
+  const [configOpen, setConfigOpen] = useState(false);
   return (
     <>
       <div
@@ -162,7 +258,7 @@ function FlowNode({
           <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
             <NodeIcon
               title="Configure step (human review, auto review, requires, produces)"
-              onClick={() => postMessage({ type: 'editStepConfig', pipelineId, idx })}
+              onClick={() => setConfigOpen(true)}
             >
               <Settings className="h-2.5 w-2.5" />
             </NodeIcon>
@@ -237,6 +333,17 @@ function FlowNode({
             className="absolute -right-px top-1/2 -translate-y-1/2 border-y-[5px] border-l-[7px] border-y-transparent border-l-primary/45"
           />
         </div>
+      )}
+      {configOpen && (
+        <StepConfigModal
+          pipelineId={pipelineId}
+          idx={idx}
+          step={step}
+          onSubmit={(config) =>
+            postMessage({ type: 'editStepConfig', pipelineId, idx, config })
+          }
+          onClose={() => setConfigOpen(false)}
+        />
       )}
     </>
   );

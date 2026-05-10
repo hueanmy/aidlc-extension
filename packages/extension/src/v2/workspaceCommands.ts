@@ -30,6 +30,7 @@ import { WorkspaceWebview } from './workspaceWebview';
 import { PresetStore } from './presetStore';
 import {
   savePresetCommand,
+  savePresetInlineCommand,
   applyPresetCommand,
   deletePresetCommand,
 } from './presetWizards';
@@ -37,6 +38,7 @@ import { loadSdlcPreset } from './builtinPresets';
 import { startEpicCommand } from './epicWizard';
 import { insertDemoEpicCommand } from './demoEpic';
 import { loadDemoProjectCommand } from './demoProject';
+import { migrateEpicStateFiles } from './epicsList';
 import {
   startPipelineRunCommand,
   markStepDoneCommand,
@@ -134,18 +136,94 @@ export function registerV2WorkspaceCommands(
     () => savePresetCommand(presetStore),
   );
 
+  const savePresetInlineCmd = vscode.commands.registerCommand(
+    'aidlc.savePresetInline',
+    (draft?: unknown) => {
+      if (!draft || typeof draft !== 'object') { return; }
+      const d = draft as Record<string, unknown>;
+      void savePresetInlineCommand(presetStore, {
+        id: typeof d.id === 'string' ? d.id : '',
+        name: typeof d.name === 'string' ? d.name : '',
+        description: typeof d.description === 'string' ? d.description : '',
+      });
+    },
+  );
+
   const applyPresetCmd = vscode.commands.registerCommand(
     'aidlc.applyPreset',
-    (presetId?: unknown) =>
+    (presetId?: unknown, skipConfirm?: unknown) =>
       applyPresetCommand(
         presetStore,
         typeof presetId === 'string' ? presetId : undefined,
+        skipConfirm === true,
       ),
   );
 
   const deletePresetCmd = vscode.commands.registerCommand(
     'aidlc.deletePreset',
     () => deletePresetCommand(presetStore),
+  );
+
+  const migrateEpicsCmd = vscode.commands.registerCommand(
+    'aidlc.migrateEpics',
+    async () => {
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!root) {
+        void vscode.window.showWarningMessage('AIDLC: open a project folder first.');
+        return;
+      }
+      const report = migrateEpicStateFiles(root);
+      const parts: string[] = [];
+      if (report.migrated.length > 0) {
+        parts.push(`migrated ${report.migrated.length}`);
+      }
+      if (report.backfilled.length > 0) {
+        parts.push(`backfilled ${report.backfilled.length}`);
+      }
+      if (report.skipped.length > 0) {
+        parts.push(`skipped ${report.skipped.length}`);
+      }
+      if (report.errors.length > 0) {
+        parts.push(`${report.errors.length} error(s)`);
+      }
+      if (parts.length === 0) {
+        void vscode.window.showInformationMessage('AIDLC: no epics to migrate.');
+        return;
+      }
+      const summary = `AIDLC migration — ${parts.join(', ')}.`;
+
+      // Group skipped epics by their reason so users see the
+      // actionable cause instead of a bare count. e.g. "5 skipped:
+      // pipeline 'dreem-sdlc-full' not found in workspace.yaml
+      // (DRM-2090, DRM-2147, …)".
+      const blockers: string[] = [];
+      const skippedByReason = new Map<string, string[]>();
+      for (const s of report.skipped) {
+        const list = skippedByReason.get(s.reason) ?? [];
+        list.push(s.epicId);
+        skippedByReason.set(s.reason, list);
+      }
+      for (const [reason, ids] of skippedByReason) {
+        const head = ids.slice(0, 3).join(', ');
+        const more = ids.length > 3 ? `, +${ids.length - 3} more` : '';
+        blockers.push(`${reason} (${head}${more})`);
+      }
+      if (report.errors.length > 0) {
+        blockers.push(
+          `${report.errors[0].epicId}: ${report.errors[0].reason}`,
+        );
+      }
+
+      if (blockers.length > 0) {
+        const detail = blockers.join('\n• ');
+        void vscode.window.showWarningMessage(
+          `${summary}\n• ${detail}`,
+          { modal: false },
+        );
+      } else {
+        void vscode.window.showInformationMessage(summary);
+      }
+    },
   );
 
   const startEpicCmd = vscode.commands.registerCommand(
@@ -165,7 +243,10 @@ export function registerV2WorkspaceCommands(
 
   const loadDemoProjectCmd = vscode.commands.registerCommand(
     'aidlc.loadDemoProject',
-    () => loadDemoProjectCommand(),
+    (mode?: unknown) =>
+      loadDemoProjectCommand(
+        mode === 'reseed' || mode === 'open-as-is' ? mode : undefined,
+      ),
   );
 
   // Reuses an existing terminal if one is open so the user doesn't end up
@@ -178,6 +259,89 @@ export function registerV2WorkspaceCommands(
   // actually runs, leaving the user staring at the rc-script prompt
   // wondering what happened. Shell integration's onDidChange fires
   // exactly when the prompt is ready, so executeCommand lands cleanly.
+  /**
+   * Send a slash command + carried feedback to the Claude REPL. Used by
+   * the "Update with feedback" button on awaiting_work steps that have a
+   * non-empty `feedback` field (cascade reject blame OR rerun feedback).
+   *
+   * Two paths:
+   * 1. AIDLC · Claude terminal already exists → assume `claude` is running
+   *    in the REPL (most common case — we created it earlier and the user
+   *    didn't kill it). `terminal.sendText(prompt, false)` types the
+   *    prompt into the REPL with NO trailing newline so the user reviews
+   *    and presses Enter, keeping them in control. If claude actually
+   *    exited (rare), the prompt lands at the shell prompt and the user
+   *    sees a shell error — recovery is to run `claude` and re-click.
+   * 2. No terminal yet → create one and launch `claude '<prompt>'` as the
+   *    one-shot initial command. Claude takes the prompt as its first
+   *    user message, so the slash command processes immediately on boot.
+   *    Single-quote-escaped via the standard `'\''` POSIX trick so quoted
+   *    feedback bodies survive intact.
+   *
+   * Avoids the previous "wait 2.2s then sendText" approach that races
+   * against claude's boot — typing slash commands into a shell prompt that
+   * doesn't recognize them produces a confusing error.
+   */
+  const runWithFeedbackCmd = vscode.commands.registerCommand(
+    'aidlc.runStepWithFeedback',
+    (slashCommand?: unknown, runId?: unknown, feedback?: unknown) => {
+      const slash = typeof slashCommand === 'string' ? slashCommand.trim() : '';
+      const id = typeof runId === 'string' ? runId.trim() : '';
+      const fb = typeof feedback === 'string' ? feedback.trim() : '';
+      if (!slash || !id) { return; }
+
+      const prompt = fb
+        ? `${slash} ${id} — Update artifact per feedback: "${fb.replace(/"/g, '\\"')}"`
+        : `${slash} ${id}`;
+
+      const TERMINAL_NAME = 'AIDLC · Claude';
+      const existing = vscode.window.terminals.find((t) => t.name === TERMINAL_NAME);
+      if (existing) {
+        existing.show(false);
+        existing.sendText(prompt, false);
+        return;
+      }
+
+      // Fresh terminal — bake the prompt into the claude launch command.
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const cwd = root && fs.existsSync(root) ? root : undefined;
+      const terminal = vscode.window.createTerminal({
+        name: TERMINAL_NAME,
+        cwd,
+        iconPath: new vscode.ThemeIcon('rocket'),
+        location: vscode.TerminalLocation.Panel,
+        env: {
+          DISABLE_AUTO_UPDATE: 'true',
+          DISABLE_UPDATE_PROMPT: 'true',
+        },
+      });
+      terminal.show(false);
+
+      // POSIX single-quote escape: the only risky character in single-
+      // quoted strings is the single quote itself, replaced with '\''.
+      const escaped = prompt.replace(/'/g, "'\\''");
+      const oneShot = `claude '${escaped}'`;
+
+      let sent = false;
+      const integ = vscode.window.onDidChangeTerminalShellIntegration((e) => {
+        if (e.terminal === terminal && e.shellIntegration && !sent) {
+          sent = true;
+          e.shellIntegration.executeCommand(oneShot);
+          integ.dispose();
+        }
+      });
+      // Fallback for shells without integration — same 2s window as
+      // openClaudeTerminal. addNewLine=true so claude actually launches.
+      setTimeout(() => {
+        if (!sent) {
+          sent = true;
+          terminal.sendText(oneShot, true);
+          integ.dispose();
+        }
+      }, 2000);
+    },
+  );
+
   const openClaudeTerminalCmd = vscode.commands.registerCommand(
     'aidlc.openClaudeTerminal',
     () => {
@@ -262,7 +426,11 @@ export function registerV2WorkspaceCommands(
   );
   const deleteRunCmd = vscode.commands.registerCommand(
     'aidlc.deleteRun',
-    (runId?: unknown) => deleteRunCommand(typeof runId === 'string' ? runId : undefined),
+    (runId?: unknown, skipConfirm?: unknown) =>
+      deleteRunCommand(
+        typeof runId === 'string' ? runId : undefined,
+        skipConfirm === true,
+      ),
   );
 
   return {
@@ -274,9 +442,12 @@ export function registerV2WorkspaceCommands(
       addPipelineCmd,
       openBuilderCmd,
       openClaudeTerminalCmd,
+      runWithFeedbackCmd,
       savePresetCmd,
+      savePresetInlineCmd,
       applyPresetCmd,
       deletePresetCmd,
+      migrateEpicsCmd,
       startEpicCmd,
       openEpicsListCmd,
       insertDemoEpicCmd,
