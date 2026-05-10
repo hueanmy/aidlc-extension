@@ -69,7 +69,7 @@ export async function loadDemoProjectCommand(): Promise<void> {
  * (e.g. their own scratch notes in the demo folder) untouched.
  */
 function wipeDemoData(root: string): void {
-  for (const sub of ['.aidlc', 'docs/epics']) {
+  for (const sub of ['.aidlc', 'docs/epics', '.claude/commands']) {
     const p = path.join(root, sub);
     if (fs.existsSync(p)) { fs.rmSync(p, { recursive: true, force: true }); }
   }
@@ -85,6 +85,74 @@ function seedDemo(root: string): void {
   writeFile(path.join(root, '.aidlc', 'skills', 'demo-review-skill.md'), REVIEW_SKILL);
   writeFile(path.join(root, '.aidlc', 'skills', 'demo-release-skill.md'), RELEASE_SKILL);
   writeFile(path.join(root, '.aidlc', 'validators', 'demo-validator.js'), DEMO_VALIDATOR);
+
+  // Claude Code reads slash commands from `.claude/commands/<name>.md`, NOT
+  // from workspace.yaml. Mirror each AIDLC agent there so `/demo-plan ARG`
+  // etc. actually work in the Claude CLI for this demo project. Each
+  // command inlines the skill body + AIDLC-specific task instructions
+  // (read state.json / inputs.json, address carried feedback, write the
+  // expected artifact, tell the user to mark step done).
+  writeFile(
+    path.join(root, '.claude', 'commands', 'demo-plan.md'),
+    claudeCommand({
+      agentLabel: 'Plan',
+      description: 'Draft the PRD for the epic',
+      artifact: 'PRD.md',
+      stepIdx: 0,
+      skillBody: PLAN_SKILL,
+    }),
+  );
+  writeFile(
+    path.join(root, '.claude', 'commands', 'demo-design.md'),
+    claudeCommand({
+      agentLabel: 'Design',
+      description: 'Author the tech design from the PRD',
+      artifact: 'TECH-DESIGN.md',
+      stepIdx: 1,
+      skillBody: DESIGN_SKILL,
+    }),
+  );
+  writeFile(
+    path.join(root, '.claude', 'commands', 'demo-implement.md'),
+    claudeCommand({
+      agentLabel: 'Implement',
+      description: 'Land the code change against the design',
+      artifact: 'CHANGES.md',
+      stepIdx: 2,
+      skillBody: IMPLEMENT_SKILL,
+    }),
+  );
+  writeFile(
+    path.join(root, '.claude', 'commands', 'demo-review.md'),
+    claudeCommand({
+      agentLabel: 'Review',
+      description: 'Review the diff for bugs, security, performance',
+      artifact: 'REVIEW.md',
+      stepIdx: 3,
+      skillBody: REVIEW_SKILL,
+    }),
+  );
+  writeFile(
+    path.join(root, '.claude', 'commands', 'demo-release.md'),
+    claudeCommand({
+      agentLabel: 'Release',
+      description: 'Compose release notes for the change',
+      artifact: 'RELEASE.md',
+      stepIdx: 4,
+      skillBody: RELEASE_SKILL,
+    }),
+  );
+  writeFile(
+    path.join(root, '.claude', 'commands', 'hello.md'),
+    `---
+description: Greet the user and confirm the AIDLC demo runner is wired up
+---
+
+${HELLO_SKILL}
+
+Reply with a friendly greeting and confirm the demo project is wired correctly. Mention the epic key the user passed: \`$ARGUMENTS\`.
+`,
+  );
 
   // 6 demo epics, each park at a different gate state
   seedEpic(root, 'DEMO-001-MARK-DONE', {
@@ -443,6 +511,64 @@ function seedRichEpic(root: string, epicId: string, opts: SeedRichEpicOpts): voi
       artifactStub(epicId, opts.artifactProducedAt),
     );
   }
+}
+
+/**
+ * Build a Claude Code slash-command markdown file from one of the demo
+ * agents. The result lives at `.claude/commands/<name>.md` and is what
+ * actually makes `/demo-plan EPIC-ID` work in the Claude REPL — Claude
+ * Code reads from `.claude/commands/`, not from `.aidlc/workspace.yaml`.
+ *
+ * The body inlines the skill prompt + AIDLC-specific task wiring so the
+ * agent knows to:
+ *   - read the epic's state.json / inputs.json
+ *   - honour any carried feedback from a prior reject (the run's history)
+ *   - write the expected artifact under docs/epics/<id>/artifacts/
+ *   - tell the user to click "Mark step done" when finished
+ *
+ * `$ARGUMENTS` is Claude's positional-argument placeholder — whatever
+ * the user passes to the slash command (typically the epic id).
+ */
+function claudeCommand(opts: {
+  agentLabel: string;
+  description: string;
+  artifact: string;
+  stepIdx: number;
+  skillBody: string;
+}): string {
+  return `---
+description: ${opts.description}
+---
+
+You are the **${opts.agentLabel}** agent for the AIDLC demo pipeline.
+
+## Skill
+
+${opts.skillBody.trim()}
+
+## Task
+
+The user invoked you with epic id \`$ARGUMENTS\`.
+
+1. Read \`docs/epics/$ARGUMENTS/state.json\` to understand the run.
+   - The current step is index ${opts.stepIdx}.
+   - If \`stepStates[${opts.stepIdx}].feedback\` is set, the previous
+     reviewer asked for changes — address that feedback explicitly in
+     this revision.
+   - If \`stepStates[${opts.stepIdx}].history\` contains \`reject\`
+     entries, read their \`reason\` fields for context.
+
+2. Read \`docs/epics/$ARGUMENTS/inputs.json\` for capability bindings
+   (jira ticket, files glob, github repo, etc.) — these are the
+   user-supplied inputs for this run.
+
+3. Produce \`docs/epics/$ARGUMENTS/artifacts/${opts.artifact}\`. The
+   AIDLC validator checks for this file's existence when the user
+   marks the step done.
+
+4. When finished, summarize what you produced and tell the user to
+   click "Mark step done" in the AIDLC sidebar to advance the pipeline.
+`;
 }
 
 function mapRichStatus(status: string): 'pending' | 'in_progress' | 'done' | 'failed' {
