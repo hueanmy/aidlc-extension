@@ -40,6 +40,25 @@ import {
 import type { PipelineConfig, RunState } from '@aidlc/core';
 
 import { readYaml } from './yamlIO';
+import { mirrorRunStateToEpic } from './epicsList';
+
+/**
+ * Save the runtime RunState file AND mirror its display fields + per-step
+ * history into the epic's docs/epics/<id>/state.json so the on-disk record
+ * stays in sync. Mirror failures don't block the save — runs/ is the
+ * authoritative source for the live machine; state.json is a snapshot for
+ * git / offline review.
+ */
+function saveRun(workspaceRoot: string, next: RunState): void {
+  RunStateStore.save(workspaceRoot, next);
+  try {
+    mirrorRunStateToEpic(workspaceRoot, next, readYaml(workspaceRoot));
+  } catch (err) {
+    void vscode.window.showWarningMessage(
+      `AIDLC: failed to mirror run state into epic state.json — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
 
 function getRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -137,7 +156,7 @@ export async function startPipelineRunInlineCommand(
     pipeline,
     context: { work: rid },
   });
-  RunStateStore.save(root, state);
+  saveRun(root, state);
 
   const firstStep = pipeline.steps[0];
   const firstAgent = typeof firstStep === 'string' ? firstStep : firstStep.agent;
@@ -204,7 +223,7 @@ export async function startPipelineRunCommand(pipelineIdArg?: string): Promise<v
     pipeline: pickedPipeline.pipeline,
     context: { epic: runId.trim() },
   });
-  RunStateStore.save(root, state);
+  saveRun(root, state);
 
   const firstStep = pickedPipeline.pipeline.steps[0];
   const firstAgent = typeof firstStep === 'string' ? firstStep : firstStep.agent;
@@ -253,7 +272,7 @@ export async function markStepDoneCommand(runIdArg?: string): Promise<void> {
 
   try {
     const next = markStepDone({ state, pipeline, workspaceRoot: root });
-    RunStateStore.save(root, next);
+    saveRun(root, next);
     notifyStepTransition(next, state.currentStepIdx);
   } catch (err) {
     surfaceRunError(err);
@@ -289,7 +308,7 @@ export async function runAutoReviewCommand(runIdArg?: string): Promise<void> {
       try {
         const verdict = await runAutoReview({ workspaceRoot: root, state, pipeline });
         const next = submitAutoReviewVerdict({ state, pipeline, verdict });
-        RunStateStore.save(root, next);
+        saveRun(root, next);
 
         const tag = verdict.decision === 'pass' ? '✅ pass' : '❌ reject';
         const followUp = next.steps[next.currentStepIdx];
@@ -337,7 +356,7 @@ export async function approveStepCommand(runIdArg?: string): Promise<void> {
 
   try {
     const next = approveStep({ state, pipeline });
-    RunStateStore.save(root, next);
+    saveRun(root, next);
     notifyStepTransition(next, state.currentStepIdx);
   } catch (err) {
     surfaceRunError(err);
@@ -380,7 +399,7 @@ export async function rejectStepCommand(runIdArg?: string): Promise<void> {
       reason: reason.trim() || undefined,
       targetIdx: targetIdx === idx ? undefined : targetIdx,
     });
-    RunStateStore.save(root, next);
+    saveRun(root, next);
     if (targetIdx === idx) {
       void vscode.window.showInformationMessage(
         `Rejected step "${currentStep.agent}". Click "Rerun" in the sidebar when ready.`,
@@ -422,7 +441,7 @@ export async function rejectStepInlineCommand(
       reason: reason.trim() || undefined,
       targetIdx: targetIdx === idx ? undefined : targetIdx,
     });
-    RunStateStore.save(root, next);
+    saveRun(root, next);
     if (targetIdx === idx) {
       void vscode.window.showInformationMessage(
         `Rejected step "${currentStep.agent}". Click "Rerun" in the sidebar when ready.`,
@@ -502,7 +521,7 @@ export async function rerunStepCommand(runIdArg?: string): Promise<void> {
 
   try {
     const next = rerunStep({ state, feedback: feedback.trim() || undefined });
-    RunStateStore.save(root, next);
+    saveRun(root, next);
     void vscode.window.showInformationMessage(
       `Step "${step.agent}" reset (revision ${next.steps[state.currentStepIdx].revision}). Run the slash command again, then "Mark step done".`,
     );
@@ -528,7 +547,7 @@ export async function rerunStepInlineCommand(
 
   try {
     const next = rerunStep({ state, feedback: feedback.trim() || undefined });
-    RunStateStore.save(root, next);
+    saveRun(root, next);
     void vscode.window.showInformationMessage(
       `Step "${step.agent}" reset (revision ${next.steps[state.currentStepIdx].revision}). Run the slash command again, then "Mark step done".`,
     );

@@ -38,7 +38,11 @@ import type {
   StepHistoryEntry,
 } from '@aidlc/core';
 import { promptStepConfig } from './wizards';
-import { listEpics, type EpicSummary as CoreEpicSummary } from './epicsList';
+import {
+  listEpics,
+  mirrorRunStateToEpic,
+  type EpicSummary as CoreEpicSummary,
+} from './epicsList';
 import { themeManager } from './themeManager';
 import {
   rejectStepInlineCommand,
@@ -1240,6 +1244,7 @@ ${sections.join('\n').trimEnd()}
               context: { epic: epicId, ...inputs },
             });
             RunStateStore.save(root, runState);
+            mirrorRunStateToEpic(root, runState, doc);
           } catch (err) {
             void vscode.window.showWarningMessage(
               `Epic created, but pipeline run could not be scaffolded: ${err instanceof Error ? err.message : String(err)}`,
@@ -1594,6 +1599,7 @@ ${sections.join('\n').trimEnd()}
     try {
       const runState = startRun({ runId: epicId, pipeline, context });
       RunStateStore.save(root, runState);
+      mirrorRunStateToEpic(root, runState, readYaml(root));
       void vscode.window.showInformationMessage(
         `Pipeline run "${epicId}" started — current step: ${runState.steps[runState.currentStepIdx].agent}.`,
       );
