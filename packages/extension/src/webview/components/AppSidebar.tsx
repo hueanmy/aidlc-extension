@@ -716,13 +716,20 @@ function CostSuggestionsSection({
               <span>No efficiency issues detected — looking clean.</span>
             </div>
           )}
-          {suggestions?.map((s, i) => (
-            <CostSuggestionRow
-              key={`${s.rule}-${i}`}
-              s={s}
-              onOpen={() => setSelectedIdx(i)}
-            />
-          ))}
+          {suggestions && suggestions.length > 0 && (
+            // Internal scroll: 48 suggestions × ~32px would push everything
+            // below off-screen. Cap the visible window and let the rest
+            // scroll inside the section.
+            <div className="max-h-80 space-y-1 overflow-y-auto pr-0.5">
+              {suggestions.map((s, i) => (
+                <CostSuggestionRow
+                  key={`${s.rule}-${i}`}
+                  s={s}
+                  onOpen={() => setSelectedIdx(i)}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
       {selected && suggestions && (
@@ -771,7 +778,7 @@ function CostSuggestionRow({
       onClick={onOpen}
       title="Open suggestion detail"
       className={cn(
-        'flex w-full items-center gap-2 rounded-md border bg-card/50 px-2.5 py-1.5 text-left text-[11px] transition-colors hover:bg-accent/40',
+        'flex w-full items-center gap-1.5 rounded border bg-card/50 px-2 py-1 text-left text-[11px] transition-colors hover:bg-accent/40',
         s.severity === 'high'
           ? 'border-destructive/40'
           : s.severity === 'med'
@@ -781,7 +788,7 @@ function CostSuggestionRow({
     >
       <span
         className={cn(
-          'shrink-0 rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wider',
+          'shrink-0 rounded-full px-1 py-px text-[8.5px] font-bold uppercase tracking-wider',
           SEV_PILL[s.severity],
         )}
       >
