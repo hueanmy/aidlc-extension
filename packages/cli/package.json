@@ -38,17 +38,19 @@
     "bundle": "esbuild src/index.ts --bundle --platform=node --target=node18 --outfile=dist/bundle.js --external:fsevents",
     "prepublishOnly": "pnpm bundle"
   },
-  "dependencies": {
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "devDependencies": {
     "@aidlc/core": "workspace:*",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.0.0",
     "chalk": "^4.1.2",
     "chokidar": "^3.6.0",
     "cli-table3": "^0.6.5",
     "commander": "^11.1.0",
+    "esbuild": "^0.21.0",
     "js-yaml": "^4.1.1"
-  },
-  "devDependencies": {
-    "@types/js-yaml": "^4.0.9",
-    "@types/node": "^20.0.0",
-    "esbuild": "^0.21.0"
   }
 }
