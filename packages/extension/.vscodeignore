@@ -3,6 +3,8 @@ node_modules/**
 src/**
 .gitignore
 tsconfig.json
+tsconfig.webview.json
+vite.config.ts
 **/*.ts
 **/*.map
 install.sh
