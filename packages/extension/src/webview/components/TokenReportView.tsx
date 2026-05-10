@@ -121,14 +121,35 @@ function Overview({ report }: { report: TokenReport }) {
   const hitColor = o.cacheHitRate >= 0.7 ? 'text-success' : o.cacheHitRate >= 0.4 ? 'text-warning' : 'text-destructive';
   return (
     <section className="mb-6">
+      <ApiEquivBanner />
       <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 rounded-md border border-border bg-card/50 px-4 py-3 text-[12px]">
         <Stat label="sessions" value={fmtInt(o.sessions)} valueClass="text-info" />
         <Stat label="projects" value={fmtInt(o.projects)} valueClass="text-primary" />
         <Stat label="calls" value={fmtInt(o.calls)} valueClass="text-info" />
         <Stat label="cache hit" value={`${(o.cacheHitRate * 100).toFixed(1)}%`} valueClass={hitColor} />
-        <Stat label="total cost" value={fmtCost(o.totalCost)} valueClass="font-semibold text-success" />
+        <Stat label="tokens" value={fmtNum(o.totalTokens)} valueClass="font-semibold text-primary" />
+        <Stat
+          label="API $"
+          value={fmtCost(o.totalCost)}
+          valueClass="font-semibold text-success"
+          hint="Pay-as-you-go API equivalent — not what subscription users actually pay."
+        />
       </div>
     </section>
+  );
+}
+
+function ApiEquivBanner() {
+  return (
+    <div className="mb-3 flex items-start gap-2 rounded-md border border-info/30 bg-info/5 px-3 py-1.5 text-[10.5px] text-muted-foreground">
+      <span className="font-bold uppercase tracking-wider text-info">Note</span>
+      <span className="leading-relaxed">
+        <span className="font-mono text-foreground">API $</span> columns show the
+        pay-as-you-go API equivalent of the usage — useful as a relative measure
+        of where token spend goes. Subscription users (Pro / Max / Team) pay a flat
+        fee, not this amount.
+      </span>
+    </div>
   );
 }
 
@@ -136,13 +157,15 @@ function Stat({
   label,
   value,
   valueClass,
+  hint,
 }: {
   label: string;
   value: string;
   valueClass?: string;
+  hint?: string;
 }) {
   return (
-    <div className="flex items-baseline gap-1.5">
+    <div className="flex items-baseline gap-1.5" title={hint}>
       <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
       <span className={cn('font-mono tabular-nums', valueClass)}>{value}</span>
     </div>
@@ -167,8 +190,8 @@ function ByModelSection({ rows, report }: { rows: ModelRow[]; report: TokenRepor
             <Th align="right">Cache R</Th>
             <Th align="right">Cache W</Th>
             <Th align="right">Hit %</Th>
-            <Th align="right">Cost</Th>
-            <Th align="right">% cost</Th>
+            <Th align="right" hint="Pay-as-you-go API equivalent — not what subscription users actually pay.">API $</Th>
+            <Th align="right">% API $</Th>
           </tr>
         </thead>
         <tbody>
@@ -228,7 +251,7 @@ function DailySection({ rows }: { rows: DailyRow[] }) {
             <Th align="right">Output</Th>
             <Th align="right">Cache R</Th>
             <Th align="right">Cache W</Th>
-            <Th align="right">Cost</Th>
+            <Th align="right" hint="Pay-as-you-go API equivalent — not what subscription users actually pay.">API $</Th>
             <Th>{''}</Th>
           </tr>
         </thead>
@@ -290,8 +313,8 @@ function TopProjectsSection({ rows, report }: { rows: ProjectRow[]; report: Toke
             <Th align="right">Calls</Th>
             <Th align="right">Input</Th>
             <Th align="right">Output</Th>
-            <Th align="right">Cost</Th>
-            <Th align="right">% cost</Th>
+            <Th align="right" hint="Pay-as-you-go API equivalent — not what subscription users actually pay.">API $</Th>
+            <Th align="right">% API $</Th>
             <Th align="right">Last active</Th>
           </tr>
         </thead>
@@ -320,7 +343,7 @@ function TopProjectsSection({ rows, report }: { rows: ProjectRow[]; report: Toke
 function HeatmapSection({ rows, peak }: { rows: HeatmapRow[]; peak: number }) {
   return (
     <section className="mb-6">
-      <SectionTitle>Usage Heatmap (cost · local time)</SectionTitle>
+      <SectionTitle>Usage Heatmap (API $ · local time)</SectionTitle>
       <div className="overflow-x-auto rounded-md border border-border bg-card/30 p-3 font-mono text-[10px]">
         <div className="flex items-center gap-1">
           <div className="w-12 shrink-0" />
@@ -429,7 +452,12 @@ function SuggestionsSection({
           {estPotentialSavings > 0 && (
             <>
               <span className="text-muted-foreground/60">·</span>
-              <span className="text-muted-foreground">est. potential savings</span>
+              <span
+                className="text-muted-foreground"
+                title="API-equivalent savings if you switched to the recommended model/workflow. Subscription users won't see this in their bill — but it does free up usage headroom."
+              >
+                est. savings (API $)
+              </span>
               <span className="font-mono tabular-nums text-success">~{fmtCost(estPotentialSavings)}</span>
             </>
           )}
@@ -442,7 +470,7 @@ function SuggestionsSection({
             <Th>Rule</Th>
             <Th>Scope</Th>
             <Th>Evidence</Th>
-            <Th align="right">Save</Th>
+            <Th align="right" hint="API-equivalent savings — directional, not what subscription users would see on their bill.">Save (API $)</Th>
             <Th>Action</Th>
           </tr>
         </thead>
@@ -534,10 +562,14 @@ function SuggestionDetailModal({
           <span className="leading-relaxed text-foreground">{suggestion.action}</span>
         </DetailField>
         {suggestion.estSavings > 0 && (
-          <DetailField label="Estimated savings">
+          <DetailField label="Estimated savings (API $)">
             <span className="font-mono tabular-nums text-success">
-              ~{fmtCost(suggestion.estSavings)} (heuristic)
+              ~{fmtCost(suggestion.estSavings)}
             </span>
+            <div className="mt-1 text-[10.5px] text-muted-foreground">
+              API-equivalent — heuristic. Subscription users see this as freed-up
+              usage headroom, not a smaller bill.
+            </div>
           </DetailField>
         )}
       </div>
@@ -588,6 +620,12 @@ function Footer() {
   return (
     <footer className="mt-8 border-t border-border pt-3 text-[10.5px] leading-relaxed text-muted-foreground">
       <div>
+        <span className="font-bold uppercase tracking-wider">$ are API equivalents:</span>{' '}
+        Tokens × API list price for the model that served them. Subscription users
+        (Pro / Max / Team) pay a flat fee — the $ here is a relative measure of where
+        spend goes, not a bill.
+      </div>
+      <div className="mt-1.5">
         <span className="font-bold uppercase tracking-wider">How savings are estimated:</span>{' '}
         Opus → Sonnet ≈ 80% (Sonnet is ~5× cheaper across input, output, and cache tiers). ZeroCTX
         assumed to compress spike stdout by ~60%. Directional only, not accounting.
@@ -614,9 +652,18 @@ function Table({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Th({ children, align }: { children: React.ReactNode; align?: 'right' }) {
+function Th({
+  children,
+  align,
+  hint,
+}: {
+  children: React.ReactNode;
+  align?: 'right';
+  hint?: string;
+}) {
   return (
     <th
+      title={hint}
       className={cn(
         'bg-card/40 px-2.5 py-1.5 text-[9.5px] font-bold uppercase tracking-wider text-muted-foreground',
         align === 'right' ? 'text-right' : 'text-left',

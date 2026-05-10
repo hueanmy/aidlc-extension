@@ -115,6 +115,7 @@ export interface OverviewStats {
   projects: number;
   calls: number;
   cacheHitRate: number;
+  totalTokens: number;
   totalCost: number;
 }
 

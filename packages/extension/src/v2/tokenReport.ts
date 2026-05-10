@@ -34,6 +34,10 @@ export interface OverviewStats {
   projects: number;
   calls: number;
   cacheHitRate: number;
+  /** Sum of input + output + cache_read + cache_write across all records.
+   * Primary number for subscription users — the $ is API-equivalent only. */
+  totalTokens: number;
+  /** API-equivalent cost (USD). Subscription users don't pay this. */
   totalCost: number;
 }
 
@@ -120,6 +124,7 @@ export function buildReport(records: CallRecord[], windowDays: number): TokenRep
       projects: projects.size,
       calls: total.calls,
       cacheHitRate: hitRate(total),
+      totalTokens: total.input + total.output + total.cacheRead + total.cacheWrite,
       totalCost: total.cost,
     },
     byModel: byModel(records, total.cost),
