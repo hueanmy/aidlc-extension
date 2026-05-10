@@ -6,6 +6,7 @@ import { AgentCard, KebabMenu } from './AgentCard';
 import { PipelineCard } from './PipelineCard';
 import { RenameModal } from './RenameModal';
 import { ConfirmModal } from './ConfirmModal';
+import { AddPipelineModal } from './AddPipelineModal';
 import { postMessage } from '@/lib/bridge';
 
 type BuilderTab = 'workflows' | 'agents' | 'skills' | 'epics';
@@ -20,6 +21,7 @@ const SCOPE_LABEL: Record<AssetScope, string> = {
 
 export function BuilderView({ state }: { state: WorkspaceState }) {
   const [tab, setTab] = useState<BuilderTab>('agents');
+  const [addPipelineOpen, setAddPipelineOpen] = useState(false);
 
   const tabs: { id: BuilderTab; label: string; count: number }[] = [
     { id: 'workflows', label: 'Workflows', count: state.pipelines.length },
@@ -36,8 +38,13 @@ export function BuilderView({ state }: { state: WorkspaceState }) {
     ? 'Add Skill'
     : 'Start Epic';
 
+  const aidlcAgents = useMemo(
+    () => state.agents.filter((a) => a.scope === 'aidlc'),
+    [state.agents],
+  );
+
   const onAdd = () => {
-    if (tab === 'workflows') { postMessage({ type: 'addPipeline' }); }
+    if (tab === 'workflows') { setAddPipelineOpen(true); }
     else if (tab === 'agents') { postMessage({ type: 'addAgent' }); }
     else if (tab === 'skills') { postMessage({ type: 'addSkill' }); }
     else { postMessage({ type: 'startEpic' }); }
@@ -98,6 +105,17 @@ export function BuilderView({ state }: { state: WorkspaceState }) {
       {tab === 'skills' && <SkillsByScope skills={state.skills} />}
       {tab === 'workflows' && <PipelinesGrid state={state} />}
       {tab === 'epics' && <EpicsMiniGrid state={state} />}
+
+      {addPipelineOpen && (
+        <AddPipelineModal
+          agents={aidlcAgents}
+          existingPipelineIds={state.pipelines.map((p) => p.id)}
+          onSubmit={(draft) =>
+            postMessage({ type: 'addPipelineInline', draft })
+          }
+          onClose={() => setAddPipelineOpen(false)}
+        />
+      )}
     </div>
   );
 }

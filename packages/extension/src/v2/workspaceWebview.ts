@@ -609,6 +609,12 @@ export class WorkspaceWebview {
         await startPipelineRunInlineCommand(pipelineId, runId);
         return;
       }
+      case 'addPipelineInline': {
+        const draft = msg.draft;
+        if (!draft || typeof draft !== 'object') { return; }
+        await this.addPipelineInline(draft as Record<string, unknown>);
+        return;
+      }
       case 'startPipelineRunForEpic': {
         const epicId = String(msg.epicId ?? '').trim();
         const pipelineId = String(msg.pipelineId ?? '').trim();
@@ -822,6 +828,82 @@ export class WorkspaceWebview {
       }
       p.steps[idx] = obj;
     });
+  }
+
+  /**
+   * Build a pipeline from the React `AddPipelineModal` payload — bypasses
+   * the legacy QuickPick wizard chain. Validates id, agents, and runner
+   * paths server-side; surfaces issues as a warning and aborts.
+   */
+  private async addPipelineInline(draft: Record<string, unknown>): Promise<void> {
+    const root = this.getRootOrWarn();
+    if (!root) { return; }
+    const doc = readYaml(root);
+    if (!doc) {
+      void vscode.window.showWarningMessage('AIDLC: no workspace.yaml — initialize first.');
+      return;
+    }
+
+    const id = String(draft.id ?? '').trim();
+    const onFailure: 'stop' | 'continue' =
+      draft.on_failure === 'continue' ? 'continue' : 'stop';
+    const stepsRaw = Array.isArray(draft.steps) ? (draft.steps as unknown[]) : [];
+
+    if (!id) {
+      void vscode.window.showWarningMessage('Pipeline id is required.');
+      return;
+    }
+    if (doc.pipelines.some((p) => p.id === id)) {
+      void vscode.window.showWarningMessage(`Pipeline "${id}" already exists.`);
+      return;
+    }
+    if (stepsRaw.length === 0) {
+      void vscode.window.showWarningMessage('Pipeline needs at least one step.');
+      return;
+    }
+
+    const agentIds = new Set(doc.agents.map((a) => String(a.id)));
+    const steps: unknown[] = [];
+    for (const raw of stepsRaw) {
+      if (!raw || typeof raw !== 'object') { continue; }
+      const r = raw as Record<string, unknown>;
+      const agent = String(r.agent ?? '').trim();
+      if (!agent || !agentIds.has(agent)) {
+        void vscode.window.showWarningMessage(
+          `Step references unknown agent "${agent}". Aborting.`,
+        );
+        return;
+      }
+      const human_review = r.human_review === true;
+      const auto_review = r.auto_review === true;
+      const runner = typeof r.auto_review_runner === 'string' ? r.auto_review_runner.trim() : '';
+      if (auto_review && !runner) {
+        void vscode.window.showWarningMessage(
+          `Step "${agent}": auto_review is on but runner path is empty.`,
+        );
+        return;
+      }
+      const step: Record<string, unknown> = {
+        agent,
+        enabled: true,
+        requires: [],
+        produces: [],
+        human_review,
+        auto_review,
+      };
+      if (auto_review) { step.auto_review_runner = runner; }
+      steps.push(step);
+    }
+
+    this.mutateYaml((d) => {
+      d.pipelines.push({ id, steps, on_failure: onFailure });
+    });
+
+    void vscode.window.showInformationMessage(
+      `Pipeline "${id}" added: ${steps
+        .map((s) => (s as { agent: string }).agent)
+        .join(' → ')}`,
+    );
   }
 
   private async addStepToPipeline(pipelineId: string, agentIdArg?: string): Promise<void> {
