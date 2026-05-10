@@ -136,6 +136,34 @@ export interface AutoReviewVerdict {
   runner: string;
 }
 
+export type StepHistoryEntry =
+  | {
+      kind: 'reject';
+      at: string;
+      revision: number;
+      reason?: string;
+      sentBackToIdx: number;
+    }
+  | {
+      kind: 'rerun';
+      at: string;
+      revision: number;
+      feedback?: string;
+    }
+  | {
+      kind: 'auto_review';
+      at: string;
+      revision: number;
+      decision: 'pass' | 'reject';
+      reason: string;
+      runner: string;
+    }
+  | {
+      kind: 'approve';
+      at: string;
+      revision: number;
+    };
+
 export interface EpicStepDetailFull {
   agent: string;
   status: 'pending' | 'in_progress' | 'done' | 'failed';
@@ -147,6 +175,11 @@ export interface EpicStepDetailFull {
   stepHasHumanReview: boolean;
   startedAt?: string;
   finishedAt?: string;
+  /** Append-only timeline of significant transitions (reject / rerun /
+   * auto_review / approve). Surfaced verbatim from the run state. */
+  history?: StepHistoryEntry[];
+  /** Number of times this step has been rejected (cached count for display). */
+  rejectCount?: number;
 }
 
 export interface EpicSummary {

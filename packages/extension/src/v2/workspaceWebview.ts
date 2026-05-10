@@ -35,6 +35,7 @@ import type {
   PipelineConfig,
   StepStatus,
   AutoReviewVerdict,
+  StepHistoryEntry,
 } from '@aidlc/core';
 import { promptStepConfig } from './wizards';
 import { listEpics, type EpicSummary as CoreEpicSummary } from './epicsList';
@@ -103,6 +104,8 @@ interface EpicStepDetailFull {
   stepHasHumanReview: boolean;
   startedAt?: string;
   finishedAt?: string;
+  history?: StepHistoryEntry[];
+  rejectCount?: number;
 }
 
 interface EpicSummaryUi {
@@ -345,6 +348,8 @@ function toEpicSummaryUi(e: CoreEpicSummary): EpicSummaryUi {
       stepHasHumanReview: s.stepHasHumanReview,
       startedAt: s.startedAt ?? undefined,
       finishedAt: s.finishedAt ?? undefined,
+      history: s.history,
+      rejectCount: s.rejectCount,
     })),
     currentStep: e.currentStep,
     pipeline: e.pipeline,

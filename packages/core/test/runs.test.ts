@@ -124,6 +124,72 @@ describe('PipelineRunner — state machine', () => {
     expect(s.steps[0].artifactsProduced).toEqual([]);
   });
 
+  it('history accumulates across reject / rerun / approve and survives later transitions', () => {
+    let s = startRun({ runId: 'R-6h', pipeline: PIPELINE_HUMAN, context: {} });
+    touch(root, 'PRD.md');
+    s = markStepDone({ state: s, pipeline: PIPELINE_HUMAN, workspaceRoot: root });
+
+    // First reject — in-place
+    s = rejectStep({ state: s, reason: 'missing acceptance criteria' });
+    s = rerunStep({ state: s, feedback: 'add AC list' });
+
+    // Second reject — same step, in-place again
+    touch(root, 'PRD.md');
+    s = markStepDone({ state: s, pipeline: PIPELINE_HUMAN, workspaceRoot: root });
+    s = rejectStep({ state: s, reason: 'still ambiguous on rate limits' });
+    s = rerunStep({ state: s, feedback: 'spell out rate limits' });
+
+    // Third pass approves and advances
+    touch(root, 'PRD.md');
+    s = markStepDone({ state: s, pipeline: PIPELINE_HUMAN, workspaceRoot: root });
+    s = approveStep({ state: s, pipeline: PIPELINE_HUMAN });
+
+    const h = s.steps[0].history ?? [];
+    const kinds = h.map((e) => e.kind);
+    // reject → rerun → reject → rerun → approve
+    expect(kinds).toEqual(['reject', 'rerun', 'reject', 'rerun', 'approve']);
+    const rejects = h.filter((e) => e.kind === 'reject');
+    expect(rejects.length).toBe(2);
+    expect((rejects[0] as { reason?: string }).reason).toContain('acceptance');
+    expect((rejects[1] as { reason?: string }).reason).toContain('rate limits');
+    expect((rejects[0] as { sentBackToIdx: number }).sentBackToIdx).toBe(0);
+    // Final entry is the approve at revision 3 (revision was bumped twice)
+    const approve = h[h.length - 1] as { kind: string; revision: number };
+    expect(approve.kind).toBe('approve');
+    expect(approve.revision).toBe(3);
+  });
+
+  it('cascade reject records reject on source step + rerun on target step', () => {
+    // Get to step 2 (idx 1) awaiting_review.
+    let s = startRun({ runId: 'R-6c', pipeline: PIPELINE_HUMAN, context: {} });
+    touch(root, 'PRD.md');
+    s = markStepDone({ state: s, pipeline: PIPELINE_HUMAN, workspaceRoot: root });
+    s = approveStep({ state: s, pipeline: PIPELINE_HUMAN });
+    touch(root, 'TECH-DESIGN.md');
+    s = markStepDone({ state: s, pipeline: PIPELINE_HUMAN, workspaceRoot: root });
+
+    // Reject step 2 (idx 1), cascade back to step 1 (idx 0).
+    s = rejectStep({ state: s, reason: 'PRD lacks rate-limit policy', targetIdx: 0 });
+
+    const sourceHistory = s.steps[1].history ?? [];
+    expect(sourceHistory.map((e) => e.kind)).toContain('reject');
+    const sourceReject = sourceHistory.find((e) => e.kind === 'reject') as
+      | { sentBackToIdx: number; reason?: string }
+      | undefined;
+    expect(sourceReject?.sentBackToIdx).toBe(0);
+    expect(sourceReject?.reason).toContain('rate-limit');
+
+    const targetHistory = s.steps[0].history ?? [];
+    const targetRerun = targetHistory.find((e) => e.kind === 'rerun') as
+      | { feedback?: string; revision: number }
+      | undefined;
+    expect(targetRerun).toBeDefined();
+    expect(targetRerun?.feedback).toContain('Rejected at step 2');
+    expect(targetRerun?.revision).toBe(2);
+    expect(s.steps[0].revision).toBe(2);
+    expect(s.currentStepIdx).toBe(0);
+  });
+
   // ── Auto-review path ─────────────────────────────────────────────────
 
   it('auto-review path: markStepDone → awaiting_auto_review (NOT awaiting_review)', () => {

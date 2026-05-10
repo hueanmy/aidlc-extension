@@ -12,7 +12,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { RunStateStore, normalizeStep } from '@aidlc/core';
-import type { StepStatus, AutoReviewVerdict, PipelineConfig, PipelineStepConfig } from '@aidlc/core';
+import type {
+  StepStatus,
+  AutoReviewVerdict,
+  PipelineConfig,
+  PipelineStepConfig,
+  StepHistoryEntry,
+} from '@aidlc/core';
 
 import { readYaml, type YamlDocument } from './yamlIO';
 
@@ -53,6 +59,10 @@ export interface EpicSummary {
     stepHasAutoReview: boolean;
     /** Step config: does this step opt into human_review in the pipeline yaml? */
     stepHasHumanReview: boolean;
+    /** Append-only timeline of significant transitions for this step. */
+    history?: StepHistoryEntry[];
+    /** Cached count of `reject` entries in `history` — for compact display. */
+    rejectCount: number;
   }>;
   /**
    * runId of the matching run state, if any. Convention: runId === epic.id.
@@ -122,11 +132,15 @@ export function listEpics(workspaceRoot: string, doc: YamlDocument | null): Epic
     const runStepByAgent = new Map<string, StepStatus>();
     const runRejectByAgent = new Map<string, string>();
     const runVerdictByAgent = new Map<string, AutoReviewVerdict>();
+    const runHistoryByAgent = new Map<string, StepHistoryEntry[]>();
     if (runState) {
       for (const sr of runState.steps) {
         runStepByAgent.set(sr.agent, sr.status);
         if (sr.rejectReason) { runRejectByAgent.set(sr.agent, sr.rejectReason); }
         if (sr.autoReviewVerdict) { runVerdictByAgent.set(sr.agent, sr.autoReviewVerdict); }
+        if (sr.history && sr.history.length > 0) {
+          runHistoryByAgent.set(sr.agent, sr.history);
+        }
       }
     }
     const runCurrentAgent = runState
@@ -151,6 +165,10 @@ export function listEpics(workspaceRoot: string, doc: YamlDocument | null): Epic
       const agent = typeof s.agent === 'string' ? s.agent : '';
       const gate = stepGateByIdx.get(i) ?? { auto: false, human: false };
       const runStatus = runStepByAgent.get(agent) ?? null;
+      const history = runHistoryByAgent.get(agent);
+      const rejectCount = history
+        ? history.filter((e) => e.kind === 'reject').length
+        : 0;
       // The state.json's per-step status doesn't sync from the run-state
       // machine, so prefer the run status when it's present. Mapping:
       //   approved                                  → done
@@ -179,6 +197,8 @@ export function listEpics(workspaceRoot: string, doc: YamlDocument | null): Epic
         autoReviewVerdict: runVerdictByAgent.get(agent),
         stepHasAutoReview: gate.auto,
         stepHasHumanReview: gate.human,
+        history,
+        rejectCount,
       };
     });
 

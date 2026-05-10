@@ -14,12 +14,15 @@ import {
   ExternalLink,
   Folder,
   Play,
+  History,
+  RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type {
   EpicSummary,
   EpicStepDetailFull,
   AgentMeta,
+  StepHistoryEntry,
   StepStatus,
   UiStatus,
 } from '@/lib/types';
@@ -385,6 +388,7 @@ function StepDetail({
       </div>
 
       <RunGate epic={epic} focused={focused} />
+      <StepHistory step={focused} />
     </div>
   );
 }
@@ -396,6 +400,146 @@ function DetailLabel({ icon, text }: { icon: React.ReactNode; text: string }) {
       <span>{text}</span>
     </div>
   );
+}
+
+function StepHistory({ step }: { step: EpicStepDetailFull }) {
+  const [open, setOpen] = useState(false);
+  const entries = step.history ?? [];
+  if (entries.length === 0) { return null; }
+
+  const rejectCount = step.rejectCount ?? 0;
+  const rerunCount = entries.filter((e) => e.kind === 'rerun').length;
+  const lastReject = [...entries].reverse().find((e) => e.kind === 'reject') as
+    | (StepHistoryEntry & { kind: 'reject' })
+    | undefined;
+
+  const summary = [
+    rejectCount > 0 && `rejected ${rejectCount}×`,
+    rerunCount > 0 && `rerun ${rerunCount}×`,
+    !rejectCount && entries.some((e) => e.kind === 'approve') && 'approved',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <div className="mt-3 rounded-md border border-border bg-secondary/20">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] hover:bg-accent/40"
+      >
+        {open ? <ChevronDown className="h-3 w-3 text-muted-foreground" /> : <ChevronRight className="h-3 w-3 text-muted-foreground" />}
+        <History className="h-3 w-3 text-muted-foreground" />
+        <span className="font-bold uppercase tracking-wider text-muted-foreground">
+          History
+        </span>
+        <span className="text-muted-foreground/80">· {entries.length} entries</span>
+        {summary && <span className="text-muted-foreground/80">· {summary}</span>}
+        {lastReject?.reason && !open && (
+          <span className="ml-auto truncate font-mono text-[10.5px] text-destructive/80 max-w-[55%]">
+            ↳ {lastReject.reason}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <ol className="border-t border-border/60 px-3 py-2 space-y-1.5 text-[10.5px]">
+          {entries.map((e, i) => (
+            <li key={i} className="flex items-start gap-2">
+              <HistoryIcon kind={e.kind} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline gap-1.5">
+                  <HistoryLabel entry={e} />
+                  <span className="text-[9.5px] text-muted-foreground tabular-nums">
+                    rev {e.revision}
+                  </span>
+                  <span className="ml-auto text-[9.5px] text-muted-foreground/80">
+                    {fmtTime(e.at)}
+                  </span>
+                </div>
+                <HistoryBody entry={e} />
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+function HistoryIcon({ kind }: { kind: StepHistoryEntry['kind'] }) {
+  switch (kind) {
+    case 'reject':
+      return <X className="mt-0.5 h-3 w-3 shrink-0 text-destructive" />;
+    case 'rerun':
+      return <RefreshCw className="mt-0.5 h-3 w-3 shrink-0 text-warning" />;
+    case 'auto_review':
+      return <Bot className="mt-0.5 h-3 w-3 shrink-0 text-info" />;
+    case 'approve':
+      return <Check className="mt-0.5 h-3 w-3 shrink-0 text-success" />;
+  }
+}
+
+function HistoryLabel({ entry }: { entry: StepHistoryEntry }) {
+  switch (entry.kind) {
+    case 'reject':
+      return (
+        <span className="font-semibold text-destructive">
+          Rejected
+          {entry.sentBackToIdx !== undefined && (
+            <span className="ml-1 font-normal text-muted-foreground">
+              → step {entry.sentBackToIdx + 1}
+            </span>
+          )}
+        </span>
+      );
+    case 'rerun':
+      return <span className="font-semibold text-warning">Rerun</span>;
+    case 'auto_review':
+      return (
+        <span className={cn('font-semibold', entry.decision === 'pass' ? 'text-success' : 'text-destructive')}>
+          Auto-review {entry.decision === 'pass' ? '✓ pass' : '✕ reject'}
+        </span>
+      );
+    case 'approve':
+      return <span className="font-semibold text-success">Approved</span>;
+  }
+}
+
+function HistoryBody({ entry }: { entry: StepHistoryEntry }) {
+  switch (entry.kind) {
+    case 'reject':
+      return entry.reason ? (
+        <div className="font-mono text-foreground/80">↳ {entry.reason}</div>
+      ) : null;
+    case 'rerun':
+      return entry.feedback ? (
+        <div className="font-mono text-muted-foreground">↳ {entry.feedback}</div>
+      ) : null;
+    case 'auto_review':
+      return (
+        <div className="font-mono text-foreground/80">
+          ↳ {entry.reason}
+        </div>
+      );
+    case 'approve':
+      return null;
+  }
+}
+
+function fmtTime(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) { return iso; }
+    return d.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
 }
 
 function DetailValue({ children, empty }: { children: React.ReactNode; empty?: boolean }) {

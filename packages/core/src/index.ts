@@ -99,6 +99,7 @@ export type {
   StepStatus,
   RunStatus,
   AutoReviewVerdict,
+  StepHistoryEntry,
 } from './runs/RunState';
 
 export const AIDLC_CORE_VERSION = '0.1.0';
