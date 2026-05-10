@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
+import { onHostMessage } from '@/lib/bridge';
 import { Plus, FileCode2, Layers, Pencil, Copy, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { WorkspaceState, AgentSummary, SkillSummary, AssetScope } from '@/lib/types';
@@ -9,6 +10,7 @@ import { ConfirmModal } from './ConfirmModal';
 import { PipelineModal } from './PipelineModal';
 import { AddSkillModal } from './AddSkillModal';
 import { AddAgentModal } from './AddAgentModal';
+import { StartEpicModal } from './StartEpicModal';
 import { postMessage } from '@/lib/bridge';
 
 type BuilderTab = 'workflows' | 'agents' | 'skills' | 'epics';
@@ -26,6 +28,7 @@ export function BuilderView({ state }: { state: WorkspaceState }) {
   const [addPipelineOpen, setAddPipelineOpen] = useState(false);
   const [addSkillOpen, setAddSkillOpen] = useState(false);
   const [addAgentOpen, setAddAgentOpen] = useState(false);
+  const [startEpicOpen, setStartEpicOpen] = useState(false);
 
   const tabs: { id: BuilderTab; label: string; count: number }[] = [
     { id: 'workflows', label: 'Workflows', count: state.pipelines.length },
@@ -51,8 +54,19 @@ export function BuilderView({ state }: { state: WorkspaceState }) {
     if (tab === 'workflows') { setAddPipelineOpen(true); }
     else if (tab === 'agents') { setAddAgentOpen(true); }
     else if (tab === 'skills') { setAddSkillOpen(true); }
-    else { postMessage({ type: 'startEpic' }); }
+    else { setStartEpicOpen(true); }
   };
+
+  // Sidebar's "Start Epic" pings the workspace panel; switch to Epics tab
+  // and pop the modal regardless of which view was last active.
+  useEffect(() => {
+    return onHostMessage((msg) => {
+      if (msg.type === 'triggerStartEpic') {
+        setTab('epics');
+        setStartEpicOpen(true);
+      }
+    });
+  }, []);
 
   const allSkillIds = useMemo(() => state.skills.map((s) => s.id), [state.skills]);
   const allAgentIds = useMemo(() => state.agents.map((a) => a.id), [state.agents]);
@@ -138,6 +152,17 @@ export function BuilderView({ state }: { state: WorkspaceState }) {
           skills={state.skills}
           onSubmit={(draft) => postMessage({ type: 'addAgentInline', draft })}
           onClose={() => setAddAgentOpen(false)}
+        />
+      )}
+      {startEpicOpen && (
+        <StartEpicModal
+          pipelines={state.pipelines}
+          agents={state.agents}
+          agentMeta={state.agentMeta}
+          nextEpicId={state.nextEpicId}
+          existingEpicIds={state.existingEpicIds}
+          onSubmit={(draft) => postMessage({ type: 'startEpicInline', draft })}
+          onClose={() => setStartEpicOpen(false)}
         />
       )}
     </div>

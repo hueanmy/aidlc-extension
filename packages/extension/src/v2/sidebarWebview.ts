@@ -30,6 +30,7 @@ import { listEpics } from './epicsList';
 import type { PresetStore } from './presetStore';
 import { themeManager } from './themeManager';
 import { rejectStepInlineCommand, startPipelineRunInlineCommand } from './runCommands';
+import { WorkspaceWebview } from './workspaceWebview';
 
 // VS Code reuses output channels by name, so this resolves to the same
 // channel created in extension.ts activate().
@@ -375,6 +376,9 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
         return;
       case 'startEpic':
         await vscode.commands.executeCommand('aidlc.startEpic');
+        return;
+      case 'requestStartEpic':
+        WorkspaceWebview.triggerStartEpic(this.extensionUri);
         return;
       case 'openEpicsList':
         await vscode.commands.executeCommand('aidlc.openEpicsList');

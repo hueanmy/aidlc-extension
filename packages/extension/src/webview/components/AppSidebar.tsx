@@ -163,7 +163,7 @@ export function AppSidebar({ state }: { state: SidebarState | null }) {
               <>
                 <button
                   type="button"
-                  onClick={() => postMessage({ type: 'startEpic' })}
+                  onClick={() => postMessage({ type: 'requestStartEpic' })}
                   className="flex w-full items-center gap-2 rounded-md bg-primary px-3 py-2 text-xs font-semibold uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90"
                 >
                   <Play className="h-3.5 w-3.5" />

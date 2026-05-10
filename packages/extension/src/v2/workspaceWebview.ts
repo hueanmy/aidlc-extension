@@ -85,6 +85,7 @@ interface AgentMeta {
   inputs: string;
   outputs: string;
   artifact: string;
+  capabilities?: string[];
 }
 
 interface EpicStepDetailFull {
@@ -141,6 +142,10 @@ interface WorkspaceState {
   runIds: string[];
   /** Built-in skill templates surfaced for the inline AddSkill modal. */
   skillTemplates: SkillTemplateRef[];
+  /** Suggested next sequential id for the inline Start-Epic modal. */
+  nextEpicId: string;
+  /** All existing epic ids (folders under epicRoot) — for uniqueness check. */
+  existingEpicIds: string[];
   initialView?: WorkspaceView;
 }
 
@@ -163,6 +168,8 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
       agentsCount: 0, skillsCount: 0, pipelinesCount: 0, epicsCount: 0,
       runIds: [],
       skillTemplates: SKILL_TEMPLATE_REFS,
+      nextEpicId: 'EPIC-001',
+      existingEpicIds: [],
       initialView,
     };
   }
@@ -178,12 +185,15 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
   if (doc) {
     for (const a of doc.agents) {
       const id = String(a.id);
+      const capsRaw = Array.isArray(a.capabilities) ? (a.capabilities as unknown[]) : [];
+      const capabilities = capsRaw.map(String).filter((c) => c);
       agentMeta[id] = {
         name: typeof a.name === 'string' ? a.name : id,
         description: typeof a.description === 'string' ? a.description : '',
         inputs: typeof a.inputs === 'string' ? a.inputs : '',
         outputs: typeof a.outputs === 'string' ? a.outputs : '',
         artifact: typeof a.artifact === 'string' ? a.artifact : '',
+        capabilities: capabilities.length > 0 ? capabilities : undefined,
       };
     }
     for (const c of doc.slash_commands) {
@@ -199,6 +209,7 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
   if (!doc) {
     const agents = mergeAgents(null, discovered.agents);
     const skills = mergeSkills(null, root, discovered.skills);
+    const epicIds0 = listEpicIdsFromDir(root, 'docs/epics');
     return {
       hasFolder: true,
       workspaceName: folder.name,
@@ -213,6 +224,8 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
       epicsCount: epics.length,
       runIds: listRunIds(root),
       skillTemplates: SKILL_TEMPLATE_REFS,
+      nextEpicId: suggestNextEpicId(epicIds0),
+      existingEpicIds: epicIds0,
       initialView,
     };
   }
@@ -239,6 +252,9 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
       : [],
   }));
 
+  const epicRoot = readEpicRoot(doc);
+  const epicIds = listEpicIdsFromDir(root, epicRoot);
+
   return {
     hasFolder: true,
     workspaceName: folder.name,
@@ -251,6 +267,8 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
     epicsCount: epics.length,
     runIds: listRunIds(root),
     skillTemplates: SKILL_TEMPLATE_REFS,
+    nextEpicId: suggestNextEpicId(epicIds),
+    existingEpicIds: epicIds,
     initialView,
   };
 }
@@ -261,6 +279,36 @@ function listRunIds(root: string): string[] {
   } catch {
     return [];
   }
+}
+
+function readEpicRoot(doc: { state?: unknown }): string {
+  const state = doc.state as Record<string, unknown> | undefined;
+  if (state && typeof state.root === 'string' && state.root.trim()) {
+    return state.root;
+  }
+  return 'docs/epics';
+}
+
+function listEpicIdsFromDir(workspaceRoot: string, epicRoot: string): string[] {
+  const dir = path.resolve(workspaceRoot, epicRoot);
+  if (!fs.existsSync(dir)) { return []; }
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch {
+    return [];
+  }
+}
+
+function suggestNextEpicId(existing: string[]): string {
+  const numbered = existing
+    .map((n) => n.match(/^EPIC-(\d+)$/i))
+    .filter((m): m is RegExpMatchArray => !!m)
+    .map((m) => parseInt(m[1], 10));
+  const next = numbered.length > 0 ? Math.max(...numbered) + 1 : 1;
+  return `EPIC-${String(next).padStart(3, '0')}`;
 }
 
 function toEpicSummaryUi(e: CoreEpicSummary): EpicSummaryUi {
@@ -397,6 +445,16 @@ export class WorkspaceWebview {
     );
     panel.iconPath = vscode.Uri.joinPath(extensionUri, 'media', 'icon.svg');
     WorkspaceWebview.current = new WorkspaceWebview(panel, extensionUri, initialView);
+  }
+
+  /**
+   * Open the workspace panel on the Epics view and ask the React side to pop
+   * the StartEpicModal. Used by the sidebar's "Start Epic" button so the user
+   * gets the inline experience instead of a chain of VS Code dialogs.
+   */
+  static triggerStartEpic(extensionUri: vscode.Uri): void {
+    WorkspaceWebview.show(extensionUri, 'epics');
+    void WorkspaceWebview.current?.panel.webview.postMessage({ type: 'triggerStartEpic' });
   }
 
   private constructor(
@@ -649,6 +707,12 @@ export class WorkspaceWebview {
         const draft = msg.draft;
         if (!draft || typeof draft !== 'object') { return; }
         await this.addAgentInline(draft as Record<string, unknown>);
+        return;
+      }
+      case 'startEpicInline': {
+        const draft = msg.draft;
+        if (!draft || typeof draft !== 'object') { return; }
+        await this.startEpicInline(draft as Record<string, unknown>);
         return;
       }
       case 'startPipelineRunForEpic': {
@@ -1037,6 +1101,134 @@ ${sections.join('\n').trimEnd()}
 
     void vscode.window.showInformationMessage(
       `Agent "${id}" added (${scope} · skills: ${skills.join(', ')}).`,
+    );
+  }
+
+  /**
+   * Apply the StartEpicModal draft. Mirrors `startEpicCommand`:
+   * - writes <epicRoot>/<id>/state.json + inputs.json + artifacts/.
+   * - when target is a pipeline, scaffolds a RunState (runId === epicId) so
+   *   the gate UI lights up immediately.
+   *
+   * Refuses to overwrite an existing epic dir — the modal's existingEpicIds
+   * already blocks collisions in normal use; this is the safety net.
+   */
+  private async startEpicInline(draft: Record<string, unknown>): Promise<void> {
+    const root = this.getRootOrWarn();
+    if (!root) { return; }
+    const doc = readYaml(root);
+    if (!doc) {
+      void vscode.window.showWarningMessage('AIDLC: no workspace.yaml — initialize first.');
+      return;
+    }
+
+    const targetRaw = draft.target as Record<string, unknown> | undefined;
+    const epicId = String(draft.epicId ?? '').trim();
+    const title = String(draft.title ?? '').trim();
+    const description = String(draft.description ?? '').trim();
+    const inputsRaw = draft.inputs && typeof draft.inputs === 'object'
+      ? (draft.inputs as Record<string, unknown>)
+      : {};
+    const inputs: Record<string, string> = {};
+    for (const [k, v] of Object.entries(inputsRaw)) {
+      if (typeof v === 'string' && v.trim()) { inputs[k] = v; }
+    }
+
+    if (!targetRaw || !epicId) { return; }
+    const targetKind = String(targetRaw.kind ?? '');
+    const targetId = String(targetRaw.id ?? '').trim();
+    if (!targetId) { return; }
+    if (targetKind !== 'pipeline' && targetKind !== 'agent') { return; }
+
+    let agents: string[] = [];
+    if (targetKind === 'pipeline') {
+      const p = (doc.pipelines as PipelineConfig[] | undefined)?.find(
+        (x) => x.id === targetId,
+      );
+      if (!p) {
+        void vscode.window.showWarningMessage(`Pipeline "${targetId}" not found.`);
+        return;
+      }
+      agents = Array.isArray(p.steps) ? (p.steps as unknown[]).map(stepAgentId) : [];
+    } else {
+      const a = doc.agents.find((x) => String(x.id) === targetId);
+      if (!a) {
+        void vscode.window.showWarningMessage(`Agent "${targetId}" not found.`);
+        return;
+      }
+      agents = [targetId];
+    }
+    if (agents.length === 0) {
+      void vscode.window.showWarningMessage(`Target "${targetId}" has no agents.`);
+      return;
+    }
+
+    const epicRoot = readEpicRoot(doc);
+    const epicDir = path.resolve(root, epicRoot, epicId);
+    if (fs.existsSync(epicDir)) {
+      void vscode.window.showWarningMessage(
+        `Epic dir already exists at ${path.relative(root, epicDir) || epicDir}. Delete it first.`,
+      );
+      return;
+    }
+
+    fs.mkdirSync(epicDir, { recursive: true });
+    fs.mkdirSync(path.join(epicDir, 'artifacts'), { recursive: true });
+
+    const state = {
+      id: epicId,
+      title,
+      description,
+      pipeline: targetKind === 'pipeline' ? targetId : null,
+      agent: targetKind === 'agent' ? targetId : null,
+      agents,
+      currentStep: 0,
+      status: 'pending' as const,
+      createdAt: new Date().toISOString(),
+      stepStates: agents.map((a) => ({
+        agent: a,
+        status: 'pending' as const,
+        startedAt: null,
+        finishedAt: null,
+      })),
+    };
+
+    fs.writeFileSync(
+      path.join(epicDir, 'state.json'),
+      JSON.stringify(state, null, 2) + '\n',
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(epicDir, 'inputs.json'),
+      JSON.stringify(inputs, null, 2) + '\n',
+      'utf8',
+    );
+
+    if (targetKind === 'pipeline') {
+      const pipelineCfg = (doc.pipelines as PipelineConfig[] | undefined)?.find(
+        (p) => p.id === targetId,
+      );
+      if (pipelineCfg && Array.isArray(pipelineCfg.steps) && pipelineCfg.steps.length > 0) {
+        const existingRun = RunStateStore.load(root, epicId);
+        if (!existingRun) {
+          try {
+            const runState = startRun({
+              runId: epicId,
+              pipeline: pipelineCfg,
+              context: { epic: epicId, ...inputs },
+            });
+            RunStateStore.save(root, runState);
+          } catch (err) {
+            void vscode.window.showWarningMessage(
+              `Epic created, but pipeline run could not be scaffolded: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+      }
+    }
+
+    void vscode.window.showInformationMessage(
+      `Started epic "${epicId}" — ${agents[0]}. Run /${agents[0]} ${epicId} in Claude to begin.`,
     );
   }
 

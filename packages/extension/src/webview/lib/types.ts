@@ -173,6 +173,8 @@ export interface AgentMeta {
   inputs: string;
   outputs: string;
   artifact: string;
+  /** Capability ids declared on the agent (used by Start Epic to ask for run-time bindings). */
+  capabilities?: string[];
 }
 
 export interface WorkspaceState {
@@ -196,6 +198,10 @@ export interface WorkspaceState {
   runIds: string[];
   /** Built-in skill templates surfaced for the inline AddSkill modal. */
   skillTemplates: SkillTemplateRef[];
+  /** Suggested next sequential id for the inline Start-Epic modal (e.g. EPIC-007). */
+  nextEpicId: string;
+  /** All existing epic ids (folders under epicRoot) — for uniqueness check. */
+  existingEpicIds: string[];
   /** Initial view to render when the panel first opens. */
   initialView?: WorkspaceView;
 }
