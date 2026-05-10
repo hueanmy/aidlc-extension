@@ -29,7 +29,7 @@ import type { PipelineConfig } from '@aidlc/core';
 import { listEpics } from './epicsList';
 import type { PresetStore } from './presetStore';
 import { themeManager } from './themeManager';
-import { rejectStepInlineCommand } from './runCommands';
+import { rejectStepInlineCommand, startPipelineRunInlineCommand } from './runCommands';
 
 // VS Code reuses output channels by name, so this resolves to the same
 // channel created in extension.ts activate().
@@ -74,6 +74,12 @@ interface ActiveRun {
   currentSlashCommand?: string;
 }
 
+interface PipelineRef {
+  id: string;
+  stepCount: number;
+  onFailure: 'stop' | 'continue';
+}
+
 interface SidebarState {
   hasFolder: boolean;
   workspaceName: string;
@@ -90,6 +96,10 @@ interface SidebarState {
   projectTemplates: TemplateRef[];
   /** Pipeline runs with status === 'running'. */
   activeRuns: ActiveRun[];
+  /** Lightweight pipeline list for the inline Start-Run modal. */
+  pipelines: PipelineRef[];
+  /** All existing run ids (any status). */
+  runIds: string[];
 }
 
 function buildState(presetStore: PresetStore | null): SidebarState {
@@ -104,6 +114,7 @@ function buildState(presetStore: PresetStore | null): SidebarState {
       slashCommands: [],
       builtinTemplates: [], projectTemplates: [],
       activeRuns: [],
+      pipelines: [], runIds: [],
     };
   }
 
@@ -136,6 +147,7 @@ function buildState(presetStore: PresetStore | null): SidebarState {
   // Active pipeline runs live in .aidlc/runs/ and are independent of the
   // workspace doc — surface them whenever the folder is open.
   const activeRuns = listActiveRuns(root);
+  const runIds = listAllRunIds(root);
 
   if (!doc) {
     return {
@@ -149,8 +161,16 @@ function buildState(presetStore: PresetStore | null): SidebarState {
       slashCommands: [],
       builtinTemplates, projectTemplates,
       activeRuns,
+      pipelines: [],
+      runIds,
     };
   }
+
+  const pipelines: PipelineRef[] = (doc.pipelines as PipelineConfig[]).map((p) => ({
+    id: String(p.id),
+    stepCount: Array.isArray(p.steps) ? p.steps.length : 0,
+    onFailure: p.on_failure === 'continue' ? 'continue' : 'stop',
+  }));
 
   return {
     hasFolder: true,
@@ -177,7 +197,17 @@ function buildState(presetStore: PresetStore | null): SidebarState {
     builtinTemplates,
     projectTemplates,
     activeRuns,
+    pipelines,
+    runIds,
   };
+}
+
+function listAllRunIds(root: string): string[] {
+  try {
+    return RunStateStore.list(root).map((r) => r.runId);
+  } catch {
+    return [];
+  }
 }
 
 function listActiveRuns(root: string): ActiveRun[] {
@@ -399,6 +429,13 @@ export class SidebarWebviewProvider implements vscode.WebviewViewProvider {
         const targetIdx = Number(msg.targetIdx);
         if (!runId || !Number.isInteger(targetIdx)) { return; }
         await rejectStepInlineCommand(runId, reason, targetIdx);
+        return;
+      }
+      case 'startRunInline': {
+        const pipelineId = String(msg.pipelineId ?? '');
+        const runId = String(msg.runId ?? '');
+        if (!pipelineId || !runId) { return; }
+        await startPipelineRunInlineCommand(pipelineId, runId);
         return;
       }
       case 'openArtifact': {

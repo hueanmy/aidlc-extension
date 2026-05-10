@@ -30,6 +30,7 @@ import type {
 } from '@/lib/types';
 import { RejectModal } from './RejectModal';
 import { ConfirmModal } from './ConfirmModal';
+import { StartRunModal } from './StartRunModal';
 import { ThemeToggle } from './ThemeToggle';
 import { postMessage, getPersistedUi, setPersistedUi } from '@/lib/bridge';
 
@@ -174,7 +175,8 @@ export function AppSidebar({ state }: { state: SidebarState | null }) {
 
                 <ActiveRunsSection
                   runs={state.activeRuns}
-                  pipelinesCount={state.pipelinesCount}
+                  pipelines={state.pipelines}
+                  runIds={state.runIds}
                   collapsed={collapsed.pipelineRuns}
                   onToggleSection={() => toggleSection('pipelineRuns')}
                   isRunCollapsed={(runId, status) => isRunCollapsed(runId, status, collapsedRuns)}
@@ -540,20 +542,23 @@ function TemplateRow({ template, builtin }: { template: TemplateRef; builtin: bo
 
 function ActiveRunsSection({
   runs,
-  pipelinesCount,
+  pipelines,
+  runIds,
   collapsed,
   onToggleSection,
   isRunCollapsed,
   onToggleRun,
 }: {
   runs: ActiveRun[];
-  pipelinesCount: number;
+  pipelines: SidebarState['pipelines'];
+  runIds: string[];
   collapsed: boolean;
   onToggleSection: () => void;
   isRunCollapsed: (runId: string, status: string) => boolean;
   onToggleRun: (runId: string, status: string) => void;
 }) {
-  const canStart = pipelinesCount > 0;
+  const [startOpen, setStartOpen] = useState(false);
+  const canStart = pipelines.length > 0;
   if (runs.length === 0 && !canStart) { return null; }
 
   return (
@@ -572,7 +577,7 @@ function ActiveRunsSection({
           {canStart && (
             <button
               type="button"
-              onClick={() => postMessage({ type: 'startPipelineRun' })}
+              onClick={() => setStartOpen(true)}
               className="flex w-full items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-primary"
             >
               <Play className="h-3 w-3" />
@@ -581,6 +586,16 @@ function ActiveRunsSection({
             </button>
           )}
         </div>
+      )}
+      {startOpen && (
+        <StartRunModal
+          pipelines={pipelines}
+          existingRunIds={runIds}
+          onStart={(pipelineId, runId) =>
+            postMessage({ type: 'startRunInline', pipelineId, runId })
+          }
+          onClose={() => setStartOpen(false)}
+        />
       )}
     </div>
   );

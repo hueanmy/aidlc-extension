@@ -14,19 +14,24 @@ import type { PipelineSummary, PipelineStepSummary, AgentSummary } from '@/lib/t
 import { postMessage } from '@/lib/bridge';
 import { ConfirmModal } from './ConfirmModal';
 import { StepPickerModal } from './StepPickerModal';
+import { StartRunModal } from './StartRunModal';
+import { StepConfigModal } from './StepConfigModal';
 
 export function PipelineCard({
   pipeline,
   agents,
+  runIds,
 }: {
   pipeline: PipelineSummary;
   agents: AgentSummary[];
+  runIds: string[];
 }) {
   const total = pipeline.steps.length;
   const [dragSrc, setDragSrc] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [runOpen, setRunOpen] = useState(false);
   return (
     <div className="rounded-lg border border-border bg-card p-3">
       <div className="flex items-center gap-2 border-b border-border pb-2">
@@ -35,7 +40,7 @@ export function PipelineCard({
         <div className="flex-1" />
         <button
           type="button"
-          onClick={() => postMessage({ type: 'runPipeline', pipelineId: pipeline.id })}
+          onClick={() => setRunOpen(true)}
           title="Start a pipeline run for this workflow"
           className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-primary hover:border-primary/60 hover:bg-primary/25"
         >
@@ -135,6 +140,23 @@ export function PipelineCard({
           onClose={() => setPickerOpen(false)}
         />
       )}
+      {runOpen && (
+        <StartRunModal
+          pipelines={[
+            {
+              id: pipeline.id,
+              stepCount: pipeline.steps.length,
+              onFailure: pipeline.on_failure,
+            },
+          ]}
+          preselectedPipelineId={pipeline.id}
+          existingRunIds={runIds}
+          onStart={(pipelineId, runId) =>
+            postMessage({ type: 'startRunInline', pipelineId, runId })
+          }
+          onClose={() => setRunOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -164,6 +186,7 @@ function FlowNode({
 }) {
   const requires = step.requires.length;
   const produces = step.produces.length;
+  const [configOpen, setConfigOpen] = useState(false);
   return (
     <>
       <div
@@ -201,7 +224,7 @@ function FlowNode({
           <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
             <NodeIcon
               title="Configure step (human review, auto review, requires, produces)"
-              onClick={() => postMessage({ type: 'editStepConfig', pipelineId, idx })}
+              onClick={() => setConfigOpen(true)}
             >
               <Settings className="h-2.5 w-2.5" />
             </NodeIcon>
@@ -276,6 +299,17 @@ function FlowNode({
             className="absolute -right-px top-1/2 -translate-y-1/2 border-y-[5px] border-l-[7px] border-y-transparent border-l-primary/45"
           />
         </div>
+      )}
+      {configOpen && (
+        <StepConfigModal
+          pipelineId={pipelineId}
+          idx={idx}
+          step={step}
+          onSubmit={(config) =>
+            postMessage({ type: 'editStepConfig', pipelineId, idx, config })
+          }
+          onClose={() => setConfigOpen(false)}
+        />
       )}
     </>
   );

@@ -248,7 +248,7 @@ function PipelinesGrid({ state }: { state: WorkspaceState }) {
   return (
     <div className="space-y-3">
       {state.pipelines.map((p) => (
-        <PipelineCard key={p.id} pipeline={p} agents={aidlcAgents} />
+        <PipelineCard key={p.id} pipeline={p} agents={aidlcAgents} runIds={state.runIds} />
       ))}
     </div>
   );

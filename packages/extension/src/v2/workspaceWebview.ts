@@ -37,7 +37,7 @@ import type {
 import { promptStepConfig } from './wizards';
 import { listEpics, type EpicSummary as CoreEpicSummary } from './epicsList';
 import { themeManager } from './themeManager';
-import { rejectStepInlineCommand } from './runCommands';
+import { rejectStepInlineCommand, startPipelineRunInlineCommand } from './runCommands';
 
 // ── Webview-side type shapes (must mirror src/webview/lib/types.ts) ───────
 
@@ -130,6 +130,8 @@ interface WorkspaceState {
   skillsCount: number;
   pipelinesCount: number;
   epicsCount: number;
+  /** All existing run ids (any status) — for inline Start-Run modal uniqueness check. */
+  runIds: string[];
   initialView?: WorkspaceView;
 }
 
@@ -145,6 +147,7 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
       agents: [], skills: [], pipelines: [], epics: [],
       agentMeta: {}, slashCommandsByAgent: {},
       agentsCount: 0, skillsCount: 0, pipelinesCount: 0, epicsCount: 0,
+      runIds: [],
       initialView,
     };
   }
@@ -193,6 +196,7 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
       skillsCount: skills.length,
       pipelinesCount: 0,
       epicsCount: epics.length,
+      runIds: listRunIds(root),
       initialView,
     };
   }
@@ -229,8 +233,17 @@ function buildState(initialView: WorkspaceView): WorkspaceState {
     skillsCount: skills.length,
     pipelinesCount: pipelines.length,
     epicsCount: epics.length,
+    runIds: listRunIds(root),
     initialView,
   };
+}
+
+function listRunIds(root: string): string[] {
+  try {
+    return RunStateStore.list(root).map((r) => r.runId);
+  } catch {
+    return [];
+  }
 }
 
 function toEpicSummaryUi(e: CoreEpicSummary): EpicSummaryUi {
@@ -589,6 +602,13 @@ export class WorkspaceWebview {
         await rejectStepInlineCommand(runId, reason, targetIdx);
         return;
       }
+      case 'startRunInline': {
+        const pipelineId = String(msg.pipelineId ?? '');
+        const runId = String(msg.runId ?? '');
+        if (!pipelineId || !runId) { return; }
+        await startPipelineRunInlineCommand(pipelineId, runId);
+        return;
+      }
       case 'startPipelineRunForEpic': {
         const epicId = String(msg.epicId ?? '').trim();
         const pipelineId = String(msg.pipelineId ?? '').trim();
@@ -614,9 +634,18 @@ export class WorkspaceWebview {
       case 'deleteStep':
         await this.deleteStep(String(msg.pipelineId ?? ''), Number(msg.idx ?? -1));
         return;
-      case 'editStepConfig':
-        await this.editStepConfig(String(msg.pipelineId ?? ''), Number(msg.idx ?? -1));
+      case 'editStepConfig': {
+        const inlineConfig =
+          msg.config && typeof msg.config === 'object'
+            ? (msg.config as Record<string, unknown>)
+            : undefined;
+        await this.editStepConfig(
+          String(msg.pipelineId ?? ''),
+          Number(msg.idx ?? -1),
+          inlineConfig,
+        );
         return;
+      }
       case 'deleteAgent':
         await this.deleteItem('agents', String(msg.id ?? ''), msg.confirmed === true);
         return;
@@ -725,7 +754,13 @@ export class WorkspaceWebview {
     });
   }
 
-  private async editStepConfig(pipelineId: string, idx: number): Promise<void> {
+  private async editStepConfig(
+    pipelineId: string,
+    idx: number,
+    /** Webview already collected the new config via inline StepConfigModal —
+     * apply it directly and skip promptStepConfig's QuickPick chain. */
+    inlineConfig?: Record<string, unknown>,
+  ): Promise<void> {
     if (!pipelineId || idx < 0) { return; }
     const root = this.getRootOrWarn();
     if (!root) { return; }
@@ -738,15 +773,39 @@ export class WorkspaceWebview {
     }
     const raw = pipeline.steps[idx] as PipelineStepConfig;
     const norm = normalizeStep(raw);
-    const draft = await promptStepConfig(norm.agent, {
-      enabled: norm.enabled,
-      requires: norm.requires,
-      produces: norm.produces,
-      human_review: norm.human_review,
-      auto_review: norm.auto_review,
-      auto_review_runner: norm.auto_review_runner,
-    });
-    if (!draft) { return; }
+    let draft;
+    if (inlineConfig) {
+      const requires = Array.isArray(inlineConfig.requires)
+        ? (inlineConfig.requires as unknown[]).map(String)
+        : [];
+      const produces = Array.isArray(inlineConfig.produces)
+        ? (inlineConfig.produces as unknown[]).map(String)
+        : [];
+      const runnerRaw = inlineConfig.auto_review_runner;
+      draft = {
+        agent: norm.agent,
+        enabled: inlineConfig.enabled === true,
+        requires,
+        produces,
+        human_review: inlineConfig.human_review === true,
+        auto_review: inlineConfig.auto_review === true,
+        auto_review_runner:
+          inlineConfig.auto_review === true && typeof runnerRaw === 'string' && runnerRaw.trim()
+            ? runnerRaw.trim()
+            : undefined,
+      };
+    } else {
+      const result = await promptStepConfig(norm.agent, {
+        enabled: norm.enabled,
+        requires: norm.requires,
+        produces: norm.produces,
+        human_review: norm.human_review,
+        auto_review: norm.auto_review,
+        auto_review_runner: norm.auto_review_runner,
+      });
+      if (!result) { return; }
+      draft = result;
+    }
     this.mutateYaml((d) => {
       const p = d.pipelines.find((x) => x.id === pipelineId);
       if (!p || !Array.isArray(p.steps) || idx >= p.steps.length) { return false; }

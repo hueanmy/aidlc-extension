@@ -63,6 +63,12 @@ export interface TemplateRef {
   description: string;
 }
 
+export interface PipelineRef {
+  id: string;
+  stepCount: number;
+  onFailure: 'stop' | 'continue';
+}
+
 export interface SidebarState {
   hasFolder: boolean;
   workspaceName: string;
@@ -76,6 +82,10 @@ export interface SidebarState {
   builtinTemplates: TemplateRef[];
   projectTemplates: TemplateRef[];
   activeRuns: ActiveRun[];
+  /** Lightweight pipeline list for the inline Start-Run modal. */
+  pipelines: PipelineRef[];
+  /** All existing run ids (any status) — used by the modal to validate uniqueness. */
+  runIds: string[];
 }
 
 export type AssetScope = 'project' | 'aidlc' | 'global';
@@ -177,6 +187,8 @@ export interface WorkspaceState {
   skillsCount: number;
   pipelinesCount: number;
   epicsCount: number;
+  /** All existing run ids (any status) — for inline Start-Run modal uniqueness check. */
+  runIds: string[];
   /** Initial view to render when the panel first opens. */
   initialView?: WorkspaceView;
 }

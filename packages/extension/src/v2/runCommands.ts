@@ -93,6 +93,59 @@ async function resolveRunId(
 
 // ── start ────────────────────────────────────────────────────────────────
 
+/**
+ * Webview-driven start: caller (the React StartRunModal) supplies pipelineId
+ * and runId directly so we skip showQuickPick + showInputBox. The validations
+ * the input box did (RUN_ID_PATTERN, no duplicate) also run inside the modal,
+ * so the only re-checks here are server-side safety nets — invalid inputs
+ * just fall through to a warning toast.
+ */
+export async function startPipelineRunInlineCommand(
+  pipelineId: string,
+  runId: string,
+): Promise<void> {
+  const root = requireRoot('Start Pipeline Run');
+  if (!root) { return; }
+
+  const id = pipelineId.trim();
+  const rid = runId.trim();
+  if (!id || !rid) { return; }
+  if (!RUN_ID_PATTERN.test(rid)) {
+    void vscode.window.showWarningMessage(
+      `Invalid run id "${rid}" — must match ${RUN_ID_PATTERN}.`,
+    );
+    return;
+  }
+
+  const doc = readYaml(root);
+  if (!doc || !Array.isArray(doc.pipelines)) {
+    void vscode.window.showWarningMessage('AIDLC: no workspace.yaml or no pipelines defined.');
+    return;
+  }
+  const pipeline = (doc.pipelines as PipelineConfig[]).find((p) => p.id === id);
+  if (!pipeline) {
+    void vscode.window.showWarningMessage(`Pipeline "${id}" not found in workspace.yaml.`);
+    return;
+  }
+  if (RunStateStore.load(root, rid)) {
+    void vscode.window.showWarningMessage(`Run "${rid}" already exists.`);
+    return;
+  }
+
+  const state = startRun({
+    runId: rid,
+    pipeline,
+    context: { work: rid },
+  });
+  RunStateStore.save(root, state);
+
+  const firstStep = pipeline.steps[0];
+  const firstAgent = typeof firstStep === 'string' ? firstStep : firstStep.agent;
+  void vscode.window.showInformationMessage(
+    `Started run "${rid}" — first step: ${firstAgent}. Run /${firstAgent} ${rid} in Claude, then click "Mark step done" in the sidebar.`,
+  );
+}
+
 export async function startPipelineRunCommand(pipelineIdArg?: string): Promise<void> {
   const root = requireRoot('Start Pipeline Run');
   if (!root) { return; }
