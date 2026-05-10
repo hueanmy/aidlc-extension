@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.9.0
+
+- feat(ast-graph): auto-scan workspace + wire as Claude MCP server
+- fix(report): label $ as API-equivalent, lead overview with tokens
+- feat(report): full Token Usage Report panel from status bar click
+- feat(sidebar): cost suggestions list + detail are stacked modals
+- feat(sidebar): cost suggestions list moves into a popup
+- fix(sidebar): cap cost-suggestions list height + tighter rows
+- fix(sidebar): cost suggestions open in a modal — inline expand was too cramped
+- feat(sidebar): cost-suggestion engine ported from claude-token-monitor
+- fix(demo): scale synthetic usage ~10× smaller so demo doesn't scare users
+- feat(demo): synthetic token usage so demo epics showcase the ⚡ badge
+- feat(epics): per-history-entry token usage in step history
+- feat(token-monitor): tokens primary, $ as API-equivalent secondary
+- fix(epics): drop run-level fallback for token attribution
+- feat(epics): per-epic + per-step token usage badge
+- chore(cli): prep aidlc for npm publish
+- feat(extension): token monitor status bar — today/month Claude spend
+- feat(epics): "Load from file…" for description / feedback
+- feat(sidebar): "MCP servers" section — show what Claude is connected to
+- fix(epics): migration toast surfaces *why* epics were skipped
+- feat(epics): migration backfills runState for legacy epics that only have state.json
+- feat(epics): "Migrate Epic State Files" command — bring legacy state.json up to current schema
+- feat(sidebar): inline "Load Demo Project" picker — replace VS Code notification
+- fix(epics): "Run with Claude" first-time runs skip the modal
+- fix(epics): button label is "Run with Claude" until the step has actually started
+- feat(runs): "Request update" — reopen approved steps when requirements change
+- feat(epics): live artifact refresh + Update-with-feedback modal w/ optional input
+- feat(epics): "Run in Claude" button on awaiting_work steps — no more manual copy
+- fix(demo): mirror agents into .claude/commands so slash commands work in Claude Code
+- fix(epics): "Update with feedback" sends prompt INTO the Claude REPL, not the shell
+- feat(epics): "Update with feedback" button — pre-types slash command into Claude
+- feat(demo): two example epics with rich step history
+- feat(epics): mirror run state into docs/epics/<id>/state.json on every transition
+- feat(runs): per-step append-only history (reject reasons, reruns, verdicts)
+- fix(epics): step badge and epic status now reflect run-state advances
+- feat(webview): inline Rerun + SavePreset + Apply-overwrite confirm
+- feat(webview): inline StartEpicModal — pipeline/agent + capability inputs in one form
+- feat(webview): inline AddAgent + AddSkill modals (Tier 3)
+- feat(webview): edit existing pipelines via inline modal
+- feat(webview): inline AddPipelineModal — pick + configure all steps in one form
+- feat(webview): inline modals for start-run and edit-step-config (Tier 2)
+- feat(webview): inline modals for rename, delete confirm, add step (Tier 1)
+- fix(core): AutoReviewer dynamic import — use native import() under module:node16
+- feat(runs): inline Reject modal — no more VS Code input box pop-up
+- feat: migrate webview to React + Vite; mono+teal theme; restore drag-and-drop step reorder
+
 ## 0.8.6
 
 - feat: collapsible run cards in pipeline runs sidebar
