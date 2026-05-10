@@ -344,6 +344,48 @@ export async function rejectStepCommand(runIdArg?: string): Promise<void> {
 }
 
 /**
+ * Webview-driven reject: caller (the React modal) supplies reason and
+ * targetIdx directly so we skip the VS Code showInputBox + showQuickPick
+ * dialogs that `rejectStepCommand` would normally pop. Same downstream
+ * state transition + toast.
+ */
+export async function rejectStepInlineCommand(
+  runId: string,
+  reason: string,
+  targetIdx: number,
+): Promise<void> {
+  const root = requireRoot('Reject Step');
+  if (!root) { return; }
+  const state = RunStateStore.load(root, runId);
+  if (!state) { return; }
+  const idx = state.currentStepIdx;
+  const currentStep = state.steps[idx];
+  if (!currentStep) { return; }
+  if (!Number.isInteger(targetIdx) || targetIdx < 0 || targetIdx > idx) { return; }
+
+  try {
+    const next = rejectStep({
+      state,
+      reason: reason.trim() || undefined,
+      targetIdx: targetIdx === idx ? undefined : targetIdx,
+    });
+    RunStateStore.save(root, next);
+    if (targetIdx === idx) {
+      void vscode.window.showInformationMessage(
+        `Rejected step "${currentStep.agent}". Click "Rerun" in the sidebar when ready.`,
+      );
+    } else {
+      const target = state.steps[targetIdx];
+      void vscode.window.showInformationMessage(
+        `Rejected step "${currentStep.agent}" → sent back to step ${targetIdx + 1} "${target.agent}". Intermediate steps reset to pending.`,
+      );
+    }
+  } catch (err) {
+    surfaceRunError(err);
+  }
+}
+
+/**
  * Quickpick for "send the rejected work back to which step?".
  * Returns the chosen step index, or undefined if the user dismissed the
  * picker. The first item is the current step (in-place rerun) — that's the

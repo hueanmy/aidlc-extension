@@ -229,21 +229,35 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "typecheck": "tsc -p ./ --noEmit",
+    "typecheck": "tsc -p ./ --noEmit && tsc -p ./tsconfig.webview.json --noEmit",
+    "bundle:webviews": "vite build",
     "bundle": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --format=cjs --outfile=out/extension.js",
     "bundle:prod": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --format=cjs --minify --outfile=out/extension.js",
-    "package": "pnpm typecheck && pnpm bundle:prod && vsce package --no-dependencies"
+    "clean:out": "rm -rf out",
+    "package": "pnpm typecheck && pnpm clean:out && pnpm bundle:webviews && pnpm bundle:prod && vsce package --no-dependencies"
   },
   "dependencies": {
     "@aidlc/core": "workspace:*",
     "js-yaml": "^4.1.1"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.2.4",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@types/vscode": "^1.85.0",
+    "@vitejs/plugin-react": "^5.2.0",
     "@vscode/vsce": "^3.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "esbuild": "^0.24.0",
-    "typescript": "^5.3.0"
+    "lucide-react": "^0.453.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.2.4",
+    "typescript": "^5.3.0",
+    "vite": "^7.3.3"
   }
 }

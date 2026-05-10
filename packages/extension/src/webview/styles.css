@@ -1,0 +1,140 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-surface: var(--surface);
+  --color-surface-foreground: var(--surface-foreground);
+  --font-mono: "JetBrains Mono", "SF Mono", Menlo, "Cascadia Code", Consolas, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+}
+
+:root {
+  --radius: 0.5rem;
+  --background: #FAFAFA;
+  --foreground: #18181B;
+  --card: #FFFFFF;
+  --card-foreground: #18181B;
+  --popover: #FFFFFF;
+  --popover-foreground: #18181B;
+  --primary: #0D9488;
+  --primary-foreground: #FFFFFF;
+  --secondary: #F4F4F5;
+  --secondary-foreground: #52525B;
+  --muted: #F4F4F5;
+  --muted-foreground: #71717A;
+  --accent: #F4F4F5;
+  --accent-foreground: #18181B;
+  --destructive: #DC2626;
+  --destructive-foreground: #FFFFFF;
+  --border: #E4E4E7;
+  --input: #E4E4E7;
+  --ring: #0D9488;
+  --success: #0D9488;
+  --success-foreground: #FFFFFF;
+  --warning: #CA8A04;
+  --warning-foreground: #FFFFFF;
+  --info: #0D9488;
+  --info-foreground: #FFFFFF;
+  --surface: #FFFFFF;
+  --surface-foreground: #27272A;
+  --sidebar: #FAFAFA;
+  --sidebar-foreground: #52525B;
+  --sidebar-primary: #0D9488;
+  --sidebar-primary-foreground: #FFFFFF;
+  --sidebar-accent: #F4F4F5;
+  --sidebar-accent-foreground: #18181B;
+  --sidebar-border: #E4E4E7;
+  --sidebar-ring: #0D9488;
+}
+
+.dark {
+  --background: #0A0A0A;
+  --foreground: rgba(255, 255, 255, 0.92);
+  --card: #131313;
+  --card-foreground: rgba(255, 255, 255, 0.92);
+  --popover: #1A1A1A;
+  --popover-foreground: rgba(255, 255, 255, 0.92);
+  --primary: #2DD4BF;
+  --primary-foreground: #0A0A0A;
+  --secondary: rgba(255, 255, 255, 0.06);
+  --secondary-foreground: rgba(255, 255, 255, 0.62);
+  --muted: rgba(255, 255, 255, 0.05);
+  --muted-foreground: rgba(255, 255, 255, 0.48);
+  --accent: rgba(255, 255, 255, 0.07);
+  --accent-foreground: rgba(255, 255, 255, 0.92);
+  --destructive: #F87171;
+  --destructive-foreground: #0A0A0A;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.06);
+  --ring: #2DD4BF;
+  --success: #2DD4BF;
+  --success-foreground: #0A0A0A;
+  --warning: #FACC15;
+  --warning-foreground: #0A0A0A;
+  --info: #2DD4BF;
+  --info-foreground: #0A0A0A;
+  --surface: #131313;
+  --surface-foreground: rgba(255, 255, 255, 0.62);
+  --sidebar: #0A0A0A;
+  --sidebar-foreground: rgba(255, 255, 255, 0.62);
+  --sidebar-primary: #2DD4BF;
+  --sidebar-primary-foreground: #0A0A0A;
+  --sidebar-accent: rgba(255, 255, 255, 0.07);
+  --sidebar-accent-foreground: rgba(255, 255, 255, 0.92);
+  --sidebar-border: rgba(255, 255, 255, 0.08);
+  --sidebar-ring: #2DD4BF;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html, body {
+    height: 100%;
+  }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    margin: 0;
+  }
+}

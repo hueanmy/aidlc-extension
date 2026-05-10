@@ -26,7 +26,7 @@ import {
   addAgentCommand,
   addPipelineCommand,
 } from './wizards';
-import { BuilderPanel } from './builderWebview';
+import { WorkspaceWebview } from './workspaceWebview';
 import { PresetStore } from './presetStore';
 import {
   savePresetCommand,
@@ -35,7 +35,6 @@ import {
 } from './presetWizards';
 import { loadSdlcPreset } from './builtinPresets';
 import { startEpicCommand } from './epicWizard';
-import { EpicsPanel } from './epicsPanelWebview';
 import { insertDemoEpicCommand } from './demoEpic';
 import { loadDemoProjectCommand } from './demoProject';
 import {
@@ -121,7 +120,7 @@ export function registerV2WorkspaceCommands(
 
   const openBuilderCmd = vscode.commands.registerCommand(
     'aidlc.openBuilder',
-    () => BuilderPanel.show(context.extensionUri),
+    () => WorkspaceWebview.show(context.extensionUri, 'builder'),
   );
 
   // Preset library — single store instance shared across all preset commands
@@ -156,7 +155,7 @@ export function registerV2WorkspaceCommands(
 
   const openEpicsListCmd = vscode.commands.registerCommand(
     'aidlc.openEpicsList',
-    () => EpicsPanel.show(context.extensionUri),
+    () => WorkspaceWebview.show(context.extensionUri, 'epics'),
   );
 
   const insertDemoEpicCmd = vscode.commands.registerCommand(

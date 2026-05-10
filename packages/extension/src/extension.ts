@@ -19,6 +19,7 @@ import { exec } from 'child_process';
 
 import { registerV2WorkspaceCommands } from './v2/workspaceCommands';
 import { SidebarWebviewProvider } from './v2/sidebarWebview';
+import { themeManager } from './v2/themeManager';
 import { WORKSPACE_DIR, WORKSPACE_FILENAME } from '@aidlc/core';
 
 export function activate(context: vscode.ExtensionContext): void {
@@ -26,6 +27,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(output);
 
   output.appendLine('Activating AIDLC Flow extension');
+
+  // Theme override manager — owns the persisted `auto|light|dark` choice
+  // and broadcasts user toggles to every open webview.
+  themeManager.init(context);
 
   // Commands (Show Workspace Config, Init, Add Skill/Agent/Pipeline, Open
   // Builder, Open Claude CLI). All under `aidlc.*` namespace.

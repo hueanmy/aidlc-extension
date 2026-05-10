@@ -95,13 +95,12 @@ export async function runAutoReview(args: {
 
   let mod: { default?: AutoReviewerFn } | AutoReviewerFn;
   try {
-    // Dynamic import accepts file:// URLs which is the most reliable form
-    // of cross-module loading for both CJS and ESM scripts. We construct
-    // the importer via `new Function` so TypeScript's CommonJS transpiler
-    // doesn't rewrite this into `require()` (which can't load file:// URLs).
+    // Dynamic import accepts file:// URLs — the most reliable form of
+    // cross-module loading for both CJS and ESM (.mjs) scripts. tsconfig
+    // `module: node16` keeps this `import()` as native, so it's NOT
+    // rewritten into `require()` (which can't load file:// or .mjs).
     const url = pathToFileURL(scriptPath).href;
-    const dynamicImport = new Function('u', 'return import(u)') as (u: string) => Promise<unknown>;
-    mod = await dynamicImport(url) as typeof mod;
+    mod = (await import(url)) as typeof mod;
   } catch (err) {
     throw new AutoReviewerError(
       `Failed to load auto_review_runner "${norm.auto_review_runner}": ${err instanceof Error ? err.message : String(err)}`,
