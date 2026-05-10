@@ -483,7 +483,7 @@ function seedRichEpic(root: string, epicId: string, opts: SeedRichEpicOpts): voi
   // verbatim when present (`<runId>.usage.json` next to `<runId>.json`).
   writeJson(
     path.join(root, '.aidlc', 'runs', `${epicId}.usage.json`),
-    buildRichEpicSyntheticUsage(steps, opts),
+    buildRichEpicSyntheticUsage(steps),
   );
 
   // Mirror into state.json so a teammate who only pulls the repo (and
@@ -543,21 +543,22 @@ function seedRichEpic(root: string, epicId: string, opts: SeedRichEpicOpts): voi
   }
 }
 
-// Per-agent "typical Opus 4.x usage" for a single attempt. Numbers are
-// hand-tuned to look plausible: planning is cheap, implement/review are
-// expensive, doc-sync is cheap. Cache-heavy because that's the norm.
+// Per-agent synthetic usage for a single attempt — deliberately small so
+// the demo doesn't make new users panic about cost on day one. Cache-heavy
+// because that's the norm for short Claude Code sessions. Full pipeline
+// sums to roughly $1 (Opus API equivalent) for a clean run; reruns scale.
 const SYNTHETIC_USAGE_BY_AGENT: Record<string, {
   cost: number; in: number; out: number; cr: number; cw: number; calls: number;
 }> = {
-  'demo-plan':      { cost:  0.42, in:  1200, out:   900, cr: 220_000, cw:  6_000, calls:  6 },
-  'demo-design':    { cost:  1.10, in:  2100, out:  2400, cr: 530_000, cw: 14_000, calls: 14 },
-  'demo-implement': { cost:  3.85, in:  3800, out:  5600, cr: 1_900_000, cw: 42_000, calls: 38 },
-  'demo-review':    { cost:  1.95, in:  2400, out:  3100, cr:   980_000, cw: 22_000, calls: 22 },
-  'demo-release':   { cost:  0.55, in:  1100, out:   800, cr:   270_000, cw:  7_500, calls:  8 },
+  'demo-plan':      { cost: 0.05, in:  400, out:  300, cr:  22_000, cw:  900, calls: 3 },
+  'demo-design':    { cost: 0.12, in:  600, out:  700, cr:  55_000, cw: 1_800, calls: 5 },
+  'demo-implement': { cost: 0.38, in:  900, out: 1400, cr: 180_000, cw: 4_400, calls: 9 },
+  'demo-review':    { cost: 0.18, in:  700, out:  900, cr:  85_000, cw: 2_200, calls: 6 },
+  'demo-release':   { cost: 0.06, in:  400, out:  300, cr:  27_000, cw:  900, calls: 3 },
 };
 
 const DEFAULT_SYNTHETIC_USAGE = {
-  cost: 0.50, in: 1500, out: 1200, cr: 300_000, cw: 10_000, calls: 10,
+  cost: 0.10, in: 500, out: 400, cr: 40_000, cw: 1_200, calls: 4,
 };
 
 /**
@@ -572,10 +573,9 @@ const DEFAULT_SYNTHETIC_USAGE = {
  */
 function buildRichEpicSyntheticUsage(
   steps: Array<Record<string, unknown>>,
-  opts: SeedRichEpicOpts,
 ): Record<string, unknown> {
   let totalCost = 0, totalTokens = 0, totalCalls = 0;
-  const stepPayloads = steps.map((s, i) => {
+  const stepPayloads = steps.map((s) => {
     const agent = String(s.agent);
     const base = SYNTHETIC_USAGE_BY_AGENT[agent] ?? DEFAULT_SYNTHETIC_USAGE;
     const status = String(s.status);
