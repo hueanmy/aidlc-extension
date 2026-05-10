@@ -13,6 +13,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 
 import { lookupSymbol, runReadCommand, type ScanSummary, type SymbolDetail } from './scanner';
+import { themeManager } from '../themeManager';
 
 export interface AstGraphRuntime {
   /** Resolved on activation — may be null while the binary is still downloading. */
@@ -97,6 +98,9 @@ export class AstGraphReportWebview {
       null,
       this.disposables,
     );
+    // Mirror the AIDLC theme override into this webview so the user's
+    // auto/light/dark toggle (driven from other AIDLC views) reaches us.
+    this.disposables.push(themeManager.register(this.panel.webview));
     void this.refresh();
   }
 
@@ -146,6 +150,13 @@ export class AstGraphReportWebview {
       case 'ready':
         void this.refresh();
         return;
+      case 'setTheme': {
+        const mode = String(msg.mode ?? '');
+        if (mode === 'auto' || mode === 'light' || mode === 'dark') {
+          await themeManager.set(mode);
+        }
+        return;
+      }
       case 'rescan':
         await this.runtime.rescan(true);
         void this.refresh();
@@ -215,6 +226,7 @@ export class AstGraphReportWebview {
 
   private html(): string {
     const nonce = makeNonce();
+    const initialTheme = themeManager.current;
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -223,19 +235,76 @@ export class AstGraphReportWebview {
   content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <title>AST Graph</title>
 <style>
+  /*
+   * Theme palette
+   * ─────────────
+   * Auto mode (default): every --ast-* token falls through to a
+   *   --vscode-* variable so we inherit whatever VS Code currently shows.
+   * Forced light/dark (data-theme attribute set by JS): the tokens flip
+   *   to a hardcoded palette so AIDLC's theme toggle wins over VS Code.
+   * Only the *neutral* surface colours are forced; semantic accents
+   *   (charts, symbolIcon-*) keep using VS Code's variables since they
+   *   already contrast well in both themes.
+   */
   :root {
     --gap: 14px;
     --radius: 6px;
     --mono: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, monospace);
-    --border: var(--vscode-editorWidget-border, var(--vscode-panel-border, rgba(127,127,127,.25)));
-    --muted: var(--vscode-descriptionForeground);
-    --surface: var(--vscode-editorWidget-background, rgba(127,127,127,.06));
+
+    --ast-bg:           var(--vscode-editor-background);
+    --ast-fg:           var(--vscode-foreground);
+    --ast-muted:        var(--vscode-descriptionForeground);
+    --ast-surface:      var(--vscode-editorWidget-background, rgba(127,127,127,.06));
+    --ast-border:       var(--vscode-editorWidget-border, var(--vscode-panel-border, rgba(127,127,127,.25)));
+    --ast-input-bg:     var(--vscode-input-background, var(--ast-surface));
+    --ast-input-fg:     var(--vscode-input-foreground, var(--ast-fg));
+    --ast-input-border: var(--vscode-input-border, var(--ast-border));
+    --ast-hover:        var(--vscode-list-hoverBackground, rgba(127,127,127,.08));
+    --ast-selection:    var(--vscode-list-activeSelectionBackground, var(--vscode-charts-blue, #4a90e2));
+    --ast-code-bg:      var(--vscode-textCodeBlock-background, rgba(127,127,127,.12));
+    --ast-link:         var(--vscode-textLink-foreground, var(--vscode-charts-blue, #4a90e2));
+    --ast-focus:        var(--vscode-focusBorder, var(--vscode-charts-blue, #4a90e2));
+
+    /* Local aliases kept for the rest of the stylesheet */
+    --border: var(--ast-border);
+    --muted: var(--ast-muted);
+    --surface: var(--ast-surface);
   }
+
+  /* Forced dark — overrides regardless of VS Code's own theme. */
+  :root[data-theme="dark"] {
+    --ast-bg:           #1e1e1e;
+    --ast-fg:           #d4d4d4;
+    --ast-muted:        #9b9b9b;
+    --ast-surface:      #252526;
+    --ast-border:       #3c3c3c;
+    --ast-input-bg:     #2d2d2d;
+    --ast-input-fg:     #d4d4d4;
+    --ast-input-border: #3c3c3c;
+    --ast-hover:        rgba(255,255,255,0.05);
+    --ast-selection:    rgba(74,144,226,0.22);
+    --ast-code-bg:      rgba(255,255,255,0.06);
+  }
+  /* Forced light. */
+  :root[data-theme="light"] {
+    --ast-bg:           #ffffff;
+    --ast-fg:           #1f1f1f;
+    --ast-muted:        #6a6a6a;
+    --ast-surface:      #f6f6f6;
+    --ast-border:       #e0e0e0;
+    --ast-input-bg:     #ffffff;
+    --ast-input-fg:     #1f1f1f;
+    --ast-input-border: #d4d4d4;
+    --ast-hover:        rgba(0,0,0,0.04);
+    --ast-selection:    rgba(74,144,226,0.16);
+    --ast-code-bg:      rgba(0,0,0,0.05);
+  }
+
   *, *::before, *::after { box-sizing: border-box; }
   body {
     font-family: var(--vscode-font-family);
-    color: var(--vscode-foreground);
-    background: var(--vscode-editor-background);
+    color: var(--ast-fg);
+    background: var(--ast-bg);
     padding: 18px 22px 40px;
     margin: 0;
     font-size: 13px;
@@ -286,7 +355,7 @@ export class AstGraphReportWebview {
   button:hover:not([disabled]) { background: var(--vscode-button-hoverBackground); }
   button.secondary {
     background: transparent;
-    color: var(--vscode-foreground);
+    color: var(--ast-fg);
     border: 1px solid var(--border);
   }
   button.secondary:hover:not([disabled]) { background: var(--surface); }
@@ -299,13 +368,13 @@ export class AstGraphReportWebview {
   section .section-head .count { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
   section .section-head input.filter {
     margin-left: auto;
-    background: var(--vscode-input-background, var(--surface));
-    color: var(--vscode-input-foreground, inherit);
-    border: 1px solid var(--vscode-input-border, var(--border));
+    background: var(--ast-input-bg);
+    color: var(--ast-input-fg);
+    border: 1px solid var(--ast-input-border);
     border-radius: 4px; padding: 3px 8px; font-size: 12px; min-width: 180px;
     font-family: inherit;
   }
-  section .section-head input.filter:focus { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+  section .section-head input.filter:focus { outline: 1px solid var(--ast-focus); outline-offset: -1px; }
 
   /* Hotspots table */
   table.hot { border-collapse: collapse; width: 100%; table-layout: fixed; }
@@ -327,7 +396,7 @@ export class AstGraphReportWebview {
     display: inline-block; padding: 1px 7px; border-radius: 3px;
     font-size: 11px; line-height: 16px;
     background: var(--kind-bg, color-mix(in srgb, var(--muted) 15%, transparent));
-    color: var(--kind-fg, var(--vscode-foreground));
+    color: var(--kind-fg, var(--ast-fg));
     border: 1px solid color-mix(in srgb, var(--kind-fg, var(--muted)) 30%, transparent);
   }
   .kind[data-kind="Method"]      { --kind-fg: var(--vscode-symbolIcon-methodForeground, #6cb6ff); }
@@ -365,8 +434,8 @@ export class AstGraphReportWebview {
 
   /* Hotspot rows clickable */
   table.hot tbody tr { cursor: pointer; }
-  table.hot tbody tr:hover { background: color-mix(in srgb, var(--vscode-list-hoverBackground, rgba(127,127,127,.08)) 100%, transparent); }
-  table.hot tbody tr.selected { background: color-mix(in srgb, var(--vscode-list-activeSelectionBackground, var(--vscode-charts-blue, #4a90e2)) 25%, transparent); }
+  table.hot tbody tr:hover { background: var(--ast-hover); }
+  table.hot tbody tr.selected { background: color-mix(in srgb, var(--ast-selection) 35%, transparent); }
 
   /* Symbol detail tree */
   .symbol-detail {
@@ -377,10 +446,10 @@ export class AstGraphReportWebview {
   .symbol-detail .header { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
   .symbol-detail .header .sym-name { font-family: var(--mono); font-size: 13.5px; font-weight: 600; }
   .symbol-detail .header .sym-loc { color: var(--muted); font-size: 11.5px; font-family: var(--mono); cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
-  .symbol-detail .header .sym-loc:hover { color: var(--vscode-textLink-foreground); }
+  .symbol-detail .header .sym-loc:hover { color: var(--ast-link); }
   .symbol-detail .sig {
     margin-top: 6px; padding: 6px 8px; border-radius: 4px;
-    background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.08));
+    background: var(--ast-code-bg);
     font-family: var(--mono); font-size: 12px;
     white-space: pre-wrap; word-break: break-word;
   }
@@ -402,7 +471,7 @@ export class AstGraphReportWebview {
     display: flex; align-items: baseline; gap: 8px;
     font-size: 12px;
   }
-  .symbol-detail .tree-col li:hover { background: var(--vscode-list-hoverBackground, rgba(127,127,127,.06)); }
+  .symbol-detail .tree-col li:hover { background: var(--ast-hover); }
   .symbol-detail .tree-col li:last-child { border-bottom: none; }
   .symbol-detail .tree-col li::before {
     content: ''; position: absolute; left: 0; top: 50%;
@@ -425,8 +494,32 @@ export class AstGraphReportWebview {
     margin-left: auto; background: transparent; border: 1px solid var(--border);
     color: var(--muted); padding: 2px 8px; border-radius: 3px; font-size: 11px; cursor: pointer;
   }
-  .symbol-detail .close:hover { background: var(--surface); color: var(--vscode-foreground); }
+  .symbol-detail .close:hover { background: var(--surface); color: var(--ast-fg); }
   .symbol-detail .err { color: var(--vscode-charts-red, #cf222e); font-size: 12px; }
+
+  /* Theme toggle segmented control */
+  .theme-toggle {
+    margin-left: auto;
+    display: inline-flex;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    overflow: hidden;
+    font-size: 11px;
+  }
+  .theme-toggle button {
+    background: transparent;
+    color: var(--muted);
+    border: none;
+    padding: 3px 10px;
+    cursor: pointer;
+    font-family: inherit;
+    border-radius: 0;
+  }
+  .theme-toggle button:hover { background: var(--ast-hover); color: var(--ast-fg); }
+  .theme-toggle button[aria-pressed="true"] {
+    background: color-mix(in srgb, var(--ast-selection) 40%, transparent);
+    color: var(--ast-fg);
+  }
 
   @media (max-width: 720px) {
     .symbol-detail .tree { grid-template-columns: 1fr; }
@@ -437,6 +530,11 @@ export class AstGraphReportWebview {
 <div class="head">
   <h1>AST Graph</h1>
   <div class="meta" id="header">Loading…</div>
+  <div class="theme-toggle" role="group" aria-label="Theme">
+    <button data-theme-mode="auto" aria-pressed="false" title="Follow VS Code theme">Auto</button>
+    <button data-theme-mode="light" aria-pressed="false" title="Force light">Light</button>
+    <button data-theme-mode="dark" aria-pressed="false" title="Force dark">Dark</button>
+  </div>
 </div>
 
 <div class="pill-row" id="status"></div>
@@ -485,6 +583,45 @@ let filterQuery = '';
 let selectedSymbol = null;
 let symbolRequestId = 0;
 let symbolLoading = false;
+
+// Theme management ---------------------------------------------------------
+let themeMode = ${JSON.stringify(initialTheme)};
+let themeObserver = null;
+
+function detectVsCodeMode() {
+  const cls = (document.body && document.body.className) || '';
+  return (cls.indexOf('vscode-dark') >= 0 || cls.indexOf('vscode-high-contrast') >= 0)
+    ? 'dark'
+    : 'light';
+}
+
+function applyTheme(mode) {
+  themeMode = (mode === 'light' || mode === 'dark') ? mode : 'auto';
+  if (themeObserver) { themeObserver.disconnect(); themeObserver = null; }
+  if (themeMode === 'auto') {
+    // Mirror VS Code's body class onto our root data-theme so charts/etc.
+    // that read from --ast-* also flip correctly. Body class can change
+    // without a reload when the user swaps themes inside VS Code.
+    const resolve = () => { document.documentElement.dataset.theme = detectVsCodeMode(); };
+    resolve();
+    themeObserver = new MutationObserver(resolve);
+    themeObserver.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  } else {
+    document.documentElement.dataset.theme = themeMode;
+  }
+  // Reflect on the toggle pills.
+  for (const btn of document.querySelectorAll('.theme-toggle button')) {
+    btn.setAttribute('aria-pressed', String(btn.dataset.themeMode === themeMode));
+  }
+}
+applyTheme(themeMode);
+for (const btn of document.querySelectorAll('.theme-toggle button')) {
+  btn.addEventListener('click', () => {
+    const next = btn.dataset.themeMode;
+    applyTheme(next);
+    vscode.postMessage({ type: 'setTheme', mode: next });
+  });
+}
 
 function fmt(n) {
   if (typeof n !== 'number') return n;
@@ -845,6 +982,13 @@ window.addEventListener('message', (ev) => {
   if (!msg) return;
   if (msg.type === 'state') {
     render(msg.state);
+    return;
+  }
+  if (msg.type === 'themeOverride') {
+    // Broadcast from themeManager when another AIDLC panel toggles.
+    if (msg.mode === 'auto' || msg.mode === 'light' || msg.mode === 'dark') {
+      applyTheme(msg.mode);
+    }
     return;
   }
   if (msg.type === 'symbol') {
