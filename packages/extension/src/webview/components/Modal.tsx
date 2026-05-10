@@ -11,12 +11,25 @@ interface Props {
   maxWidth?: string;
   /** Optional Cmd/Ctrl+Enter handler. */
   onSubmit?: () => void;
+  /** When true, suppresses Esc / backdrop-click handlers. Used by the
+   * outer modal in a stacked-modal pair so the inner modal's Esc doesn't
+   * also dismiss the outer one. */
+  inactive?: boolean;
 }
 
-export function Modal({ title, subtitle, onClose, children, maxWidth = 'max-w-md', onSubmit }: Props) {
+export function Modal({
+  title,
+  subtitle,
+  onClose,
+  children,
+  maxWidth = 'max-w-md',
+  onSubmit,
+  inactive = false,
+}: Props) {
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (inactive) { return; }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -28,12 +41,12 @@ export function Modal({ title, subtitle, onClose, children, maxWidth = 'max-w-md
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, onSubmit]);
+  }, [onClose, onSubmit, inactive]);
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={onClose}
+      onClick={inactive ? undefined : onClose}
     >
       <div
         ref={panelRef}

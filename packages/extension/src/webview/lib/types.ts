@@ -88,6 +88,81 @@ export interface McpServerInfo {
   statusText: string;
 }
 
+export type SuggestionSeverity = 'high' | 'med' | 'low';
+
+export interface CostSuggestion {
+  rule: string;
+  severity: SuggestionSeverity;
+  scope: string;
+  evidence: string;
+  action: string;
+  /** USD; 0 when the rule doesn't quantify a saving. */
+  estSavings: number;
+}
+
+// ── Token report ──────────────────────────────────────────────────────────
+export interface UsageTotals {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost: number;
+  calls: number;
+}
+
+export interface OverviewStats {
+  sessions: number;
+  projects: number;
+  calls: number;
+  cacheHitRate: number;
+  totalTokens: number;
+  totalCost: number;
+}
+
+export interface ModelRow extends UsageTotals {
+  model: string;
+  hitRate: number;
+  costShare: number;
+}
+
+export interface DailyRow extends UsageTotals {
+  date: string;
+}
+
+export interface ProjectRow extends UsageTotals {
+  project: string;
+  displayPath: string;
+  lastActive: string;
+  costShare: number;
+}
+
+export interface HeatmapRow {
+  dow: number;
+  label: string;
+  hours: number[];
+  rowTotal: number;
+}
+
+export interface TokenReport {
+  generatedAt: string;
+  windowDays: number;
+  overview: OverviewStats;
+  byModel: ModelRow[];
+  daily: DailyRow[];
+  topProjects: ProjectRow[];
+  heatmap: HeatmapRow[];
+  heatmapPeak: number;
+  suggestions: CostSuggestion[];
+  estPotentialSavings: number;
+}
+
+export interface TokenReportPanelState {
+  report: TokenReport | null;
+  loading: boolean;
+  error: string | null;
+  windowDays: number;
+}
+
 export interface SidebarState {
   hasFolder: boolean;
   workspaceName: string;

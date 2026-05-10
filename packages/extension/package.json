@@ -163,6 +163,12 @@
           "default": 60,
           "minimum": 15,
           "description": "How often to re-scan ~/.claude/projects for new usage records (seconds, minimum 15)."
+        },
+        "aidlc.tokenMonitor.suggestionWindowDays": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "description": "Window the cost-suggestion engine scans (in days). Older logs are skipped — they don't reflect current habits."
         }
       }
     },

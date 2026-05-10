@@ -134,7 +134,10 @@ interface McpSnapshot {
   error: string | null;
 }
 
-function buildState(presetStore: PresetStore | null, mcp: McpSnapshot): SidebarState {
+function buildState(
+  presetStore: PresetStore | null,
+  mcp: McpSnapshot,
+): SidebarState {
   const demoProjectExists = fs.existsSync(path.join(os.homedir(), DEMO_DIR_NAME));
   const folder = vscode.workspace.workspaceFolders?.[0];
   if (!folder) {

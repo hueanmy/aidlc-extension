@@ -608,6 +608,7 @@ function McpRow({ server }: { server: McpServerInfo }) {
   );
 }
 
+
 function WorkflowsSection({
   builtins,
   project,

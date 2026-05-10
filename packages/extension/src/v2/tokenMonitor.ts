@@ -16,32 +16,8 @@ import * as path from 'path';
 import * as os from 'os';
 import * as readline from 'readline';
 
-// Pricing per 1M tokens (USD). Mirrored from monitor.py:PRICING.
-// Substring match against the model name reported in the JSONL.
-const PRICING: Record<string, ModelPrice> = {
-  'claude-opus-4':     { in: 15.0, out: 75.0, cr: 1.50, cw: 18.75 },
-  'claude-sonnet-4':   { in:  3.0, out: 15.0, cr: 0.30, cw:  3.75 },
-  'claude-haiku-4':    { in:  1.0, out:  5.0, cr: 0.10, cw:  1.25 },
-  'claude-3-5-sonnet': { in:  3.0, out: 15.0, cr: 0.30, cw:  3.75 },
-  'claude-3-5-haiku':  { in:  0.8, out:  4.0, cr: 0.08, cw:  1.00 },
-  'claude-3-opus':     { in: 15.0, out: 75.0, cr: 1.50, cw: 18.75 },
-  'claude-3-haiku':    { in: 0.25, out: 1.25, cr: 0.03, cw:  0.30 },
-};
-const DEFAULT_PRICE: ModelPrice = { in: 3.0, out: 15.0, cr: 0.30, cw: 3.75 };
-
-interface ModelPrice {
-  in: number;
-  out: number;
-  cr: number;
-  cw: number;
-}
-
-interface Usage {
-  input_tokens: number;
-  output_tokens: number;
-  cache_read_input_tokens: number;
-  cache_creation_input_tokens: number;
-}
+import { calcCost, type Usage } from './tokenPricing';
+import { TokenReportWebview } from './tokenReportWebview';
 
 interface Totals extends Usage {
   cost: number;
@@ -64,24 +40,6 @@ function emptyTotals(): Totals {
     cost: 0,
     calls: 0,
   };
-}
-
-function modelPrice(model: string): ModelPrice {
-  const m = (model || '').toLowerCase();
-  for (const [prefix, price] of Object.entries(PRICING)) {
-    if (m.includes(prefix)) return price;
-  }
-  return DEFAULT_PRICE;
-}
-
-function calcCost(usage: Usage, model: string): number {
-  const p = modelPrice(model);
-  return (
-    usage.input_tokens * p.in / 1_000_000 +
-    usage.output_tokens * p.out / 1_000_000 +
-    usage.cache_read_input_tokens * p.cr / 1_000_000 +
-    usage.cache_creation_input_tokens * p.cw / 1_000_000
-  );
 }
 
 function projectsRoot(): string {
@@ -233,15 +191,6 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
-function totalTokens(t: Totals): number {
-  return (
-    t.input_tokens +
-    t.output_tokens +
-    t.cache_read_input_tokens +
-    t.cache_creation_input_tokens
-  );
-}
-
 function buildTooltip(snap: Snapshot): vscode.MarkdownString {
   const md = new vscode.MarkdownString();
   md.isTrusted = true;
@@ -264,6 +213,7 @@ const REFRESH_COMMAND = 'aidlc.refreshTokenUsage';
 export function registerTokenMonitor(
   context: vscode.ExtensionContext,
   output: vscode.OutputChannel,
+  extensionUri: vscode.Uri,
 ): void {
   const cfg = () => vscode.workspace.getConfiguration('aidlc.tokenMonitor');
   if (!cfg().get<boolean>('enabled', true)) {
@@ -278,7 +228,6 @@ export function registerTokenMonitor(
   item.show();
   context.subscriptions.push(item);
 
-  let last: Snapshot | null = null;
   let inFlight = false;
 
   const refresh = async () => {
@@ -286,7 +235,6 @@ export function registerTokenMonitor(
     inFlight = true;
     try {
       const snap = await readSnapshot();
-      last = snap;
       item.text = `$(graph) ${fmtCost(snap.today.cost)} today · ${fmtCost(snap.month.cost)} mo`;
       item.tooltip = buildTooltip(snap);
     } catch (err) {
@@ -320,24 +268,11 @@ export function registerTokenMonitor(
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand(SHOW_DETAILS_COMMAND, async () => {
-      if (!last) await refresh();
-      const snap = last;
-      if (!snap) return;
-      const lines = [
-        `Today  ${fmtCost(snap.today.cost).padEnd(8)} ${snap.today.calls} calls  in ${fmtTokens(snap.today.input_tokens)}  out ${fmtTokens(snap.today.output_tokens)}  cache rd ${fmtTokens(snap.today.cache_read_input_tokens)}  cache wr ${fmtTokens(snap.today.cache_creation_input_tokens)}`,
-        `Month  ${fmtCost(snap.month.cost).padEnd(8)} ${snap.month.calls} calls  in ${fmtTokens(snap.month.input_tokens)}  out ${fmtTokens(snap.month.output_tokens)}  cache rd ${fmtTokens(snap.month.cache_read_input_tokens)}  cache wr ${fmtTokens(snap.month.cache_creation_input_tokens)}`,
-        '',
-        `Total tokens today: ${fmtTokens(totalTokens(snap.today))}`,
-        `Total tokens month: ${fmtTokens(totalTokens(snap.month))}`,
-        `Files scanned: ${snap.scannedFiles}`,
-      ];
-      const pick = await vscode.window.showInformationMessage(
-        lines.join('\n'),
-        { modal: true },
-        'Refresh now',
-      );
-      if (pick === 'Refresh now') await refresh();
+    vscode.commands.registerCommand(SHOW_DETAILS_COMMAND, () => {
+      // Click on the status-bar item opens the full-dashboard report panel
+      // (Overview / By Model / Daily / Top Projects / Heatmap / Suggestions).
+      // The panel reuses an existing instance if already open.
+      TokenReportWebview.show(extensionUri);
     }),
   );
 
