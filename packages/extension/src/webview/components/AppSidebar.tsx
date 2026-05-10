@@ -777,69 +777,68 @@ function CostSuggestionsListModal({
   counts: { high: number; med: number; low: number };
   onClose: () => void;
 }) {
-  // Two-mode modal: list view by default, swap to detail when a row is
-  // clicked. Avoids stacking two Modals (which would double the backdrop
-  // and fight over Esc-to-close).
+  // List + detail are two stacked modals: list stays mounted underneath,
+  // detail floats on top when a row is clicked. List is marked `inactive`
+  // while detail is open so Esc / backdrop-click on detail doesn't also
+  // dismiss the list.
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const selected = selectedIdx !== null ? suggestions[selectedIdx] ?? null : null;
-
-  if (selected !== null && selectedIdx !== null) {
-    return (
-      <CostSuggestionDetailModal
-        suggestion={selected}
-        index={selectedIdx}
-        total={suggestions.length}
-        onPrev={selectedIdx > 0 ? () => setSelectedIdx(selectedIdx - 1) : undefined}
-        onNext={
-          selectedIdx < suggestions.length - 1
-            ? () => setSelectedIdx(selectedIdx + 1)
-            : undefined
-        }
-        onBack={() => setSelectedIdx(null)}
-        onClose={onClose}
-      />
-    );
-  }
-
   return (
-    <Modal
-      title={`Cost suggestions (${suggestions.length})`}
-      subtitle={
-        <span className="flex items-center gap-2">
-          <span>Heuristic scan of last {windowDays}d</span>
-          <span className="text-muted-foreground/70">·</span>
-          {counts.high > 0 && (
-            <span className="text-destructive">{counts.high} high</span>
-          )}
-          {counts.med > 0 && (
-            <span className="text-warning">{counts.med} med</span>
-          )}
-          {counts.low > 0 && (
-            <span className="text-muted-foreground">{counts.low} low</span>
-          )}
-          {totalSavings > 0 && (
-            <>
-              <span className="text-muted-foreground/70">·</span>
-              <span className="font-mono tabular-nums text-success">
-                save ~{fmtUsd(totalSavings)}
-              </span>
-            </>
-          )}
-        </span>
-      }
-      maxWidth="max-w-3xl"
-      onClose={onClose}
-    >
-      <div className="max-h-[60vh] space-y-1 overflow-y-auto pr-1">
-        {suggestions.map((s, i) => (
-          <CostSuggestionRow
-            key={`${s.rule}-${i}`}
-            s={s}
-            onOpen={() => setSelectedIdx(i)}
-          />
-        ))}
-      </div>
-    </Modal>
+    <>
+      <Modal
+        title={`Cost suggestions (${suggestions.length})`}
+        subtitle={
+          <span className="flex items-center gap-2">
+            <span>Heuristic scan of last {windowDays}d</span>
+            <span className="text-muted-foreground/70">·</span>
+            {counts.high > 0 && (
+              <span className="text-destructive">{counts.high} high</span>
+            )}
+            {counts.med > 0 && (
+              <span className="text-warning">{counts.med} med</span>
+            )}
+            {counts.low > 0 && (
+              <span className="text-muted-foreground">{counts.low} low</span>
+            )}
+            {totalSavings > 0 && (
+              <>
+                <span className="text-muted-foreground/70">·</span>
+                <span className="font-mono tabular-nums text-success">
+                  save ~{fmtUsd(totalSavings)}
+                </span>
+              </>
+            )}
+          </span>
+        }
+        maxWidth="max-w-3xl"
+        onClose={onClose}
+        inactive={selected !== null}
+      >
+        <div className="max-h-[60vh] space-y-1 overflow-y-auto pr-1">
+          {suggestions.map((s, i) => (
+            <CostSuggestionRow
+              key={`${s.rule}-${i}`}
+              s={s}
+              onOpen={() => setSelectedIdx(i)}
+            />
+          ))}
+        </div>
+      </Modal>
+      {selected !== null && selectedIdx !== null && (
+        <CostSuggestionDetailModal
+          suggestion={selected}
+          index={selectedIdx}
+          total={suggestions.length}
+          onPrev={selectedIdx > 0 ? () => setSelectedIdx(selectedIdx - 1) : undefined}
+          onNext={
+            selectedIdx < suggestions.length - 1
+              ? () => setSelectedIdx(selectedIdx + 1)
+              : undefined
+          }
+          onClose={() => setSelectedIdx(null)}
+        />
+      )}
+    </>
   );
 }
 
