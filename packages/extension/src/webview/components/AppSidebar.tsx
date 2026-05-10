@@ -643,10 +643,12 @@ function CostSuggestionsSection({
   // tell at a glance whether anything is high-severity without expanding.
   const totalSavings = suggestions?.reduce((s, x) => s + x.estSavings, 0) ?? 0;
   const counts = countBySeverity(suggestions);
-  // Click a row to open the detail modal — the inline expand was too
-  // cramped in the narrow sidebar to read evidence + action comfortably.
-  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
-  const selected = selectedIdx !== null && suggestions ? suggestions[selectedIdx] ?? null : null;
+  // Whole list lives in a modal so the sidebar stays compact — even with
+  // internal scroll, 48+ rows in a 220-px column is hard to skim. The
+  // section just shows a summary CTA; click → modal.
+  const [listOpen, setListOpen] = useState(false);
+  const total = suggestions?.length ?? 0;
+  const hasItems = total > 0;
   return (
     <div>
       <SectionHeader
@@ -716,34 +718,31 @@ function CostSuggestionsSection({
               <span>No efficiency issues detected — looking clean.</span>
             </div>
           )}
-          {suggestions && suggestions.length > 0 && (
-            // Internal scroll: 48 suggestions × ~32px would push everything
-            // below off-screen. Cap the visible window and let the rest
-            // scroll inside the section.
-            <div className="max-h-80 space-y-1 overflow-y-auto pr-0.5">
-              {suggestions.map((s, i) => (
-                <CostSuggestionRow
-                  key={`${s.rule}-${i}`}
-                  s={s}
-                  onOpen={() => setSelectedIdx(i)}
-                />
-              ))}
-            </div>
+          {hasItems && (
+            <button
+              type="button"
+              onClick={() => setListOpen(true)}
+              className="flex w-full items-center gap-2 rounded-md border border-primary/30 bg-primary/10 px-2.5 py-2 text-[11px] text-primary hover:border-primary/50 hover:bg-primary/15"
+            >
+              <Lightbulb className="h-3 w-3" />
+              <span className="font-semibold">View {total} suggestion{total === 1 ? '' : 's'}</span>
+              {totalSavings > 0 && (
+                <span className="font-mono text-[10px] tabular-nums text-success">
+                  · save ~{fmtUsd(totalSavings)}
+                </span>
+              )}
+              <ChevronRight className="ml-auto h-3 w-3 opacity-70" />
+            </button>
           )}
         </div>
       )}
-      {selected && suggestions && (
-        <CostSuggestionDetailModal
-          suggestion={selected}
-          index={selectedIdx ?? 0}
-          total={suggestions.length}
-          onPrev={selectedIdx !== null && selectedIdx > 0
-            ? () => setSelectedIdx(selectedIdx - 1)
-            : undefined}
-          onNext={selectedIdx !== null && selectedIdx < suggestions.length - 1
-            ? () => setSelectedIdx(selectedIdx + 1)
-            : undefined}
-          onClose={() => setSelectedIdx(null)}
+      {listOpen && suggestions && (
+        <CostSuggestionsListModal
+          suggestions={suggestions}
+          windowDays={windowDays}
+          totalSavings={totalSavings}
+          counts={counts}
+          onClose={() => setListOpen(false)}
         />
       )}
     </div>
@@ -764,6 +763,85 @@ const SEV_PILL: Record<CostSuggestion['severity'], string> = {
   med: 'bg-warning/15 text-warning',
   low: 'bg-muted text-muted-foreground',
 };
+
+function CostSuggestionsListModal({
+  suggestions,
+  windowDays,
+  totalSavings,
+  counts,
+  onClose,
+}: {
+  suggestions: CostSuggestion[];
+  windowDays: number;
+  totalSavings: number;
+  counts: { high: number; med: number; low: number };
+  onClose: () => void;
+}) {
+  // Two-mode modal: list view by default, swap to detail when a row is
+  // clicked. Avoids stacking two Modals (which would double the backdrop
+  // and fight over Esc-to-close).
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const selected = selectedIdx !== null ? suggestions[selectedIdx] ?? null : null;
+
+  if (selected !== null && selectedIdx !== null) {
+    return (
+      <CostSuggestionDetailModal
+        suggestion={selected}
+        index={selectedIdx}
+        total={suggestions.length}
+        onPrev={selectedIdx > 0 ? () => setSelectedIdx(selectedIdx - 1) : undefined}
+        onNext={
+          selectedIdx < suggestions.length - 1
+            ? () => setSelectedIdx(selectedIdx + 1)
+            : undefined
+        }
+        onBack={() => setSelectedIdx(null)}
+        onClose={onClose}
+      />
+    );
+  }
+
+  return (
+    <Modal
+      title={`Cost suggestions (${suggestions.length})`}
+      subtitle={
+        <span className="flex items-center gap-2">
+          <span>Heuristic scan of last {windowDays}d</span>
+          <span className="text-muted-foreground/70">·</span>
+          {counts.high > 0 && (
+            <span className="text-destructive">{counts.high} high</span>
+          )}
+          {counts.med > 0 && (
+            <span className="text-warning">{counts.med} med</span>
+          )}
+          {counts.low > 0 && (
+            <span className="text-muted-foreground">{counts.low} low</span>
+          )}
+          {totalSavings > 0 && (
+            <>
+              <span className="text-muted-foreground/70">·</span>
+              <span className="font-mono tabular-nums text-success">
+                save ~{fmtUsd(totalSavings)}
+              </span>
+            </>
+          )}
+        </span>
+      }
+      maxWidth="max-w-3xl"
+      onClose={onClose}
+    >
+      <div className="max-h-[60vh] space-y-1 overflow-y-auto pr-1">
+        {suggestions.map((s, i) => (
+          <CostSuggestionRow
+            key={`${s.rule}-${i}`}
+            s={s}
+            onOpen={() => setSelectedIdx(i)}
+          />
+        ))}
+      </div>
+    </Modal>
+  );
+}
 
 function CostSuggestionRow({
   s,
@@ -813,6 +891,7 @@ function CostSuggestionDetailModal({
   total,
   onPrev,
   onNext,
+  onBack,
   onClose,
 }: {
   suggestion: CostSuggestion;
@@ -820,6 +899,10 @@ function CostSuggestionDetailModal({
   total: number;
   onPrev?: () => void;
   onNext?: () => void;
+  /** Optional "back to list" handler — present when the detail view is
+   * embedded inside the list modal. Independent of onClose so users can
+   * return to the list without closing the whole popup. */
+  onBack?: () => void;
   onClose: () => void;
 }) {
   // Modal lives at fixed inset-0 z-50, so it floats above the sidebar
@@ -866,6 +949,16 @@ function CostSuggestionDetailModal({
       </div>
       <div className="mt-5 flex items-center justify-between gap-2">
         <div className="flex gap-2">
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="rounded-md border border-border px-3 py-1.5 text-[11.5px] font-medium text-muted-foreground hover:border-border/80 hover:bg-accent hover:text-foreground"
+              title="Back to list"
+            >
+              ← List
+            </button>
+          )}
           <button
             type="button"
             onClick={onPrev}
