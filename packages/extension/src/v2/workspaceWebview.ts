@@ -514,6 +514,19 @@ export class WorkspaceWebview {
       runsWatcher.onDidCreate(refresh, null, this.disposables);
       runsWatcher.onDidDelete(refresh, null, this.disposables);
       this.disposables.push(runsWatcher);
+
+      // Artifacts dir under each epic — refresh when the agent writes a
+      // produced file. Without this, "PRD.md · not produced yet" stays
+      // stale until the user triggers another refresh manually.
+      const artifactsPattern = new vscode.RelativePattern(
+        vscode.Uri.file(root),
+        '**/artifacts/**',
+      );
+      const artifactsWatcher = vscode.workspace.createFileSystemWatcher(artifactsPattern);
+      artifactsWatcher.onDidChange(refresh, null, this.disposables);
+      artifactsWatcher.onDidCreate(refresh, null, this.disposables);
+      artifactsWatcher.onDidDelete(refresh, null, this.disposables);
+      this.disposables.push(artifactsWatcher);
     }
 
     this.refresh();

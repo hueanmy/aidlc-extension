@@ -29,6 +29,7 @@ import type {
 import { StatusBadge } from './StatusBadge';
 import { RejectModal } from './RejectModal';
 import { RerunModal } from './RerunModal';
+import { RunWithFeedbackModal } from './RunWithFeedbackModal';
 import { postMessage } from '@/lib/bridge';
 
 function epicUiStatus(status: EpicSummary['status']): UiStatus {
@@ -561,6 +562,7 @@ function RunGate({
 }) {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rerunOpen, setRerunOpen] = useState(false);
+  const [runOpen, setRunOpen] = useState(false);
   if (!epic.runId || !focused.isCurrentRunStep) { return null; }
   const ui = runStatusUi(focused.runStatus);
   if (!ui) { return null; }
@@ -663,19 +665,8 @@ function RunGate({
         {status === 'awaiting_work' && (
           <>
             {slashCommand && (
-              <GateButton
-                variant="approve"
-                onClick={() =>
-                  postMessage({
-                    type: 'runStepWithFeedback',
-                    runId: epic.runId!,
-                    slashCommand,
-                    feedback: focused.feedback ?? '',
-                  })
-                }
-              >
-                <Play className="h-3 w-3" />
-                {focused.feedback ? 'Update with feedback' : 'Run in Claude'}
+              <GateButton variant="approve" onClick={() => setRunOpen(true)}>
+                <Play className="h-3 w-3" /> Update with feedback
               </GateButton>
             )}
             <GateButton
@@ -734,6 +725,23 @@ function RunGate({
             postMessage({ type: 'rerunStepInline', runId: epic.runId!, feedback })
           }
           onClose={() => setRerunOpen(false)}
+        />
+      )}
+      {runOpen && epic.runId && slashCommand && (
+        <RunWithFeedbackModal
+          agent={focused.agent}
+          runId={epic.runId}
+          slashCommand={slashCommand}
+          carriedFeedback={focused.feedback}
+          onSubmit={(feedback) =>
+            postMessage({
+              type: 'runStepWithFeedback',
+              runId: epic.runId!,
+              slashCommand,
+              feedback,
+            })
+          }
+          onClose={() => setRunOpen(false)}
         />
       )}
     </div>

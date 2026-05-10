@@ -32,6 +32,7 @@ import { RejectModal } from './RejectModal';
 import { ConfirmModal } from './ConfirmModal';
 import { StartRunModal } from './StartRunModal';
 import { RerunModal } from './RerunModal';
+import { RunWithFeedbackModal } from './RunWithFeedbackModal';
 import { SavePresetModal } from './SavePresetModal';
 import { ThemeToggle } from './ThemeToggle';
 import { postMessage, getPersistedUi, setPersistedUi } from '@/lib/bridge';
@@ -685,6 +686,7 @@ function RunCard({
 }) {
   const stepLabel = `${run.currentStepIdx + 1}/${run.totalSteps}: ${run.currentAgent}`;
   const pillCls = STATUS_PILL[run.currentStepStatus] ?? 'bg-muted text-muted-foreground';
+  const [runOpen, setRunOpen] = useState(false);
   return (
     <div className="rounded-md border border-border bg-card/50 px-2.5 py-2">
       <div className="flex items-center gap-1.5">
@@ -746,19 +748,8 @@ function RunCard({
               {run.currentStepStatus === 'awaiting_work' && (
                 <button
                   type="button"
-                  onClick={() =>
-                    postMessage({
-                      type: 'runStepWithFeedback',
-                      runId: run.runId,
-                      slashCommand: run.currentSlashCommand,
-                      feedback: run.feedback ?? '',
-                    })
-                  }
-                  title={
-                    run.feedback
-                      ? 'Run in Claude with the carried feedback'
-                      : 'Run in Claude — opens the AIDLC · Claude terminal and launches the slash command'
-                  }
+                  onClick={() => setRunOpen(true)}
+                  title="Run in Claude with optional feedback for the agent"
                   className="flex shrink-0 items-center justify-center rounded bg-primary px-2 text-primary-foreground hover:bg-primary/90"
                 >
                   <Play className="h-3 w-3" />
@@ -782,6 +773,24 @@ function RunCard({
 
           <RunActions run={run} />
         </>
+      )}
+
+      {runOpen && run.currentSlashCommand && (
+        <RunWithFeedbackModal
+          agent={run.currentAgent}
+          runId={run.runId}
+          slashCommand={run.currentSlashCommand}
+          carriedFeedback={run.feedback}
+          onSubmit={(feedback) =>
+            postMessage({
+              type: 'runStepWithFeedback',
+              runId: run.runId,
+              slashCommand: run.currentSlashCommand,
+              feedback,
+            })
+          }
+          onClose={() => setRunOpen(false)}
+        />
       )}
     </div>
   );
