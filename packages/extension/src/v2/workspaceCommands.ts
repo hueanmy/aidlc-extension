@@ -191,9 +191,34 @@ export function registerV2WorkspaceCommands(
         return;
       }
       const summary = `AIDLC migration — ${parts.join(', ')}.`;
+
+      // Group skipped epics by their reason so users see the
+      // actionable cause instead of a bare count. e.g. "5 skipped:
+      // pipeline 'dreem-sdlc-full' not found in workspace.yaml
+      // (DRM-2090, DRM-2147, …)".
+      const blockers: string[] = [];
+      const skippedByReason = new Map<string, string[]>();
+      for (const s of report.skipped) {
+        const list = skippedByReason.get(s.reason) ?? [];
+        list.push(s.epicId);
+        skippedByReason.set(s.reason, list);
+      }
+      for (const [reason, ids] of skippedByReason) {
+        const head = ids.slice(0, 3).join(', ');
+        const more = ids.length > 3 ? `, +${ids.length - 3} more` : '';
+        blockers.push(`${reason} (${head}${more})`);
+      }
       if (report.errors.length > 0) {
+        blockers.push(
+          `${report.errors[0].epicId}: ${report.errors[0].reason}`,
+        );
+      }
+
+      if (blockers.length > 0) {
+        const detail = blockers.join('\n• ');
         void vscode.window.showWarningMessage(
-          `${summary} First error: ${report.errors[0]?.epicId} — ${report.errors[0]?.reason}`,
+          `${summary}\n• ${detail}`,
+          { modal: false },
         );
       } else {
         void vscode.window.showInformationMessage(summary);

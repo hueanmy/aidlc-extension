@@ -361,7 +361,7 @@ function mapStepStatus(status: StepStatus): EpicStatus {
 export interface MigrationReport {
   migrated: string[];
   backfilled: string[];
-  skipped: string[];
+  skipped: Array<{ epicId: string; reason: string }>;
   errors: Array<{ epicId: string; reason: string }>;
 }
 
@@ -404,7 +404,7 @@ export function migrateEpicStateFiles(workspaceRoot: string): MigrationReport {
       if (!runState) {
         const built = backfillRunStateFromEpic(workspaceRoot, epicId, doc);
         if (!built.ok) {
-          report.skipped.push(epicId);
+          report.skipped.push({ epicId, reason: built.reason });
           continue;
         }
         RunStateStore.save(workspaceRoot, built.runState);
