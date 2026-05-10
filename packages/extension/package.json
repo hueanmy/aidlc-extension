@@ -136,8 +136,36 @@
         "title": "Load Demo Project (full pipeline + 6 epics)",
         "icon": "$(beaker)",
         "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.showTokenUsage",
+        "title": "Show Claude Token Usage",
+        "icon": "$(graph)",
+        "category": "AIDLC"
+      },
+      {
+        "command": "aidlc.refreshTokenUsage",
+        "title": "Refresh Claude Token Usage",
+        "icon": "$(refresh)",
+        "category": "AIDLC"
       }
     ],
+    "configuration": {
+      "title": "AIDLC",
+      "properties": {
+        "aidlc.tokenMonitor.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a status bar item with today/this-month Claude token spend, parsed from ~/.claude/projects logs."
+        },
+        "aidlc.tokenMonitor.refreshSeconds": {
+          "type": "number",
+          "default": 60,
+          "minimum": 15,
+          "description": "How often to re-scan ~/.claude/projects for new usage records (seconds, minimum 15)."
+        }
+      }
+    },
     "menus": {
       "view/title": [
         {

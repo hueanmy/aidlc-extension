@@ -13,10 +13,16 @@ importers:
         version: 5.9.3
 
   packages/cli:
-    dependencies:
+    devDependencies:
       '@aidlc/core':
         specifier: workspace:*
         version: link:../core
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.39
       chalk:
         specifier: ^4.1.2
         version: 4.1.2
@@ -29,19 +35,12 @@ importers:
       commander:
         specifier: ^11.1.0
         version: 11.1.0
-      js-yaml:
-        specifier: ^4.1.1
-        version: 4.1.1
-    devDependencies:
-      '@types/js-yaml':
-        specifier: ^4.0.9
-        version: 4.0.9
-      '@types/node':
-        specifier: ^20.0.0
-        version: 20.19.39
       esbuild:
         specifier: ^0.21.0
         version: 0.21.5
+      js-yaml:
+        specifier: ^4.1.1
+        version: 4.1.1
 
   packages/core:
     dependencies:
