@@ -164,18 +164,18 @@ export async function computeWorkspaceEpicUsage(
 
   const normalized = path.resolve(workspaceRoot);
 
-  // Per-run pre-computation: windows + accumulators.
+  // Per-run pre-computation: per-step windows only. We deliberately do NOT
+  // fall back to [run.startedAt, run.updatedAt] — that field gets bumped
+  // every time the state file is rewritten (mirror updates, idle refreshes,
+  // unrelated transitions), so it doesn't reflect actual activity. When all
+  // step.startedAt are missing, the epic shows no usage rather than fake
+  // numbers attributed to the entire run lifetime.
   interface RunCtx {
     run: RunState;
     windows: StepWindow[];
     steps: StepUsage[];
     earliestMs: number;
     latestMs: number;
-    /** Run-level fallback window for runs without per-step startedAt
-     * timestamps. Used to compute epic-level total only (per-step stays 0). */
-    fallbackStartMs: number;
-    fallbackEndMs: number;
-    fallbackTotal: { cost: number; tokens: number; calls: number };
   }
   const ctxByRun: RunCtx[] = runs.map((run) => {
     const windows = buildStepWindows(run);
@@ -184,33 +184,12 @@ export async function computeWorkspaceEpicUsage(
     );
     const validStarts = windows.map((w) => w.startMs).filter(Number.isFinite);
     const validEnds = windows.map((w) => w.endMs).filter(Number.isFinite);
-    const runStartMs = Date.parse(run.startedAt || '');
-    const runEndMs = Date.parse(run.updatedAt || '');
-    const runWindowValid = Number.isFinite(runStartMs) && Number.isFinite(runEndMs)
-      && runEndMs >= runStartMs;
-    // Earliest scan boundary covers BOTH per-step windows and the run-level
-    // fallback so we never miss records that fall between collapsed step
-    // windows but inside the run lifetime.
-    const earliest = Math.min(
-      ...(validStarts.length > 0 ? [Math.min(...validStarts)] : []),
-      ...(runWindowValid ? [runStartMs] : []),
-    );
-    const latest = Math.max(
-      ...(validEnds.length > 0 ? [Math.max(...validEnds)] : []),
-      ...(runWindowValid ? [runEndMs] : []),
-    );
     return {
       run,
       windows,
       steps,
-      earliestMs: Number.isFinite(earliest) ? earliest : Infinity,
-      latestMs: Number.isFinite(latest) ? latest : -Infinity,
-      // Run-level window is ALWAYS used for the epic-level total — per-step
-      // windows are a best-effort breakdown that may not cover the whole run
-      // when steps lack `startedAt`.
-      fallbackStartMs: runWindowValid ? runStartMs : NaN,
-      fallbackEndMs: runWindowValid ? runEndMs : NaN,
-      fallbackTotal: { cost: 0, tokens: 0, calls: 0 },
+      earliestMs: validStarts.length > 0 ? Math.min(...validStarts) : Infinity,
+      latestMs: validEnds.length > 0 ? Math.max(...validEnds) : -Infinity,
     };
   });
 
@@ -256,37 +235,41 @@ export async function computeWorkspaceEpicUsage(
     }
   }
 
-  // Detect overlap between run-level windows. Two epics in the same project
-  // whose lifetimes overlap will double-count usage during the overlap.
+  // Detect overlap between any pair of step windows from different runs.
+  // Two steps overlapping in time means the same usage record can fall into
+  // both — flagged via `hasOverlap` so the UI can warn the user.
   const overlapByRunId = new Map<string, boolean>();
   for (let i = 0; i < ctxByRun.length; i++) {
-    const a = ctxByRun[i];
-    if (!Number.isFinite(a.fallbackStartMs)) {
-      overlapByRunId.set(a.run.runId, false);
-      continue;
-    }
     let overlap = false;
-    for (let j = 0; j < ctxByRun.length; j++) {
+    outer: for (let j = 0; j < ctxByRun.length; j++) {
       if (i === j) continue;
-      const b = ctxByRun[j];
-      if (!Number.isFinite(b.fallbackStartMs)) continue;
-      if (a.fallbackStartMs < b.fallbackEndMs && b.fallbackStartMs < a.fallbackEndMs) {
-        overlap = true;
-        break;
+      for (const wi of ctxByRun[i].windows) {
+        if (!Number.isFinite(wi.startMs) || wi.endMs <= wi.startMs) continue;
+        for (const wj of ctxByRun[j].windows) {
+          if (!Number.isFinite(wj.startMs) || wj.endMs <= wj.startMs) continue;
+          if (wi.startMs < wj.endMs && wj.startMs < wi.endMs) {
+            overlap = true;
+            break outer;
+          }
+        }
       }
     }
-    overlapByRunId.set(a.run.runId, overlap);
+    overlapByRunId.set(ctxByRun[i].run.runId, overlap);
   }
 
-  // Finalize per-run totals. The run-level window is the source of truth
-  // for the epic total; per-step usage is a best-effort breakdown.
+  // Finalize per-run totals. Epic total = sum of per-step usage. Steps
+  // without `startedAt` contribute zero — old runs that pre-date the
+  // per-step timestamp schema will show no badge rather than a misleading
+  // run-window aggregate.
   for (const ctx of ctxByRun) {
+    let cost = 0, totalTokens = 0, calls = 0;
+    for (const s of ctx.steps) {
+      cost += s.cost;
+      totalTokens += s.totalTokens;
+      calls += s.calls;
+    }
     result.set(ctx.run.runId, {
-      total: {
-        cost: ctx.fallbackTotal.cost,
-        totalTokens: ctx.fallbackTotal.tokens,
-        calls: ctx.fallbackTotal.calls,
-      },
+      total: { cost, totalTokens, calls },
       steps: ctx.steps,
       hasOverlap: overlapByRunId.get(ctx.run.runId) ?? false,
       computedAt: Date.now(),
@@ -304,9 +287,6 @@ interface RunCtxLike {
   steps: StepUsage[];
   earliestMs: number;
   latestMs: number;
-  fallbackStartMs: number;
-  fallbackEndMs: number;
-  fallbackTotal: { cost: number; tokens: number; calls: number };
 }
 
 async function processJsonl(
@@ -353,25 +333,17 @@ async function processJsonl(
       const cost = inp * p.in / 1e6 + out * p.out / 1e6
                  + cr * p.cr / 1e6 + cw * p.cw / 1e6;
 
-      // Attribute to every run that overlaps this timestamp. Two passes per
-      // run: (1) run-level window populates the always-correct epic total,
-      // (2) per-step window populates the best-effort breakdown when
-      // `step.startedAt` is available. Overlapping runs double-count by
-      // design (flagged via hasOverlap).
+      // Attribute to every run-step whose window contains this timestamp.
+      // Steps without a valid startedAt have a zero-length window and are
+      // skipped — old runs that pre-date the per-step timestamp schema
+      // simply show no usage rather than fake numbers from a broad fallback.
+      // Overlapping step windows from different runs double-count by design
+      // (flagged via `hasOverlap`).
       for (const ctx of ctxByRun) {
         if (ts < ctx.earliestMs || ts >= ctx.latestMs) continue;
-        // Run-level total — the source of truth for epic.tokenUsage.total.
-        if (Number.isFinite(ctx.fallbackStartMs)
-            && ts >= ctx.fallbackStartMs && ts < ctx.fallbackEndMs) {
-          ctx.fallbackTotal.cost += cost;
-          ctx.fallbackTotal.tokens += inp + out + cr + cw;
-          ctx.fallbackTotal.calls += 1;
-        }
-        // Per-step breakdown — only when the step has a real startedAt.
         for (let i = 0; i < ctx.windows.length; i++) {
           const w = ctx.windows[i];
-          if (!Number.isFinite(w.startMs)) continue;
-          if (w.endMs <= w.startMs) continue;
+          if (!Number.isFinite(w.startMs) || w.endMs <= w.startMs) continue;
           if (ts >= w.startMs && ts < w.endMs) {
             const s = ctx.steps[i];
             s.cost += cost;
