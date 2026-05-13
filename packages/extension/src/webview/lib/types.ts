@@ -143,6 +143,46 @@ export interface HeatmapRow {
   rowTotal: number;
 }
 
+export interface PlanProgress {
+  source: string;
+  total: number;
+  done: number;
+  inProgress: number;
+  pending: number;
+  overdue: number;
+  withPipeline: number;
+}
+
+export interface RunSummary {
+  runId: string;
+  user: string;
+  pipelineId: string;
+  startedAt: string;
+  status: 'running' | 'completed' | 'failed';
+  stepCount: number;
+  approvedSteps: number;
+  rejectedSteps: number;
+  totalRevisions: number;
+  durationMs: number | null;
+}
+
+export interface RunStats {
+  totalRuns: number;
+  completedRuns: number;
+  failedRuns: number;
+  runningRuns: number;
+  avgDurationMs: number | null;
+  mostUsedPipeline: string | null;
+  totalRejections: number;
+  avgRevisionsPerRun: number;
+}
+
+export interface AidlcDashboard {
+  planProgress: PlanProgress | null;
+  recentRuns: RunSummary[];
+  runStats: RunStats;
+}
+
 export interface TokenReport {
   generatedAt: string;
   windowDays: number;
@@ -154,6 +194,7 @@ export interface TokenReport {
   heatmapPeak: number;
   suggestions: CostSuggestion[];
   estPotentialSavings: number;
+  aidlcDashboard: AidlcDashboard | null;
 }
 
 export interface TokenReportPanelState {

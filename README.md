@@ -14,6 +14,29 @@ This is a **monorepo** managed with [pnpm workspaces](https://pnpm.io/workspaces
 | [`@aidlc/core`](packages/core/) | `packages/core/` | Pure-TypeScript engine: Zod schema, workspace loader, runner registry (`DefaultRunner` shells out to `claude`), pipeline state machine. **No `import 'vscode'`** — runs identically in CLI / tests / cloud. |
 | [`aidlc`](packages/cli/) (CLI) | `packages/cli/` | Standalone terminal CLI. Manages `workspace.yaml`, drives runs end-to-end via Claude, no VS Code required. See [packages/cli/README.md](packages/cli/README.md). |
 
+## Claude Code Skills
+
+AIDLC ships two Claude Code slash-command skills for project onboarding and continuous improvement.
+
+| Skill | Invoke | Purpose |
+|---|---|---|
+| [`/aidlc-init`](.claude/skills/aidlc-init/SKILL.md) | `/aidlc-init` | Onboard any project: installs the VS Code extension, discovers docs and plan sources, interviews you about your role, generates a role-specific `workspace.<user>.yaml` and skill files. |
+| [`/aidlc-suggest`](.claude/skills/aidlc-suggest/SKILL.md) | `/aidlc-suggest` | Analyzes run history, token usage, plan progress, and pipeline performance — produces ranked suggestions to optimize your workflow. |
+
+### When to use each
+
+- **New project or new team member** → `/aidlc-init`
+- **Project already has `.aidlc/workspace.yaml`** → `/aidlc-init` reads it and extends with your profile
+- **After running pipelines** → `/aidlc-suggest` to find bottlenecks and optimize
+
+### Per-user workspaces
+
+`/aidlc-init` generates `workspace.<username>.yaml` so each team member has their own pipeline profile while sharing a common `workspace.yaml` base. Runs are stored per-user under `.aidlc/runs/<username>/`.
+
+### Plan integration
+
+Both skills read `.aidlc/plan.json` as the project schedule anchor for token attribution. If no plan exists, `/aidlc-init` discovers one automatically from CSV, Markdown tables, llm-wiki, or git signals — then normalizes it to a common schema.
+
 ## Quick start
 
 ### 1. Install the CLI

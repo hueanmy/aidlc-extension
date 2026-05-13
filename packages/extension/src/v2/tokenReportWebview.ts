@@ -72,7 +72,8 @@ export class TokenReportWebview {
     this.loadPromise = (async () => {
       try {
         const records = await loadAllRecords(windowDays);
-        const report = buildReport(records, windowDays);
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const report = buildReport(records, windowDays, workspaceRoot);
         this.state = { report, loading: false, error: null, windowDays };
       } catch (e) {
         this.state = {

@@ -19,6 +19,7 @@ import {
   shortenPath,
 } from './tokenRecords';
 import { analyzeSuggestions, type Suggestion } from './costSuggestions';
+import { loadAidlcDashboard, type AidlcDashboard } from './aidlcDashboard';
 
 export interface UsageTotals {
   input: number;
@@ -82,6 +83,7 @@ export interface TokenReport {
   suggestions: Suggestion[];
   /** Total estimated savings from all suggestions, USD. */
   estPotentialSavings: number;
+  aidlcDashboard: AidlcDashboard | null;
 }
 
 const DOW_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -104,7 +106,7 @@ function hitRate(t: UsageTotals): number {
   return denom > 0 ? t.cacheRead / denom : 0;
 }
 
-export function buildReport(records: CallRecord[], windowDays: number): TokenReport {
+export function buildReport(records: CallRecord[], windowDays: number, workspaceRoot?: string): TokenReport {
   const total = emptyTotals();
   const sessions = new Set<string>();
   const projects = new Set<string>();
@@ -134,6 +136,7 @@ export function buildReport(records: CallRecord[], windowDays: number): TokenRep
     heatmapPeak: heat.peak,
     suggestions,
     estPotentialSavings: suggestions.reduce((s, x) => s + x.estSavings, 0),
+    aidlcDashboard: workspaceRoot ? loadAidlcDashboard(workspaceRoot) : null,
   };
 }
 
