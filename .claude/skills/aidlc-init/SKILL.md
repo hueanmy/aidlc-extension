@@ -257,6 +257,73 @@ If `.aidlc/workspace.yaml` does not exist, create it with shared base (agents an
 
 If it exists, do NOT overwrite — append missing shared skills only.
 
+## 6c. Create or update CLAUDE.md
+
+Check if `CLAUDE.md` exists in the project root.
+
+### If CLAUDE.md does not exist — create it
+
+Generate a `CLAUDE.md` based on context map (step 2) and confirmed pipelines (step 5):
+
+```markdown
+# <project_name> — Claude Code Project Instructions
+
+## Project overview
+<1–2 sentences from README or context map>
+
+## Tech stack
+<detected stack: language, frameworks, databases, infra>
+
+## Where things go
+
+### AIDLC workspace files
+- Per-user workspace: `.aidlc/workspace.<username>.yaml`
+- Shared base: `.aidlc/workspace.yaml`
+- Project plan: `.aidlc/plan.json`
+- Runs: `.aidlc/runs/<username>/*.json`
+- Skills: `.aidlc/skills/<username>/`
+
+### Source code
+<auto-detected from project structure — e.g.:>
+- Components: `src/components/`
+- API handlers: `src/handlers/`
+- Database models: `src/models/`
+
+## Key conventions
+<extracted from existing CLAUDE.md if any, or inferred from tech stack>
+
+## AIDLC pipelines for this project
+<list confirmed pipelines with brief description of each>
+
+## Skills
+<list skill files and their purpose>
+```
+
+### If CLAUDE.md already exists — append AIDLC section only
+
+Read the existing file. If it already contains an `## AIDLC` section, update it in place. Otherwise append:
+
+```markdown
+
+---
+
+## AIDLC setup (<username>, <date>)
+
+### Workspace profile
+`.aidlc/workspace.<username>.yaml`
+
+### Active pipelines
+<list confirmed pipelines>
+
+### Skills
+<list generated skill files>
+
+### Plan source
+`.aidlc/plan.json` — <source description>
+```
+
+Never overwrite existing content — only append or update the AIDLC section.
+
 ## 7. Validate
 
 Run validation checks in parallel:
