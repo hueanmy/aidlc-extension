@@ -18,6 +18,9 @@ import type {
   ProjectRow,
   HeatmapRow,
   CostSuggestion,
+  PlanProgress,
+  RunSummary,
+  RunStats,
 } from '@/lib/types';
 import { postMessage } from '@/lib/bridge';
 import { Modal } from './Modal';
@@ -65,6 +68,13 @@ export function TokenReportView({ state }: { state: TokenReportPanelState | null
           suggestions={state.report.suggestions}
           estPotentialSavings={state.report.estPotentialSavings}
         />
+        {state.report.aidlcDashboard && (
+          <>
+            <PlanProgressSection plan={state.report.aidlcDashboard.planProgress} />
+            <PipelineRunsSection runs={state.report.aidlcDashboard.recentRuns} />
+            <RunStatsSection stats={state.report.aidlcDashboard.runStats} />
+          </>
+        )}
         <Footer />
       </div>
     </div>
@@ -612,6 +622,167 @@ function DetailField({ label, children }: { label: string; children: React.React
       </div>
       <div>{children}</div>
     </div>
+  );
+}
+
+// ── Plan Progress ─────────────────────────────────────────────────────────
+function PlanProgressSection({ plan }: { plan: PlanProgress | null }) {
+  if (!plan) {
+    return (
+      <section className="mb-6">
+        <SectionTitle>Plan Progress</SectionTitle>
+        <div className="text-[11px] text-muted-foreground">
+          No <span className="font-mono">.aidlc/plan.json</span> found in workspace.
+        </div>
+      </section>
+    );
+  }
+  const fraction = plan.total > 0 ? plan.done / plan.total : 0;
+  return (
+    <section className="mb-6">
+      <SectionTitle>Plan Progress</SectionTitle>
+      <div className="rounded-md border border-border bg-card/50 px-4 py-3 text-[12px]">
+        <div className="mb-2 flex items-baseline gap-2 text-[11px] text-muted-foreground">
+          <span className="font-mono text-foreground">{plan.source}</span>
+          <span>·</span>
+          <span>{plan.done} / {plan.total} tasks done</span>
+        </div>
+        <div className="mb-3 h-2 w-full overflow-hidden rounded-sm bg-secondary/40">
+          <div
+            className="h-full rounded-sm bg-success"
+            style={{ width: `${(fraction * 100).toFixed(1)}%` }}
+          />
+        </div>
+        <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1">
+          <Stat label="done" value={String(plan.done)} valueClass="text-success" />
+          <Stat label="in progress" value={String(plan.inProgress)} valueClass="text-info" />
+          <Stat label="pending" value={String(plan.pending)} valueClass="text-muted-foreground" />
+          <Stat
+            label="overdue"
+            value={String(plan.overdue)}
+            valueClass={plan.overdue > 0 ? 'text-destructive' : 'text-muted-foreground'}
+          />
+          <Stat label="with pipeline" value={String(plan.withPipeline)} valueClass="text-primary" />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ── Pipeline Runs ─────────────────────────────────────────────────────────
+function PipelineRunsSection({ runs }: { runs: RunSummary[] }) {
+  if (runs.length === 0) {
+    return (
+      <section className="mb-6">
+        <SectionTitle>Pipeline Runs</SectionTitle>
+        <div className="text-[11px] text-muted-foreground">
+          No runs yet — start a pipeline run to see history.
+        </div>
+      </section>
+    );
+  }
+  return (
+    <section className="mb-6">
+      <SectionTitle>Pipeline Runs (last {runs.length})</SectionTitle>
+      <Table>
+        <thead>
+          <tr>
+            <Th>Run ID</Th>
+            <Th>User</Th>
+            <Th>Pipeline</Th>
+            <Th>Status</Th>
+            <Th align="right">Steps</Th>
+            <Th align="right">Duration</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {runs.map((run) => (
+            <tr key={run.runId} className="border-t border-border/50">
+              <Td><span className="font-mono text-[10.5px] text-foreground">{run.runId}</span></Td>
+              <Td><span className="font-mono text-[10.5px] text-muted-foreground">{run.user}</span></Td>
+              <Td><span className="font-mono text-[10.5px] text-primary">{run.pipelineId || '—'}</span></Td>
+              <Td><RunStatusBadge status={run.status} /></Td>
+              <Td align="right">
+                <span className="font-mono tabular-nums">
+                  <span className="text-success">{run.approvedSteps}</span>
+                  <span className="text-muted-foreground">/{run.stepCount}</span>
+                </span>
+              </Td>
+              <Td align="right">
+                <span className="font-mono tabular-nums text-muted-foreground">
+                  {fmtDuration(run.durationMs)}
+                </span>
+              </Td>
+            </tr>
+          ))}
+        </tbody>
+      </Table>
+    </section>
+  );
+}
+
+function RunStatusBadge({ status }: { status: 'running' | 'completed' | 'failed' }) {
+  const cls =
+    status === 'completed' ? 'bg-success/15 text-success border-success/30'
+    : status === 'failed' ? 'bg-destructive/15 text-destructive border-destructive/30'
+    : 'bg-info/15 text-info border-info/30';
+  const label =
+    status === 'completed' ? 'COMPLETED'
+    : status === 'failed' ? 'FAILED'
+    : 'RUNNING';
+  return (
+    <span className={cn('inline-flex items-center rounded border px-2 py-0.5 text-[10px] font-bold tracking-wider', cls)}>
+      {label}
+    </span>
+  );
+}
+
+function fmtDuration(ms: number | null): string {
+  if (ms === null || ms < 0) { return '—'; }
+  const totalSec = Math.round(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m === 0) { return `${s}s`; }
+  return `${m}m ${s}s`;
+}
+
+// ── Run Statistics ────────────────────────────────────────────────────────
+function RunStatsSection({ stats }: { stats: RunStats }) {
+  if (stats.totalRuns === 0) { return null; }
+  return (
+    <section className="mb-6">
+      <SectionTitle>Run Statistics</SectionTitle>
+      <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 rounded-md border border-border bg-card/50 px-4 py-3 text-[12px]">
+        <Stat label="total runs" value={String(stats.totalRuns)} valueClass="text-primary" />
+        <Stat label="completed" value={String(stats.completedRuns)} valueClass="text-success" />
+        <Stat
+          label="failed"
+          value={String(stats.failedRuns)}
+          valueClass={stats.failedRuns > 0 ? 'text-destructive' : 'text-muted-foreground'}
+        />
+        <Stat label="running" value={String(stats.runningRuns)} valueClass="text-info" />
+        <Stat
+          label="most used pipeline"
+          value={stats.mostUsedPipeline ?? '—'}
+          valueClass="text-primary font-mono"
+        />
+        <Stat
+          label="avg duration"
+          value={fmtDuration(stats.avgDurationMs)}
+          valueClass="text-muted-foreground"
+        />
+        <Stat
+          label="total rejections"
+          value={String(stats.totalRejections)}
+          valueClass={stats.totalRejections > 0 ? 'text-warning' : 'text-muted-foreground'}
+        />
+        <Stat
+          label="avg revisions/run"
+          value={stats.avgRevisionsPerRun.toFixed(1)}
+          valueClass="text-muted-foreground"
+        />
+      </div>
+    </section>
   );
 }
 
